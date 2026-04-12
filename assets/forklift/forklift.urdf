@@ -15,13 +15,22 @@
   </material>
 
   <!-- ================================================================
-       Base chassis
+       Base chassis  —  visual uses the 48-forklift 3-D mesh
+       Mesh is in Cinema 4D centimetres (Y-up), so we apply:
+         scale 0.004  → roughly 1 m wide / 2 m tall at the chosen unit
+         rpy "π/2  0  π" → rotate Y-up to Z-up, then flip 180° so that
+                           the mesh's fork/mast side faces URDF +X
+         xyz "0  0  -0.6" → put the mesh's ground (Y=0) at z=-0.6 in
+                            base_link frame (chassis centre is 0.6 m
+                            above world ground after the height fix)
+       Collision keeps the cheap primitive box for physics performance.
   ================================================================ -->
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin xyz="0 0 -0.6" rpy="1.5708 0 3.14159"/>
       <geometry>
-        <box size="1.8 1.0 0.6"/>
+        <mesh filename="../48-forklift/Forklift.obj"
+              scale="0.004 0.004 0.004"/>
       </geometry>
       <material name="yellow"/>
     </visual>
@@ -39,16 +48,9 @@
   </link>
 
   <!-- ================================================================
-       Rear left drive wheel
+       Rear left drive wheel — visual suppressed (covered by body mesh)
   ================================================================ -->
   <link name="rear_left_wheel">
-    <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <geometry>
-        <cylinder radius="0.3" length="0.15"/>
-      </geometry>
-      <material name="dark_gray"/>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
@@ -69,16 +71,9 @@
   </joint>
 
   <!-- ================================================================
-       Rear right drive wheel
+       Rear right drive wheel — visual suppressed (covered by body mesh)
   ================================================================ -->
   <link name="rear_right_wheel">
-    <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
-      <geometry>
-        <cylinder radius="0.3" length="0.15"/>
-      </geometry>
-      <material name="dark_gray"/>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="1.5708 0 0"/>
       <geometry>
@@ -99,16 +94,9 @@
   </joint>
 
   <!-- ================================================================
-       Front left caster wheel (non-driven)
+       Front left caster wheel — visual suppressed (covered by body mesh)
   ================================================================ -->
   <link name="front_left_caster">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <sphere radius="0.2"/>
-      </geometry>
-      <material name="dark_gray"/>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
@@ -129,16 +117,9 @@
   </joint>
 
   <!-- ================================================================
-       Front right caster wheel (non-driven)
+       Front right caster wheel — visual suppressed (covered by body mesh)
   ================================================================ -->
   <link name="front_right_caster">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <sphere radius="0.2"/>
-      </geometry>
-      <material name="dark_gray"/>
-    </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
@@ -159,17 +140,9 @@
   </joint>
 
   <!-- ================================================================
-       Mast (vertical column the fork slides along)
+       Mast — visual suppressed (mast is part of the body mesh)
   ================================================================ -->
   <link name="mast">
-    <visual>
-      <!-- Taller mast (1.8 m) centred at 0.9 m above mast origin -->
-      <origin xyz="0 0 0.9" rpy="0 0 0"/>
-      <geometry>
-        <box size="0.15 0.8 1.8"/>
-      </geometry>
-      <material name="yellow"/>
-    </visual>
     <collision>
       <origin xyz="0 0 0.9" rpy="0 0 0"/>
       <geometry>
@@ -185,12 +158,11 @@
   <joint name="mast_joint" type="fixed">
     <parent link="base_link"/>
     <child link="mast"/>
-    <!-- Bottom of chassis → fork tines reach ground level at joint=0 -->
     <origin xyz="0.85 0 -0.3" rpy="0 0 0"/>
   </joint>
 
   <!-- ================================================================
-       Fork carriage — slides up/down the mast (prismatic joint)
+       Fork carriage — keeps its visual so fork raising is animated
   ================================================================ -->
   <link name="fork_carriage">
     <visual>
@@ -215,16 +187,13 @@
   <joint name="fork_lift_joint" type="prismatic">
     <parent link="mast"/>
     <child link="fork_carriage"/>
-    <!-- Lowered origin so tine bottom = 0 m (ground level) at joint = 0.
-         tine_center = 0.150 - 0.125 = 0.025 m → bottom = 0 m, top = 0.05 m.
-         Lifting is handled kinematically in forklift_env._update_box_grab. -->
     <origin xyz="0.05 0 0.150" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
     <limit lower="0.0" upper="1.5" effort="5000.0" velocity="2.0"/>
   </joint>
 
   <!-- ================================================================
-       Left fork tine
+       Left fork tine — keeps its visual so fork raising is animated
   ================================================================ -->
   <link name="fork_left">
     <visual>
@@ -253,7 +222,7 @@
   </joint>
 
   <!-- ================================================================
-       Right fork tine
+       Right fork tine — keeps its visual so fork raising is animated
   ================================================================ -->
   <link name="fork_right">
     <visual>

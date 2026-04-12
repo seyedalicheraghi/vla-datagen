@@ -4,11 +4,14 @@
 
 """Configuration for the articulated forklift.
 
-The forklift URDF was converted to USD with:
+The base_link visual now uses the 48-forklift 3-D mesh (assets/48-forklift/Forklift.obj).
+Reconvert the URDF to USD any time the URDF or the mesh changes:
+
     ./isaaclab.sh -p scripts/tools/convert_urdf.py \
         assets/forklift/forklift.urdf \
-        assets/forklift/forklift.usd \
-        --fix-base
+        assets/forklift/forklift.usd
+
+Note: do NOT use --fix-base (causes articulation crash).
 
 Joint names (from URDF):
     Drive wheels (continuous → velocity-controlled):
