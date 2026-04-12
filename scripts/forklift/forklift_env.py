@@ -401,7 +401,21 @@ class ForkliftEnv(DirectRLEnv):
         vel[:, 0] = v_x * torch.cos(heading)
         vel[:, 1] = v_x * torch.sin(heading)
         vel[:, 5] = omega_z
+        # indices 2 (vz), 3 (roll-rate), 4 (pitch-rate) remain 0 → no Z or tipping
         self.forklift.write_root_velocity_to_sim(vel)
+
+        # ── constrain to ground plane (kills Z drift and tipping) ─────────
+        # Rebuild pose with Z fixed and quaternion forced to pure yaw so
+        # collisions with boxes can never lift or tip the forklift.
+        pose = self.forklift.data.root_state_w[:, :7].clone()
+        ground_z = self.scene.env_origins[:, 2] + 0.3   # chassis centre height
+        pose[:, 2] = ground_z
+        half_yaw = heading / 2.0
+        pose[:, 3] = torch.cos(half_yaw)   # qw
+        pose[:, 4] = 0.0                   # qx  (zero roll)
+        pose[:, 5] = 0.0                   # qy  (zero pitch)
+        pose[:, 6] = torch.sin(half_yaw)   # qz
+        self.forklift.write_root_pose_to_sim(pose)
 
         # Cosmetic wheel spin
         R = self.cfg.wheel_radius
