@@ -214,51 +214,100 @@ The controller is accessed via Isaac Lab's `Se2Gamepad` class (designed for grou
 
 ## 6. Import the Forklift Asset
 
-### Get the forklift USD model
+### Why the current forklift doesn't look realistic
 
-Isaac Lab's official asset library includes a forklift. It's stored on NVIDIA's Nucleus
-server and downloaded automatically when needed:
+The forklift in this repo was built from scratch using simple box and cylinder geometry in a URDF file. It works for physics simulation, but it does not look like a real industrial forklift — the mast is a plain yellow box, the wheels are cylinders, and there are no realistic textures or details.
 
+This section explains where to find a better model and how to swap it in.
+
+---
+
+### How to find a realistic forklift model
+
+There are three main sources to look:
+
+**1. NVIDIA Isaac Sim built-in assets (easiest)**
+
+Isaac Sim ships with two ready-made forklift models called `forklift_b` and `forklift_c`. These are professionally modelled, properly articulated (wheels spin, forks move), and already configured for Isaac Sim physics. They are stored on NVIDIA's Nucleus cloud server and download automatically the first time you reference them.
+
+To find them: open Isaac Sim, go to **Create → Isaac → Robots → Wheeled Robots → Forklift** in the menu. You will see Forklift B and Forklift C listed. You can drag either into the viewport to inspect it.
+
+The USD path for Forklift B is:
+```
+omniverse://localhost/NVIDIA/Assets/Isaac/4.5/Isaac/Robots/Forklift/forklift_b.usd
+```
+
+In Python, reference it as:
 ```python
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
-
-# The forklift USD path on NVIDIA's Nucleus server
-FORKLIFT_USD = f"{ISAAC_NUCLEUS_DIR}/Props/Forklift/forklift.usd"
+from isaaclab.utils.assets import NVIDIA_NUCLEUS_DIR
+FORKLIFT_USD = f"{NVIDIA_NUCLEUS_DIR}/Assets/Isaac/4.5/Isaac/Robots/Forklift/forklift_b.usd"
 ```
 
-> **What is Nucleus?** NVIDIA's cloud asset server. Isaac Lab downloads assets from it
-> automatically the first time you reference them and caches them locally.
+> **What is Nucleus?** NVIDIA's cloud asset server. Isaac Lab downloads assets from it automatically the first time you reference them and caches them locally at `~/.cache/`.
 
-### Alternative — use a custom FBX model
+**2. Open-source URDF on GitHub (best for customization)**
 
-**What is FBX?** FBX is a 3D model file format commonly used in game engines and CAD tools. You can download free forklift models from sites like [Sketchfab](https://sketchfab.com) or [TurboSquid](https://www.turbosquid.com) in FBX format.
+The best open-source option is the [ROS2 Forklift Simulation](https://github.com/cangozpi/ROS2-Forklift-Simulation) by cangozpi on GitHub. It is a complete URDF with Ackermann steering, a prismatic fork lift joint, and sensor mounts for camera, depth camera, lidar, and IMU — all closer to a real warehouse forklift.
 
-**Where to place it:** Copy your `.fbx` file into `~/Projects/IsaacLab/assets/forklift/`.
+To use it: clone the repository, locate the `.urdf` or `.xacro` file under its `urdf/` directory, then follow the URDF conversion steps below.
 
-**Step 1 — Convert FBX to USD** (Isaac Sim's native format):
-```bash
-./isaaclab.sh -p scripts/tools/convert_mesh.py \
-    --input assets/forklift/forklift.fbx \
-    --output assets/forklift/forklift.usd \
-    --make-instanceable
-```
+**3. Sketchfab (best visual quality)**
 
-**Step 2 — Add joints (if needed):** A raw FBX is just a visual mesh with no physics joints. To make it a drivable robot, you need a URDF file describing the wheel and fork joints. Once you have one:
+[Sketchfab](https://sketchfab.com/tags/forklift) hosts free CC-licensed forklift models with PBR textures and pre-rigged animations. Download in GLTF/GLB format, convert to USD via Omniverse, then wrap with a URDF to add physics joints. This gives the most realistic appearance but requires the most setup work.
+
+A well-regarded free option is the Forklift model by Ethian74 (CC Attribution 4.0) which includes wheel and fork bone animations.
+
+---
+
+### How to replace the current forklift with a new model
+
+**Step 1 — Convert the model to USD**
+
+Isaac Sim only reads `.usd` files. If you have a URDF:
 ```bash
 ./isaaclab.sh -p scripts/tools/convert_urdf.py \
-    --input assets/forklift/forklift.urdf \
-    --output assets/forklift/forklift_articulated.usd
+    assets/forklift/new_forklift.urdf \
+    assets/forklift/new_forklift.usd \
+    --fix-base
 ```
 
-> **Tip:** If you're just starting out, skip the custom model and use NVIDIA's built-in forklift USD from Nucleus — it already has joints defined and downloads automatically.
+If you have an FBX or GLTF from Sketchfab, use Omniverse's built-in importer:
+open Isaac Sim, go to **File → Import**, select your file, and export it as USD.
+
+**Step 2 — Inspect joint names**
+
+Before wiring it into code, you need to know what the joints are called in the new USD. Open it in Isaac Sim's Stage panel and look under the robot's prim hierarchy, or run:
+```bash
+./isaaclab.sh -p scripts/tools/convert_urdf.py \
+    assets/forklift/new_forklift.urdf \
+    assets/forklift/new_forklift.usd \
+    --fix-base --print-joints
+```
+
+Write down the names of the left wheel joint, right wheel joint, and fork lift joint — you will need them in the next step.
+
+**Step 3 — Update `source/isaaclab_assets/isaaclab_assets/robots/forklift.py`**
+
+This file is the single place that connects the USD file to Isaac Lab's physics system. Change `usd_path` to point to your new USD, and update the joint name expressions in each `ImplicitActuatorCfg` to match what you found in Step 2.
+
+**Step 4 — Reconvert or verify the USD path is correct**
+
+Run the teleop script once without a controller just to confirm the model loads and the joints are found:
+```bash
+./isaaclab.sh -p scripts/forklift/forklift_env.py
+```
+
+If you see `[INFO] Forklift joints: [...]` in the terminal with the correct joint names, the swap is complete.
+
+---
 
 ### Define the forklift configuration
 
 The forklift configuration tells Isaac Lab how to treat the USD model as a robot — which joints are wheels, which is the fork, and what their speed/force limits are.
 
-Create the file `source/isaaclab_assets/isaaclab_assets/robots/forklift.py` with an `ArticulationCfg` that points to your USD path and defines actuators for the wheel joints and fork lift joint.
+The file `source/isaaclab_assets/isaaclab_assets/robots/forklift.py` already exists in this repo. It currently points to the hand-built URDF converted to USD. To use a better model, update the `usd_path` field and the joint name expressions as described in Step 3 above.
 
-> This file is the single place you'll edit if you want to change forklift physics properties (e.g. max speed, fork force limits).
+> This file is the single place you need to edit when switching forklift models or tuning physics properties (max speed, fork force limits, damping).
 
 ---
 
