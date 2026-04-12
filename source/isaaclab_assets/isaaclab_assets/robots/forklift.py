@@ -90,13 +90,15 @@ FORKLIFT_CFG = ArticulationCfg(
             stiffness=0.0,
             damping=50.0,
         ),
-        # Fork lift — effort-controlled prismatic joint
+        # Fork lift — low stiffness so spring forces don't move the chassis.
+        # _apply_action also does write_joint_state_to_sim + syncs the target,
+        # so the net spring force at runtime is always zero.
         "fork_lift": ImplicitActuatorCfg(
             joint_names_expr=["fork_lift_joint"],
             effort_limit=5000.0,
-            velocity_limit=0.5,
-            stiffness=5000.0,
-            damping=500.0,
+            velocity_limit=2.0,
+            stiffness=150.0,
+            damping=100.0,
         ),
     },
 )

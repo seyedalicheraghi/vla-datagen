@@ -1,19 +1,25 @@
 """
 Forklift warehouse environment.
 
-Task: Drive the forklift to a red box, lift it with the forks, and place it
-on a green pallet. Box and pallet positions are randomized each episode.
+Task: Navigate the forklift through a cluttered warehouse to reach the unique
+orange target box.  All other boxes are tan/cardboard-coloured obstacles.
+The warehouse layout (box positions, target location) is re-randomised each
+episode while guaranteeing a navigable path from the forklift start to the
+target using BFS.
 
 This file defines ForkliftEnv and ForkliftEnvCfg as importable classes.
-AppLauncher must be initialized by the caller BEFORE importing this module.
+AppLauncher must be initialised by the caller BEFORE importing this module.
 
-Standalone usage (for scene inspection):
+Standalone usage (scene inspection):
     ./isaaclab.sh -p scripts/forklift/forklift_env.py
 """
 
 # ---------------------------------------------------------------------------
 # Isaac Lab imports — safe because caller has already run AppLauncher
 # ---------------------------------------------------------------------------
+
+import numpy as np
+from collections import deque
 
 import torch
 import isaaclab.sim as sim_utils
@@ -25,9 +31,23 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
-# FORKLIFT_CFG is imported lazily inside _setup_scene() because
-# isaaclab_assets.robots.forklift pulls in pxr which requires Isaac Sim
-# to be running. Importing it here would break the standalone entry point.
+# ---------------------------------------------------------------------------
+# Warehouse layout constants
+# ---------------------------------------------------------------------------
+
+_WAREHOUSE_HALF = 8.5   # half-width of warehouse floor  → 17 m × 17 m
+_WALL_T         = 0.3   # wall thickness (m)
+_WALL_H         = 4.0   # wall height (m)
+
+_GRID_N  = 11           # grid cells per axis (11 × 11)
+_CELL    = 1.5          # metres per cell  → grid spans ±7.5 m inside the walls
+
+_N_BOXES  = 48          # pre-spawned common boxes (upper bound per layout)
+_BOX_SIZE = 0.55        # cube side length (m)
+_PARK_Z   = -60.0       # underground parking depth for inactive boxes
+
+_COMMON_COLOR = (0.70, 0.58, 0.38)   # cardboard / tan
+_TARGET_COLOR = (0.95, 0.25, 0.05)   # bright orange-red
 
 
 # ---------------------------------------------------------------------------
@@ -36,28 +56,19 @@ from isaaclab.utils import configclass
 
 @configclass
 class ForkliftEnvCfg(DirectRLEnvCfg):
-    """Settings for the forklift environment."""
+    """Settings for the warehouse forklift environment."""
 
-    # Simulation: 120 Hz physics
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=4)
-
-    # Policy runs every 4 physics steps → effective policy rate = 30 Hz
     decimation: int = 4
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=40.0)
+    episode_length_s: float = 120.0
 
-    # Scene: single environment with 10m spacing
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=10.0)
-
-    # Episode ends after 60 seconds if the task isn't completed
-    episode_length_s: float = 60.0
-
-    # Spaces (used by RL wrappers; not needed for teleoperation)
     observation_space: int = 64
-    action_space: int = 3         # [v_x, omega_z, fork_height]
+    action_space: int = 3       # [v_x, omega_z, fork_cmd]
     state_space: int = 0
 
-    # Differential drive geometry
-    wheel_radius: float = 0.3          # metres (matches URDF cylinder radius)
-    wheel_base: float = 1.15           # distance between rear wheels (matches URDF y offsets ×2)
+    wheel_radius: float = 0.3
+    wheel_base: float = 1.15
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +76,7 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
 # ---------------------------------------------------------------------------
 
 class ForkliftEnv(DirectRLEnv):
-    """Forklift pick-and-place environment with articulated joints."""
+    """Warehouse forklift environment with procedurally generated layouts."""
 
     cfg: ForkliftEnvCfg
 
@@ -73,78 +84,235 @@ class ForkliftEnv(DirectRLEnv):
         super().__init__(cfg, **kwargs)
         self.actions = torch.zeros(self.num_envs, 3, device=self.device)
 
-        # Cache joint indices after super().__init__ has set up the scene.
-        # find_joints returns (indices_list, names_list); we want the first index.
         all_joints = self.forklift.joint_names
         print(f"[INFO] Forklift joints: {all_joints}")
-        self._left_wheel_idx:  int = self.forklift.find_joints("rear_left_wheel_joint")[0][0]
-        self._right_wheel_idx: int = self.forklift.find_joints("rear_right_wheel_joint")[0][0]
-        self._fork_idx:        int = self.forklift.find_joints("fork_lift_joint")[0][0]
-        print(f"[INFO] left_wheel={self._left_wheel_idx}, right_wheel={self._right_wheel_idx}, fork={self._fork_idx}")
+        self._left_wheel_idx  = self.forklift.find_joints("rear_left_wheel_joint")[0][0]
+        self._right_wheel_idx = self.forklift.find_joints("rear_right_wheel_joint")[0][0]
+        self._fork_idx        = self.forklift.find_joints("fork_lift_joint")[0][0]
+        print(f"[INFO] left_wheel={self._left_wheel_idx}, "
+              f"right_wheel={self._right_wheel_idx}, fork={self._fork_idx}")
+
+        self._rng = np.random.default_rng()   # layout RNG (re-seeded per episode)
 
     # ------------------------------------------------------------------
-    # Scene setup
+    # Scene setup (called once at init)
     # ------------------------------------------------------------------
 
     def _setup_scene(self):
-        # Deferred import: pxr (and isaaclab_assets) require Isaac Sim running
         from isaaclab_assets.robots.forklift import FORKLIFT_CFG
 
-        # Floor and lighting
-        spawn_ground_plane(prim_path="/World/Ground", cfg=GroundPlaneCfg())
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.75, 0.75, 0.75))
-        light_cfg.func("/World/Light", light_cfg)
+        # Concrete-grey warehouse floor
+        spawn_ground_plane(
+            prim_path="/World/Ground",
+            cfg=GroundPlaneCfg(color=(0.40, 0.40, 0.38)),
+        )
 
-        # Articulated forklift — wheels + fork lift joint.
-        # FORKLIFT_CFG already uses {ENV_REGEX_NS} as prim_path placeholder;
-        # Isaac Lab expands it to the per-env path automatically.
+        # Warm ambient lighting
+        sim_utils.DomeLightCfg(
+            intensity=3500.0,
+            color=(0.95, 0.88, 0.75),
+        ).func("/World/Light", sim_utils.DomeLightCfg(intensity=3500.0, color=(0.95, 0.88, 0.75)))
+
+        # Four static warehouse walls
+        self._spawn_walls()
+
+        # Articulated forklift
         self.forklift = Articulation(FORKLIFT_CFG)
 
-        # Red box — physics rigid body, randomized each episode
-        self.box = RigidObject(RigidObjectCfg(
-            prim_path="/World/envs/env_.*/Box",
+        # Common boxes: kinematic obstacles, parked underground at start
+        self.common_boxes: list[RigidObject] = []
+        for i in range(_N_BOXES):
+            box = RigidObject(RigidObjectCfg(
+                prim_path=f"/World/envs/env_.*/CBox_{i:02d}",
+                spawn=sim_utils.CuboidCfg(
+                    size=(_BOX_SIZE,) * 3,
+                    rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                        kinematic_enabled=True,
+                    ),
+                    mass_props=sim_utils.MassPropertiesCfg(mass=40.0),
+                    collision_props=sim_utils.CollisionPropertiesCfg(),
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=_COMMON_COLOR,
+                        roughness=0.8,
+                    ),
+                ),
+                init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, _PARK_Z)),
+            ))
+            self.common_boxes.append(box)
+
+        # Target box: physics-enabled so the forklift can push / lift it
+        self.target_box = RigidObject(RigidObjectCfg(
+            prim_path="/World/envs/env_.*/TargetBox",
             spawn=sim_utils.CuboidCfg(
-                size=(0.4, 0.4, 0.4),
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(),
+                size=(_BOX_SIZE,) * 3,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                    kinematic_enabled=False,
+                    linear_damping=0.5,
+                    angular_damping=1.0,
+                ),
                 mass_props=sim_utils.MassPropertiesCfg(mass=5.0),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.8, 0.2, 0.2)),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=_TARGET_COLOR,
+                    roughness=0.4,
+                    metallic=0.1,
+                ),
             ),
         ))
 
-        # Green pallet — kinematic, randomized each episode
-        self.pallet = RigidObject(RigidObjectCfg(
-            prim_path="/World/envs/env_.*/Pallet",
-            spawn=sim_utils.CuboidCfg(
-                size=(0.8, 0.8, 0.05),
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.8, 0.2)),
-            ),
-        ))
-
-        # Overhead camera looking down at the scene
+        # Overhead wide-angle camera centred on the warehouse
         self.camera = Camera(CameraCfg(
             prim_path="/World/envs/env_.*/Camera",
             update_period=1 / 30,
-            height=224,
-            width=224,
+            height=512,
+            width=512,
             data_types=["rgb", "depth"],
             spawn=sim_utils.PinholeCameraCfg(
-                focal_length=24.0,
+                focal_length=14.0,
                 horizontal_aperture=20.955,
-                clipping_range=(0.1, 50.0),
+                clipping_range=(0.1, 120.0),
             ),
             offset=CameraCfg.OffsetCfg(
-                pos=(0.0, 0.0, 8.0),
-                rot=(0.7071, 0.0, 0.0, 0.7071),
+                pos=(0.0, 0.0, 22.0),
+                rot=(0.7071, 0.0, 0.0, 0.7071),   # looking straight down
             ),
         ))
 
-        # Register physics assets and sensors with the scene
+        # Register everything with the scene
         self.scene.clone_environments(copy_from_source=False)
         self.scene.articulations["forklift"] = self.forklift
-        self.scene.rigid_objects["box"]      = self.box
-        self.scene.rigid_objects["pallet"]   = self.pallet
-        self.scene.sensors["camera"]         = self.camera
+        for i, box in enumerate(self.common_boxes):
+            self.scene.rigid_objects[f"cbox_{i:02d}"] = box
+        self.scene.rigid_objects["target_box"] = self.target_box
+        self.scene.sensors["camera"]           = self.camera
+
+    # ------------------------------------------------------------------
+    # Wall helpers
+    # ------------------------------------------------------------------
+
+    def _spawn_walls(self):
+        """Spawn four kinematic walls enclosing the warehouse."""
+        W = _WAREHOUSE_HALF
+        T = _WALL_T
+        H = _WALL_H
+
+        # Shared visual / physics material
+        def _wall_cfg(size):
+            return sim_utils.CuboidCfg(
+                size=size,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+                mass_props=sim_utils.MassPropertiesCfg(mass=1e6),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.78, 0.74, 0.68),
+                    roughness=0.9,
+                ),
+            )
+
+        walls = [
+            ("Wall_N", (W * 2 + T * 2, T, H), ( 0.0,  W + T / 2, H / 2)),
+            ("Wall_S", (W * 2 + T * 2, T, H), ( 0.0, -W - T / 2, H / 2)),
+            ("Wall_E", (T, W * 2 + T * 2, H), ( W + T / 2,  0.0, H / 2)),
+            ("Wall_W", (T, W * 2 + T * 2, H), (-W - T / 2,  0.0, H / 2)),
+        ]
+        for name, size, pos in walls:
+            cfg = _wall_cfg(size)
+            cfg.func(f"/World/{name}", cfg, translation=pos)
+
+    # ------------------------------------------------------------------
+    # Procedural layout generator
+    # ------------------------------------------------------------------
+
+    def _generate_layout(self) -> tuple[list[tuple[float, float]], tuple[float, float]]:
+        """
+        Build a random warehouse layout on an _GRID_N × _GRID_N grid and
+        guarantee a navigable path from the forklift's starting cell to the
+        target box using BFS.
+
+        Returns
+        -------
+        box_xy   : list of (x, y) world-frame positions for active common boxes
+        target_xy: (x, y) world-frame position for the unique target box
+        """
+        N = _GRID_N
+        C = _CELL
+
+        # Grid-cell centre → world (x, y)
+        # Cell (row=0, col=0) is the bottom-left corner.
+        # Forklift is at the centre cell (N//2, N//2) = world (0, 0).
+        def g2w(row: int, col: int) -> tuple[float, float]:
+            x = (col - (N - 1) / 2.0) * C
+            y = (row - (N - 1) / 2.0) * C
+            return float(x), float(y)
+
+        start_r = N // 2   # = 5 for N=11
+        start_c = N // 2
+
+        # 3×3 cells always kept clear so the forklift has room to start
+        CLEAR = {
+            (start_r + dr, start_c + dc)
+            for dr in (-1, 0, 1)
+            for dc in (-1, 0, 1)
+        }
+
+        for _attempt in range(40):
+            grid = np.zeros((N, N), dtype=np.int8)   # 0 = free, 1 = box
+
+            # ── random box clusters ──────────────────────────────────────
+            n_clusters = int(self._rng.integers(4, 8))   # 4–7 clusters
+            for _ in range(n_clusters):
+                ch = int(self._rng.integers(1, 3))        # 1–2 rows tall
+                cw = int(self._rng.integers(2, 5))        # 2–4 cols wide
+                r0 = int(self._rng.integers(0, N - ch + 1))
+                c0 = int(self._rng.integers(0, N - cw + 1))
+                for r in range(r0, min(r0 + ch, N)):
+                    for c in range(c0, min(c0 + cw, N)):
+                        if (r, c) not in CLEAR:
+                            grid[r, c] = 1
+
+            # ── BFS from forklift start ──────────────────────────────────
+            visited: set[tuple[int, int]] = set()
+            q: deque[tuple[int, int]] = deque([(start_r, start_c)])
+            visited.add((start_r, start_c))
+            while q:
+                r, c = q.popleft()
+                for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    nr, nc = r + dr, c + dc
+                    if (0 <= nr < N and 0 <= nc < N
+                            and grid[nr, nc] == 0
+                            and (nr, nc) not in visited):
+                        visited.add((nr, nc))
+                        q.append((nr, nc))
+
+            # ── candidate cells for the target box ───────────────────────
+            # Must be reachable, outside the clear zone, and at least 4
+            # Manhattan-distance steps away so it's not trivially close.
+            candidates = [
+                (r, c) for r, c in visited
+                if (r, c) not in CLEAR
+                and abs(r - start_r) + abs(c - start_c) >= 4
+            ]
+            if not candidates:
+                continue   # layout too dense — retry
+
+            # Pick target cell randomly
+            idx = int(self._rng.integers(0, len(candidates)))
+            t_r, t_c = candidates[idx]
+            grid[t_r, t_c] = 0   # ensure target cell itself is free
+
+            # ── collect box world positions ──────────────────────────────
+            box_xy = [
+                g2w(r, c)
+                for r in range(N)
+                for c in range(N)
+                if grid[r, c] == 1
+            ]
+            target_xy = g2w(t_r, t_c)
+            return box_xy, target_xy
+
+        # Fallback: clear warehouse, target in far corner
+        print("[WARN] Layout generator fallback — placing target at far corner.")
+        return [], g2w(N - 1, N - 1)
 
     # ------------------------------------------------------------------
     # Episode reset
@@ -152,35 +320,59 @@ class ForkliftEnv(DirectRLEnv):
 
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
-        n = len(env_ids)
+        origins = self.scene.env_origins[env_ids]
 
-        # Reset forklift articulation to default pose, zero velocity
-        default_root_state = self.forklift.data.default_root_state[env_ids].clone()
-        default_root_state[:, :3] += self.scene.env_origins[env_ids]
-        self.forklift.write_root_pose_to_sim(default_root_state[:, :7], env_ids=env_ids)
-        self.forklift.write_root_velocity_to_sim(default_root_state[:, 7:], env_ids=env_ids)
+        # Reset forklift to its default pose at the centre of the warehouse
+        default_root = self.forklift.data.default_root_state[env_ids].clone()
+        default_root[:, :3] += origins
+        self.forklift.write_root_pose_to_sim(default_root[:, :7], env_ids=env_ids)
+        self.forklift.write_root_velocity_to_sim(default_root[:, 7:], env_ids=env_ids)
+        dj_pos = self.forklift.data.default_joint_pos[env_ids].clone()
+        dj_vel = self.forklift.data.default_joint_vel[env_ids].clone()
+        self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
-        default_joint_pos = self.forklift.data.default_joint_pos[env_ids].clone()
-        default_joint_vel = self.forklift.data.default_joint_vel[env_ids].clone()
-        self.forklift.write_joint_state_to_sim(default_joint_pos, default_joint_vel, env_ids=env_ids)
+        # Per-env layout generation (runs once per reset; num_envs=1 typical)
+        for i, env_id in enumerate(env_ids.tolist()):
+            origin = origins[i].cpu().numpy()
+            ox, oy = float(origin[0]), float(origin[1])
 
-        # Randomize box position
-        box_pos = torch.zeros(n, 7, device=self.device)
-        box_pos[:, 0] = torch.FloatTensor(n).uniform_(-3.0, 3.0).to(self.device)
-        box_pos[:, 1] = torch.FloatTensor(n).uniform_(-3.0, 3.0).to(self.device)
-        box_pos[:, 2] = 0.2
-        box_pos[:, 6] = 1.0
-        box_pos[:, :3] += self.scene.env_origins[env_ids]
-        self.box.write_root_pose_to_sim(box_pos, env_ids=env_ids)
+            box_xy, target_xy = self._generate_layout()
 
-        # Randomize pallet position
-        pallet_pos = torch.zeros(n, 7, device=self.device)
-        pallet_pos[:, 0] = torch.FloatTensor(n).uniform_(-3.0, 3.0).to(self.device)
-        pallet_pos[:, 1] = torch.FloatTensor(n).uniform_(-3.0, 3.0).to(self.device)
-        pallet_pos[:, 2] = 0.025
-        pallet_pos[:, 6] = 1.0
-        pallet_pos[:, :3] += self.scene.env_origins[env_ids]
-        self.pallet.write_root_pose_to_sim(pallet_pos, env_ids=env_ids)
+            # ── place active common boxes ────────────────────────────────
+            env_id_t = torch.tensor([env_id], device=self.device)
+            for j, (bx, by) in enumerate(box_xy[:_N_BOXES]):
+                pose = torch.zeros(1, 7, device=self.device)
+                pose[0, 0] = bx + ox
+                pose[0, 1] = by + oy
+                pose[0, 2] = _BOX_SIZE / 2   # sit on the floor
+                pose[0, 6] = 1.0             # quaternion w
+                self.common_boxes[j].write_root_pose_to_sim(pose, env_ids=env_id_t)
+
+            # ── park unused common boxes underground ─────────────────────
+            for j in range(len(box_xy), _N_BOXES):
+                pose = torch.zeros(1, 7, device=self.device)
+                pose[0, 0] = ox
+                pose[0, 1] = oy
+                pose[0, 2] = _PARK_Z
+                pose[0, 6] = 1.0
+                self.common_boxes[j].write_root_pose_to_sim(pose, env_ids=env_id_t)
+
+            # ── place target box ─────────────────────────────────────────
+            tpose = torch.zeros(1, 7, device=self.device)
+            tpose[0, 0] = target_xy[0] + ox
+            tpose[0, 1] = target_xy[1] + oy
+            tpose[0, 2] = _BOX_SIZE / 2
+            tpose[0, 6] = 1.0
+            self.target_box.write_root_pose_to_sim(tpose, env_ids=env_id_t)
+            self.target_box.write_root_velocity_to_sim(
+                torch.zeros(1, 6, device=self.device), env_ids=env_id_t
+            )
+
+            n_active = min(len(box_xy), _N_BOXES)
+            print(
+                f"[INFO] Env {env_id}: {n_active} obstacle boxes placed, "
+                f"target at ({target_xy[0]:.1f}, {target_xy[1]:.1f}) world"
+            )
 
     # ------------------------------------------------------------------
     # Actions
@@ -190,39 +382,47 @@ class ForkliftEnv(DirectRLEnv):
         self.actions = actions.clone()
 
     def _apply_action(self):
-        v_x      = self.actions[:, 0]   # forward / backward (m/s in body frame)
-        omega_z  = self.actions[:, 1]   # yaw rate (rad/s)
+        v_x      = self.actions[:, 0]
+        omega_z  = self.actions[:, 1]
         fork_cmd = self.actions[:, 2]   # +1 raise, -1 lower, 0 hold
 
-        # --- Drive the base directly via root velocity (body → world frame) ---
-        # Wheel contact physics requires precise friction tuning; driving the root
-        # is more robust for this simulation.
-        heading = self.forklift.data.heading_w   # (N,) yaw in world frame
-
+        # ── base: drive root velocity directly (body → world frame) ──────
+        heading = self.forklift.data.heading_w
         vel = torch.zeros(self.num_envs, 6, device=self.device)
-        vel[:, 0] = v_x * torch.cos(heading)   # world X
-        vel[:, 1] = v_x * torch.sin(heading)   # world Y
-        vel[:, 5] = omega_z                     # yaw
+        vel[:, 0] = v_x * torch.cos(heading)
+        vel[:, 1] = v_x * torch.sin(heading)
+        vel[:, 5] = omega_z
         self.forklift.write_root_velocity_to_sim(vel)
 
-        # Also spin the visual wheel joints to match, so the wheels look like
-        # they're rolling (cosmetic only — the root velocity drives motion).
+        # Cosmetic wheel spin
         R = self.cfg.wheel_radius
         L = self.cfg.wheel_base
         omega_left  = (v_x - omega_z * L / 2.0) / R
         omega_right = (v_x + omega_z * L / 2.0) / R
-        joint_vel_target = self.forklift.data.joint_vel_target.clone()
-        joint_vel_target[:, self._left_wheel_idx]  = omega_left
-        joint_vel_target[:, self._right_wheel_idx] = omega_right
-        self.forklift.set_joint_velocity_target(joint_vel_target)
+        jvt = self.forklift.data.joint_vel_target.clone()
+        jvt[:, self._left_wheel_idx]  = omega_left
+        jvt[:, self._right_wheel_idx] = omega_right
+        self.forklift.set_joint_velocity_target(jvt)
 
-        # --- Fork lift: accumulate position target ---
-        fork_pos = self.forklift.data.joint_pos[:, self._fork_idx].clone()
-        fork_delta = fork_cmd * 0.05   # 0.05 m per step at 30 Hz → ~1.5 m/s
-        new_fork_pos = torch.clamp(fork_pos + fork_delta, 0.0, 1.5)
-        fork_pos_target = self.forklift.data.joint_pos_target.clone()
-        fork_pos_target[:, self._fork_idx] = new_fork_pos
-        self.forklift.set_joint_position_target(fork_pos_target)
+        # ── fork: direct state write — bypasses actuator spring forces ───
+        # Using write_joint_state_to_sim for the fork joint means no actuator
+        # reaction force is applied to the chassis.  The position target is
+        # also updated so the actuator does not fight back between steps.
+        fork_pos   = self.forklift.data.joint_pos[:, self._fork_idx].clone()
+        fork_delta = fork_cmd * 0.05   # 0.05 m per 30 Hz step → 1.5 m/s
+        new_fork   = torch.clamp(fork_pos + fork_delta, 0.0, 1.5)
+
+        # Teleport only the fork joint
+        all_jpos = self.forklift.data.joint_pos.clone()
+        all_jvel = self.forklift.data.joint_vel.clone()
+        all_jpos[:, self._fork_idx] = new_fork
+        all_jvel[:, self._fork_idx] = 0.0
+        self.forklift.write_joint_state_to_sim(all_jpos, all_jvel)
+
+        # Keep position target in sync so the stiff actuator adds zero force
+        jpt = self.forklift.data.joint_pos_target.clone()
+        jpt[:, self._fork_idx] = new_fork
+        self.forklift.set_joint_position_target(jpt)
 
     # ------------------------------------------------------------------
     # Observations, rewards, termination
@@ -232,21 +432,25 @@ class ForkliftEnv(DirectRLEnv):
         return {
             "rgb":        self.camera.data.output["rgb"],
             "depth":      self.camera.data.output["depth"],
-            "box_pos":    self.box.data.root_pos_w,
-            "pallet_pos": self.pallet.data.root_pos_w,
+            "target_pos": self.target_box.data.root_pos_w,
+            "fork_pos":   self.forklift.data.joint_pos[
+                              :, self._fork_idx : self._fork_idx + 1
+                          ],
         }
 
     def _get_rewards(self) -> torch.Tensor:
-        dist = torch.norm(
-            self.box.data.root_pos_w[:, :2] - self.pallet.data.root_pos_w[:, :2], dim=1
-        )
+        forklift_xy = self.forklift.data.root_pos_w[:, :2]
+        target_xy   = self.target_box.data.root_pos_w[:, :2]
+        dist = torch.norm(forklift_xy - target_xy, dim=1)
         return torch.exp(-dist)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        dist = torch.norm(
-            self.box.data.root_pos_w[:, :2] - self.pallet.data.root_pos_w[:, :2], dim=1
-        )
-        return dist < 0.3, self.episode_length_buf >= self.max_episode_length
+        forklift_xy = self.forklift.data.root_pos_w[:, :2]
+        target_xy   = self.target_box.data.root_pos_w[:, :2]
+        dist = torch.norm(forklift_xy - target_xy, dim=1)
+        success = dist < 0.6
+        timeout = self.episode_length_buf >= self.max_episode_length
+        return success, timeout
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +461,7 @@ if __name__ == "__main__":
     import argparse
     from isaaclab.app import AppLauncher
 
-    parser = argparse.ArgumentParser(description="Forklift environment — standalone inspection.")
+    parser = argparse.ArgumentParser(description="Forklift warehouse — standalone inspection.")
     AppLauncher.add_app_launcher_args(parser)
     args_cli = parser.parse_args()
     args_cli.enable_cameras = True
@@ -267,7 +471,7 @@ if __name__ == "__main__":
 
     env = ForkliftEnv(ForkliftEnvCfg())
     env.reset()
-    print("[INFO] Forklift environment loaded. Press Ctrl+C to exit.")
+    print("[INFO] Warehouse environment loaded. Press Ctrl+C to exit.")
 
     while simulation_app.is_running():
         env.step(torch.zeros(1, 3))

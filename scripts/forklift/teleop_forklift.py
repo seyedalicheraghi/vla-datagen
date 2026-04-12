@@ -159,15 +159,15 @@ def main():
         step += 1
 
         if step % 30 == 0:
-            box_pos    = obs["box_pos"][0].cpu()
-            pallet_pos = obs["pallet_pos"][0].cpu()
-            dist = torch.norm(box_pos[:2] - pallet_pos[:2]).item()
+            target_pos   = obs["target_pos"][0].cpu()
+            forklift_pos = env.forklift.data.root_pos_w[0].cpu()
+            dist = torch.norm(forklift_pos[:2] - target_pos[:2]).item()
             fork_pos_m = env.forklift.data.joint_pos[0, env._fork_idx].item()
             print(
                 f"  step={step:4d} | "
                 f"v_x={action[0,0]:.2f}  ω={action[0,1]:.2f}  fork_cmd={action[0,2]:+.2f} | "
-                f"fork_joint={fork_pos_m:.3f}m | "
-                f"box↔pallet={dist:.2f}m | reward={reward[0]:.3f}"
+                f"fork={fork_pos_m:.3f}m | "
+                f"dist_to_target={dist:.2f}m | reward={reward[0]:.3f}"
             )
 
         if terminated.any() or truncated.any():
