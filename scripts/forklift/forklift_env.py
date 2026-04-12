@@ -395,22 +395,26 @@ class ForkliftEnv(DirectRLEnv):
         omega_z  = self.actions[:, 1]
         fork_cmd = self.actions[:, 2]   # +1 raise, -1 lower, 0 hold
 
-        # ── base: drive root velocity directly (body → world frame) ──────
+        # ── base: integrate heading directly, then drive root velocity ───────
+        # Writing omega_z to velocity AND immediately overwriting the pose with
+        # the old heading causes the rotation to be lost.  Instead, advance the
+        # heading by omega_z * sim_dt ourselves and bake it into the pose write.
         heading = self.forklift.data.heading_w
+        dt = self.cfg.sim.dt                     # one physics sub-step
+        new_heading = heading + omega_z * dt
+
         vel = torch.zeros(self.num_envs, 6, device=self.device)
-        vel[:, 0] = v_x * torch.cos(heading)
-        vel[:, 1] = v_x * torch.sin(heading)
-        vel[:, 5] = omega_z
-        # indices 2 (vz), 3 (roll-rate), 4 (pitch-rate) remain 0 → no Z or tipping
+        vel[:, 0] = v_x * torch.cos(new_heading)
+        vel[:, 1] = v_x * torch.sin(new_heading)
+        # angular velocity left at 0 — heading is managed by the pose write below
         self.forklift.write_root_velocity_to_sim(vel)
 
-        # ── constrain to ground plane (kills Z drift and tipping) ─────────
-        # Rebuild pose with Z fixed and quaternion forced to pure yaw so
-        # collisions with boxes can never lift or tip the forklift.
+        # ── constrain to ground plane with updated heading ─────────────────
+        # chassis centre is 0.6 m above ground (wheel radius 0.3 + joint offset 0.3)
         pose = self.forklift.data.root_state_w[:, :7].clone()
-        ground_z = self.scene.env_origins[:, 2] + 0.3   # chassis centre height
+        ground_z = self.scene.env_origins[:, 2] + 0.6   # chassis centre height
         pose[:, 2] = ground_z
-        half_yaw = heading / 2.0
+        half_yaw = new_heading / 2.0
         pose[:, 3] = torch.cos(half_yaw)   # qw
         pose[:, 4] = 0.0                   # qx  (zero roll)
         pose[:, 5] = 0.0                   # qy  (zero pitch)
@@ -431,7 +435,7 @@ class ForkliftEnv(DirectRLEnv):
         # Lower limit 0.0 m (tines at ground level); upper 1.5 m.
         fork_pos   = self.forklift.data.joint_pos[:, self._fork_idx].clone()
         fork_delta = fork_cmd * 0.04   # 0.04 m/step at 30 Hz → 1.2 m/s
-        new_fork   = torch.clamp(fork_pos + fork_delta, 0.0, 1.5)
+        new_fork   = torch.clamp(fork_pos + fork_delta, -0.3, 1.5)
 
         # Teleport the fork joint directly (no actuator spring force on chassis)
         all_jpos = self.forklift.data.joint_pos.clone()
@@ -490,8 +494,9 @@ class ForkliftEnv(DirectRLEnv):
             fwd = dx * cos_i + dy * sin_i          # positive = in front
             lat = abs(-dx * sin_i + dy * cos_i)    # unsigned lateral
 
-            # Tine centre height: fork_lift_joint + 0.025 (adjusted URDF origin)
-            tine_z = j + 0.025
+            # Tine centre height: chassis(0.6) + mast_joint(-0.3) + fork_lift_origin(0.15)
+            #                     + fork_carriage_to_tine(-0.125) = 0.325 + j
+            tine_z = j + 0.325
 
             env_t = torch.tensor([i], device=self.device)
 

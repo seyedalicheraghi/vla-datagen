@@ -63,7 +63,7 @@ FORKLIFT_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 0.3),   # half of rear-wheel radius keeps it on the ground
+        pos=(0.0, 0.0, 0.6),   # wheel joints at z=-0.3 from chassis → wheel centre=0.3, bottom=0.0
         joint_pos={
             "rear_left_wheel_joint":   0.0,
             "rear_right_wheel_joint":  0.0,
