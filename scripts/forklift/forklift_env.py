@@ -414,10 +414,10 @@ class ForkliftEnv(DirectRLEnv):
         self.forklift.set_joint_velocity_target(jvt)
 
         # ── fork: direct state write — bypasses actuator spring forces ───
-        # Lower limit is now -0.025 m (tines reach ground); upper 1.5 m.
+        # Lower limit 0.0 m (tines at ground level); upper 1.5 m.
         fork_pos   = self.forklift.data.joint_pos[:, self._fork_idx].clone()
         fork_delta = fork_cmd * 0.04   # 0.04 m/step at 30 Hz → 1.2 m/s
-        new_fork   = torch.clamp(fork_pos + fork_delta, -0.025, 1.5)
+        new_fork   = torch.clamp(fork_pos + fork_delta, 0.0, 1.5)
 
         # Teleport the fork joint directly (no actuator spring force on chassis)
         all_jpos = self.forklift.data.joint_pos.clone()
