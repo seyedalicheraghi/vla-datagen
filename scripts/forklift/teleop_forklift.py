@@ -163,11 +163,13 @@ def main():
             forklift_pos = env.forklift.data.root_pos_w[0].cpu()
             dist = torch.norm(forklift_pos[:2] - target_pos[:2]).item()
             fork_pos_m = env.forklift.data.joint_pos[0, env._fork_idx].item()
+            grabbed = env._box_grabbed[0]
             print(
                 f"  step={step:4d} | "
-                f"v_x={action[0,0]:.2f}  ω={action[0,1]:.2f}  fork_cmd={action[0,2]:+.2f} | "
-                f"fork={fork_pos_m:.3f}m | "
-                f"dist_to_target={dist:.2f}m | reward={reward[0]:.3f}"
+                f"v_x={action[0,0]:.2f}  ω={action[0,1]:.2f}  fork={action[0,2]:+.2f} | "
+                f"fork_height={fork_pos_m:.3f}m | "
+                f"dist={dist:.2f}m | {'[CARRYING]' if grabbed else '          '} | "
+                f"reward={reward[0]:.3f}"
             )
 
         if terminated.any() or truncated.any():

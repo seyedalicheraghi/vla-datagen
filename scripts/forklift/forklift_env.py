@@ -94,6 +94,11 @@ class ForkliftEnv(DirectRLEnv):
 
         self._rng = np.random.default_rng()   # layout RNG (re-seeded per episode)
 
+        # Kinematic box-grab state (one entry per env)
+        self._box_grabbed: list[bool]  = [False] * self.num_envs
+        self._grab_fwd:    list[float] = [0.0]   * self.num_envs  # body-frame fwd offset
+        self._grab_lat:    list[float] = [0.0]   * self.num_envs  # body-frame lateral offset
+
     # ------------------------------------------------------------------
     # Scene setup (called once at init)
     # ------------------------------------------------------------------
@@ -331,6 +336,10 @@ class ForkliftEnv(DirectRLEnv):
         dj_vel = self.forklift.data.default_joint_vel[env_ids].clone()
         self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
+        # Clear grab state for every resetting env
+        for env_id in env_ids.tolist():
+            self._box_grabbed[env_id] = False
+
         # Per-env layout generation (runs once per reset; num_envs=1 typical)
         for i, env_id in enumerate(env_ids.tolist()):
             origin = origins[i].cpu().numpy()
@@ -405,24 +414,105 @@ class ForkliftEnv(DirectRLEnv):
         self.forklift.set_joint_velocity_target(jvt)
 
         # ── fork: direct state write — bypasses actuator spring forces ───
-        # Using write_joint_state_to_sim for the fork joint means no actuator
-        # reaction force is applied to the chassis.  The position target is
-        # also updated so the actuator does not fight back between steps.
+        # Lower limit is now -0.025 m (tines reach ground); upper 1.5 m.
         fork_pos   = self.forklift.data.joint_pos[:, self._fork_idx].clone()
-        fork_delta = fork_cmd * 0.05   # 0.05 m per 30 Hz step → 1.5 m/s
-        new_fork   = torch.clamp(fork_pos + fork_delta, 0.0, 1.5)
+        fork_delta = fork_cmd * 0.04   # 0.04 m/step at 30 Hz → 1.2 m/s
+        new_fork   = torch.clamp(fork_pos + fork_delta, -0.025, 1.5)
 
-        # Teleport only the fork joint
+        # Teleport the fork joint directly (no actuator spring force on chassis)
         all_jpos = self.forklift.data.joint_pos.clone()
         all_jvel = self.forklift.data.joint_vel.clone()
         all_jpos[:, self._fork_idx] = new_fork
         all_jvel[:, self._fork_idx] = 0.0
         self.forklift.write_joint_state_to_sim(all_jpos, all_jvel)
 
-        # Keep position target in sync so the stiff actuator adds zero force
+        # Sync position target → actuator spring force stays at zero
         jpt = self.forklift.data.joint_pos_target.clone()
         jpt[:, self._fork_idx] = new_fork
         self.forklift.set_joint_position_target(jpt)
+
+        # ── kinematic box grab ───────────────────────────────────────────
+        self._update_box_grab(fork_cmd, new_fork)
+
+    # ------------------------------------------------------------------
+    # Kinematic grab
+    # ------------------------------------------------------------------
+
+    def _update_box_grab(self, fork_cmd: torch.Tensor, fork_joint: torch.Tensor):
+        """
+        Detect when the forklift's forks are positioned under the target box
+        and kinematically attach / detach it.
+
+        Grab triggers when ALL of:
+          - Box is 0.5–2.2 m forward of chassis in the forklift's body frame
+          - Box is within ±0.5 m laterally
+          - fork_cmd > 0  (operator is pressing raise)
+          - Box is within 0.5 m vertically of where it would sit on the tines
+
+        Carry: each step the box position is set to follow the tine position.
+        Release: when fork_joint drops below 0.03 m (forks near the floor).
+        """
+        fl_pos     = self.forklift.data.root_pos_w   # (N, 3)
+        fl_heading = self.forklift.data.heading_w    # (N,)
+        box_pos    = self.target_box.data.root_pos_w # (N, 3)
+
+        cos_h = torch.cos(fl_heading)
+        sin_h = torch.sin(fl_heading)
+
+        for i in range(self.num_envs):
+            j       = fork_joint[i].item()
+            cmd     = fork_cmd[i].item()
+            cos_i   = cos_h[i].item()
+            sin_i   = sin_h[i].item()
+            fl_x    = fl_pos[i, 0].item()
+            fl_y    = fl_pos[i, 1].item()
+            box_x   = box_pos[i, 0].item()
+            box_y   = box_pos[i, 1].item()
+            box_z   = box_pos[i, 2].item()
+
+            # Box in forklift body frame
+            dx  = box_x - fl_x
+            dy  = box_y - fl_y
+            fwd = dx * cos_i + dy * sin_i          # positive = in front
+            lat = abs(-dx * sin_i + dy * cos_i)    # unsigned lateral
+
+            # Tine centre height: fork_lift_joint + 0.025 (adjusted URDF origin)
+            tine_z = j + 0.025
+
+            env_t = torch.tensor([i], device=self.device)
+
+            if not self._box_grabbed[i]:
+                # ── try to grab ──────────────────────────────────────────
+                in_zone    = 0.5 < fwd < 2.2 and lat < 0.5
+                height_ok  = abs(box_z - (tine_z + _BOX_SIZE / 2)) < 0.5
+                if in_zone and height_ok and cmd > 0.05:
+                    self._box_grabbed[i] = True
+                    self._grab_fwd[i] = fwd
+                    self._grab_lat[i] = -dx * sin_i + dy * cos_i  # signed
+                    print(f"[GRAB] env={i}  fork={j:.3f}m  "
+                          f"fwd={fwd:.2f}m  lat={lat:.2f}m")
+            else:
+                # ── release when forks reach the floor ───────────────────
+                if j < 0.03:
+                    self._box_grabbed[i] = False
+                    print(f"[DROP] env={i}  fork={j:.3f}m")
+                else:
+                    # ── carry: move box with the forks ───────────────────
+                    fwd_i = self._grab_fwd[i]
+                    lat_i = self._grab_lat[i]
+                    new_bx = fl_x + fwd_i * cos_i - lat_i * sin_i
+                    new_by = fl_y + fwd_i * sin_i + lat_i * cos_i
+                    new_bz = tine_z + _BOX_SIZE / 2
+
+                    pose = torch.zeros(1, 7, device=self.device)
+                    pose[0, 0] = new_bx
+                    pose[0, 1] = new_by
+                    pose[0, 2] = new_bz
+                    pose[0, 6] = 1.0
+                    self.target_box.write_root_pose_to_sim(pose, env_ids=env_t)
+                    self.target_box.write_root_velocity_to_sim(
+                        torch.zeros(1, 6, device=self.device), env_ids=env_t
+                    )
 
     # ------------------------------------------------------------------
     # Observations, rewards, termination

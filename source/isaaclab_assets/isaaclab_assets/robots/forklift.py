@@ -90,9 +90,9 @@ FORKLIFT_CFG = ArticulationCfg(
             stiffness=0.0,
             damping=50.0,
         ),
-        # Fork lift — low stiffness so spring forces don't move the chassis.
-        # _apply_action also does write_joint_state_to_sim + syncs the target,
-        # so the net spring force at runtime is always zero.
+        # Fork lift — position-controlled with low stiffness.
+        # _apply_action teleports via write_joint_state_to_sim and syncs the
+        # position target so net spring force is always ~0 at runtime.
         "fork_lift": ImplicitActuatorCfg(
             joint_names_expr=["fork_lift_joint"],
             effort_limit=5000.0,
