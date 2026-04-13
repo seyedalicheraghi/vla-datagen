@@ -1,16 +1,14 @@
 """
 Forklift warehouse environment.
 
-Task: Navigate the forklift through a cluttered warehouse to reach the unique
-orange target box.  All other boxes are tan/cardboard-coloured obstacles.
-The warehouse layout (box positions, target location) is re-randomised each
-episode while guaranteeing a navigable path from the forklift start to the
-target using BFS.
+Physics-based warehouse with a GMA 48×40 compound pallet (real fork-pocket geometry)
+and 4 individual cardboard boxes stacked on top.  The operator drives the forklift,
+inserts the forks into the pallet's lower clearance gap, and lifts the entire load.
 
 This file defines ForkliftEnv and ForkliftEnvCfg as importable classes.
 AppLauncher must be initialised by the caller BEFORE importing this module.
 
-Standalone usage (scene inspection):
+Standalone usage:
     ./isaaclab.sh -p scripts/forklift/forklift_env.py
 """
 
@@ -35,19 +33,157 @@ from isaaclab.utils import configclass
 # Warehouse layout constants
 # ---------------------------------------------------------------------------
 
-_WAREHOUSE_HALF = 8.5   # half-width of warehouse floor  → 17 m × 17 m
-_WALL_T         = 0.3   # wall thickness (m)
-_WALL_H         = 4.0   # wall height (m)
+_WAREHOUSE_HALF = 8.5    # half-width of warehouse floor → 17 m × 17 m
+_WALL_T         = 0.3
+_WALL_H         = 4.0
 
-_GRID_N  = 11           # grid cells per axis (11 × 11)
-_CELL    = 1.5          # metres per cell  → grid spans ±7.5 m inside the walls
+_GRID_N = 9              # grid cells per axis (keeps placements inside walls)
+_CELL   = 1.8            # metres per cell
 
-_N_BOXES  = 48          # pre-spawned common boxes (upper bound per layout)
-_BOX_SIZE = 0.55        # cube side length (m)
-_PARK_Z   = -60.0       # underground parking depth for inactive boxes
+# ---------------------------------------------------------------------------
+# GMA 48×40 pallet geometry  (all dimensions in metres)
+# ---------------------------------------------------------------------------
+#
+#  Side view (approach from +X):
+#
+#   ┌──────────────────────────────────┐  ← top deck  (DECK_H = 25 mm)
+#   │                                  │
+#   │  ┌──────┐  ┌──┐  ┌──────┐       │  ← stringers  (STG_H = 200 mm)
+#   │  │      │  │  │  │      │       │    stringer notch (NOTCH_W = 200 mm)
+#   │  └──────┘  └──┘  └──────┘       │    provides 4-way fork entry
+#   └──────────────────────────────────┘  ← bottom blocks  (BOT_H = 60 mm)
+#
+#   Fork pocket height = STG_H — must be tall enough for ForkliftC tines
+#   Forks must be at tine_z < STG_H + small_tolerance to enter
+#
 
-_COMMON_COLOR = (0.70, 0.58, 0.38)   # cardboard / tan
-_TARGET_COLOR = (0.95, 0.25, 0.05)   # bright orange-red
+_PALLET_L       = 1.219   # 48 in — forklift approaches along this axis
+_PALLET_W       = 1.500   # wider pallet for easier fork entry
+_PALLET_DECK_H  = 0.025   # top deck thickness
+_PALLET_STG_H   = 0.200   # stringer height — tall enough for ForkliftC fork tines
+_PALLET_BOT_H   = 0.060   # bottom blocks — ground clearance for fork entry
+_PALLET_H       = _PALLET_DECK_H + _PALLET_STG_H + _PALLET_BOT_H   # ~0.285 m
+_PALLET_CL      = _PALLET_STG_H                                      # 0.200 m
+_PALLET_STG_W   = 0.090   # stringer width  (~3.5 in)
+_PALLET_NOTCH_W = 0.200   # 4-way fork-entry notch width in each stringer (~8 in)
+_PALLET_MASS    = 25.0    # kg — empty GMA pallet
+_PALLET_COLOR   = (0.62, 0.44, 0.22)   # weathered pine
+
+# ---------------------------------------------------------------------------
+# Cargo boxes  (individual rigid bodies stacked on the pallet)
+# ---------------------------------------------------------------------------
+#
+#  Layout — 2 × 2 grid, single layer:
+#
+#   ┌───────┬───────┐
+#   │  box  │  box  │
+#   ├───────┼───────┤
+#   │  box  │  box  │
+#   └───────┴───────┘
+#   ← 1.219 m pallet →
+
+_BOX_L    = 0.55     # m — fits two along pallet length with margin
+_BOX_W    = 0.45     # m — fits two along pallet width with margin
+_BOX_H    = 0.35     # m
+_BOX_MASS = 15.0     # kg each (4 boxes → 60 kg total load)
+_BOX_COLS = 2        # columns along pallet L  (X-axis)
+_BOX_ROWS = 2        # rows    along pallet W  (Y-axis)
+_N_BOXES  = _BOX_COLS * _BOX_ROWS    # = 4
+
+# Pre-compute each box's LOCAL offset from pallet centre (z = 0 = pallet bottom)
+_BOX_LOCAL_OFFSETS: list[tuple[float, float, float]] = []
+for _col in range(_BOX_COLS):
+    for _row in range(_BOX_ROWS):
+        _x = (_col - (_BOX_COLS - 1) / 2.0) * (_BOX_L + 0.02)
+        _y = (_row - (_BOX_ROWS - 1) / 2.0) * (_BOX_W + 0.02)
+        _z = _PALLET_H + _BOX_H / 2.0
+        _BOX_LOCAL_OFFSETS.append((_x, _y, _z))
+
+_BOX_COLOR  = (0.80, 0.65, 0.45)   # cardboard brown
+_PARK_Z     = -60.0                 # underground parking for inactive units
+
+
+# ---------------------------------------------------------------------------
+# Compound pallet builder  (module-level — called during _setup_scene)
+# ---------------------------------------------------------------------------
+
+def _build_compound_pallet(stage, root_path: str, color=_PALLET_COLOR) -> None:
+    """Create a GMA pallet as a compound USD rigid body at *root_path*.
+
+    Structure (z = 0 is the pallet bottom surface):
+    - 1  top deck  (full L × W footprint)
+    - 3 stringers × 2 half-pieces = 6 pieces (4-way notch at x = 0)
+    - 6 bottom blocks (one directly under each stringer piece)
+
+    Total = 13 child Cube prims under a kinematic Xform root.
+
+    Fork entry — long-side (X approach):
+        The two open lanes between left/centre and centre/right stringers.
+    Fork entry — short-side (Y approach):
+        The 200 mm notch cut in every stringer at x = 0.
+    """
+    from pxr import UsdGeom, UsdPhysics, Gf
+
+    L, W        = _PALLET_L, _PALLET_W
+    top_h       = _PALLET_DECK_H
+    stg_h       = _PALLET_STG_H
+    bot_h       = _PALLET_BOT_H
+    stg_w       = _PALLET_STG_W
+    notch_w     = _PALLET_NOTCH_W
+    stg_half_l  = (L - notch_w) / 2.0    # 0.510 m
+
+    # ── root Xform ───────────────────────────────────────────────────────
+    stage.DefinePrim(root_path, "Xform")
+    root = stage.GetPrimAtPath(root_path)
+
+    # Kinematic rigid body (we move it ourselves via write_root_pose_to_sim)
+    rb_api = UsdPhysics.RigidBodyAPI.Apply(root)
+    rb_api.CreateKinematicEnabledAttr(True)
+    UsdPhysics.MassAPI.Apply(root).CreateMassAttr().Set(_PALLET_MASS)
+
+    col = Gf.Vec3f(*color)
+
+    def _cube(name: str, size: tuple, pos: tuple,
+             collide: bool = False) -> None:
+        """Add a scaled unit-cube child prim.
+
+        When *collide* is True a ``UsdPhysics.CollisionAPI`` is applied so
+        PhysX treats this piece as a solid wall for dynamic bodies (the
+        forklift articulation).  Stringers are left collision-free so the
+        fork tines can enter the pocket between them.
+        """
+        p = f"{root_path}/{name}"
+        cube = UsdGeom.Cube.Define(stage, p)
+        cube.GetSizeAttr().Set(1.0)           # unit cube, scaled below
+        xf = UsdGeom.XformCommonAPI(cube.GetPrim())
+        xf.SetTranslate(Gf.Vec3d(*pos))
+        xf.SetScale(Gf.Vec3f(*size))
+        cube.GetDisplayColorAttr().Set([col])
+        if collide:
+            UsdPhysics.CollisionAPI.Apply(cube.GetPrim())
+
+    # ── Top deck (with collision) ────────────────────────────────────────
+    _cube("top_deck",
+          (L, W, top_h),
+          (0.0, 0.0, bot_h + stg_h + top_h / 2),
+          collide=True)
+
+    # ── 3 stringers × 2 half-pieces  +  6 bottom blocks ─────────────────
+    stg_ys = [-W / 3, 0.0, W / 3]   # left, centre, right stringer Y positions
+    for si, sy in enumerate(stg_ys):
+        for pi, sign in enumerate([-1, 1]):
+            px = sign * (notch_w / 2 + stg_half_l / 2)
+
+            # Stringer piece — NO collision (fork pocket must stay open)
+            _cube(f"stg_{si}_{pi}",
+                  (stg_half_l, stg_w, stg_h),
+                  (px, sy, bot_h + stg_h / 2))
+
+            # Bottom block (with collision)
+            _cube(f"bot_{si}_{pi}",
+                  (stg_half_l, stg_w, bot_h),
+                  (px, sy, bot_h / 2),
+                  collide=True)
 
 
 # ---------------------------------------------------------------------------
@@ -64,11 +200,13 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
     episode_length_s: float = 120.0
 
     observation_space: int = 64
-    action_space: int = 3       # [v_x, omega_z, fork_cmd]
+    action_space: int = 3        # [v_x, omega_z, fork_cmd]
     state_space: int = 0
 
-    wheel_radius: float = 0.3
-    wheel_base: float = 1.15
+    # ForkliftC kinematics (Ackermann, rear-wheel-steered, front-wheel-driven)
+    wheel_radius: float = 0.325
+    wheel_base:   float = 1.65
+    chassis_z_offset: float = 0.0   # ForkliftC USD root at ground level
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +214,7 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
 # ---------------------------------------------------------------------------
 
 class ForkliftEnv(DirectRLEnv):
-    """Warehouse forklift environment with procedurally generated layouts."""
+    """Warehouse forklift with a compound pallet and stacked boxes."""
 
     cfg: ForkliftEnvCfg
 
@@ -85,123 +223,151 @@ class ForkliftEnv(DirectRLEnv):
         self.actions = torch.zeros(self.num_envs, 3, device=self.device)
 
         all_joints = self.forklift.joint_names
-        print(f"[INFO] Forklift joints: {all_joints}")
-        self._left_wheel_idx  = self.forklift.find_joints("rear_left_wheel_joint")[0][0]
-        self._right_wheel_idx = self.forklift.find_joints("rear_right_wheel_joint")[0][0]
-        self._fork_idx        = self.forklift.find_joints("fork_lift_joint")[0][0]
-        print(f"[INFO] left_wheel={self._left_wheel_idx}, "
-              f"right_wheel={self._right_wheel_idx}, fork={self._fork_idx}")
+        print(f"[INFO] ForkliftC joints: {all_joints}")
 
-        self._rng = np.random.default_rng()   # layout RNG (re-seeded per episode)
+        # Drive wheels (all 4 spun cosmetically)
+        self._lf_wheel_idx = self.forklift.find_joints("left_front_wheel_joint")[0][0]
+        self._rf_wheel_idx = self.forklift.find_joints("right_front_wheel_joint")[0][0]
+        self._lb_wheel_idx = self.forklift.find_joints("left_back_wheel_joint")[0][0]
+        self._rb_wheel_idx = self.forklift.find_joints("right_back_wheel_joint")[0][0]
 
-        # Kinematic box-grab state (one entry per env)
-        self._box_grabbed: list[bool]  = [False] * self.num_envs
-        self._grab_fwd:    list[float] = [0.0]   * self.num_envs  # body-frame fwd offset
-        self._grab_lat:    list[float] = [0.0]   * self.num_envs  # body-frame lateral offset
+        # Ackermann steering
+        self._l_steer_idx = self.forklift.find_joints("left_rotator_joint")[0][0]
+        self._r_steer_idx = self.forklift.find_joints("right_rotator_joint")[0][0]
+
+        # Fork lift prismatic joint
+        self._fork_idx = self.forklift.find_joints("lift_joint")[0][0]
+
+        print(f"[INFO] lf={self._lf_wheel_idx} rf={self._rf_wheel_idx} "
+              f"lb={self._lb_wheel_idx} rb={self._rb_wheel_idx} "
+              f"l_steer={self._l_steer_idx} r_steer={self._r_steer_idx} "
+              f"fork={self._fork_idx}")
+
+        self._rng = np.random.default_rng()
+
+        # Authoritative fork position — never read back from physics solver
+        # (collision with carried pallet corrupts the solver's joint state)
+        self._fork_pos = torch.zeros(self.num_envs, device=self.device)
+
+        # Tracked X,Y position — during carry the kinematic load pushes
+        # the forklift via PhysX collision, so we integrate velocity
+        # ourselves and ignore the solver's position.
+        self._carry_pos = torch.zeros(self.num_envs, 2, device=self.device)
+
+        # Per-env grab state
+        self._pallet_grabbed:    list[bool]  = [False] * self.num_envs
+        self._grab_fwd:          list[float] = [0.0]   * self.num_envs
+        self._grab_lat:          list[float] = [0.0]   * self.num_envs
+        self._grab_heading:      list[float] = [0.0]   * self.num_envs
+        # Box offsets relative to pallet when grabbed (body-frame)
+        self._grab_box_offsets: list[list[tuple[float, float, float]]] = \
+            [list(_BOX_LOCAL_OFFSETS) for _ in range(self.num_envs)]
 
     # ------------------------------------------------------------------
-    # Scene setup (called once at init)
+    # Scene setup
     # ------------------------------------------------------------------
 
     def _setup_scene(self):
+        import omni.usd
         from isaaclab_assets.robots.forklift import FORKLIFT_CFG
+        from isaaclab.utils.assets import NVIDIA_NUCLEUS_DIR
+        from isaaclab.sim.utils import bind_visual_material
 
-        # Concrete-grey warehouse floor
-        spawn_ground_plane(
-            prim_path="/World/Ground",
-            cfg=GroundPlaneCfg(color=(0.40, 0.40, 0.38)),
+        # ── Warehouse floor (concrete MDL) ────────────────────────────
+        spawn_ground_plane("/World/Ground",
+                           cfg=GroundPlaneCfg(color=None, size=(200.0, 200.0)))
+        mat_cfg = sim_utils.MdlFileCfg(
+            mdl_path=f"{NVIDIA_NUCLEUS_DIR}/Materials/Base/Concrete/Concrete_Rough.mdl",
+            project_uvw=True,
+            texture_scale=(0.25, 0.25),
         )
+        mat_cfg.func("/World/Ground/material", mat_cfg)
+        bind_visual_material("/World/Ground", "/World/Ground/material")
 
-        # Warm ambient lighting
+        # ── Lighting ─────────────────────────────────────────────────
         sim_utils.DomeLightCfg(
             intensity=3500.0,
             color=(0.95, 0.88, 0.75),
-        ).func("/World/Light", sim_utils.DomeLightCfg(intensity=3500.0, color=(0.95, 0.88, 0.75)))
+        ).func("/World/Light",
+               sim_utils.DomeLightCfg(intensity=3500.0, color=(0.95, 0.88, 0.75)))
 
-        # Four static warehouse walls
+        # ── Warehouse walls ───────────────────────────────────────────
         self._spawn_walls()
 
-        # Articulated forklift
+        # ── Forklift articulation ─────────────────────────────────────
         self.forklift = Articulation(FORKLIFT_CFG)
 
-        # Common boxes: kinematic obstacles, parked underground at start
-        self.common_boxes: list[RigidObject] = []
+        # ── Compound pallet (pre-built in USD, then wrapped by RigidObject)
+        # Build at env_0 BEFORE cloning — the cloner copies it to all envs.
+        stage = omni.usd.get_context().get_stage()
+        _build_compound_pallet(stage, "/World/envs/env_0/Pallet")
+
+        self.pallet = RigidObject(RigidObjectCfg(
+            prim_path="/World/envs/env_.*/Pallet",
+            spawn=None,    # prim already created above
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=(0.0, 0.0, _PARK_Z),
+            ),
+        ))
+
+        # ── 4 cargo boxes (individual physics rigid bodies) ───────────
+        self.boxes: list[RigidObject] = []
         for i in range(_N_BOXES):
             box = RigidObject(RigidObjectCfg(
-                prim_path=f"/World/envs/env_.*/CBox_{i:02d}",
+                prim_path=f"/World/envs/env_.*/CargoBox_{i}",
                 spawn=sim_utils.CuboidCfg(
-                    size=(_BOX_SIZE,) * 3,
+                    size=(_BOX_L, _BOX_W, _BOX_H),
                     rigid_props=sim_utils.RigidBodyPropertiesCfg(
                         kinematic_enabled=True,
+                        linear_damping=0.5,
+                        angular_damping=2.0,
                     ),
-                    mass_props=sim_utils.MassPropertiesCfg(mass=40.0),
+                    mass_props=sim_utils.MassPropertiesCfg(mass=_BOX_MASS),
                     collision_props=sim_utils.CollisionPropertiesCfg(),
                     visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=_COMMON_COLOR,
-                        roughness=0.8,
+                        diffuse_color=_BOX_COLOR,
+                        roughness=0.85,
+                        metallic=0.0,
                     ),
                 ),
                 init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, _PARK_Z)),
             ))
-            self.common_boxes.append(box)
+            self.boxes.append(box)
 
-        # Target box: physics-enabled so the forklift can push / lift it
-        self.target_box = RigidObject(RigidObjectCfg(
-            prim_path="/World/envs/env_.*/TargetBox",
-            spawn=sim_utils.CuboidCfg(
-                size=(_BOX_SIZE,) * 3,
-                rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    kinematic_enabled=False,
-                    linear_damping=0.5,
-                    angular_damping=1.0,
-                ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=5.0),
-                collision_props=sim_utils.CollisionPropertiesCfg(),
-                visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=_TARGET_COLOR,
-                    roughness=0.4,
-                    metallic=0.1,
-                ),
-            ),
-        ))
-
-        # Overhead wide-angle camera centred on the warehouse
+        # ── Driver camera (world-level prim, pose updated every step) ─
         self.camera = Camera(CameraCfg(
-            prim_path="/World/envs/env_.*/Camera",
+            prim_path="/World/envs/env_.*/DriverCam",
             update_period=1 / 30,
-            height=512,
-            width=512,
-            data_types=["rgb", "depth"],
+            height=480,
+            width=640,
+            data_types=["rgb"],
             spawn=sim_utils.PinholeCameraCfg(
-                focal_length=14.0,
+                focal_length=10.0,
                 horizontal_aperture=20.955,
-                clipping_range=(0.1, 120.0),
+                clipping_range=(0.1, 80.0),
             ),
             offset=CameraCfg.OffsetCfg(
-                pos=(0.0, 0.0, 22.0),
-                rot=(0.7071, 0.0, 0.0, 0.7071),   # looking straight down
+                pos=(0.0, 0.0, 0.0),
+                rot=(1.0, 0.0, 0.0, 0.0),
+                convention="world",
             ),
         ))
 
-        # Register everything with the scene
+        # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
         self.scene.articulations["forklift"] = self.forklift
-        for i, box in enumerate(self.common_boxes):
-            self.scene.rigid_objects[f"cbox_{i:02d}"] = box
-        self.scene.rigid_objects["target_box"] = self.target_box
-        self.scene.sensors["camera"]           = self.camera
+        self.scene.rigid_objects["pallet"]   = self.pallet
+        for i, box in enumerate(self.boxes):
+            self.scene.rigid_objects[f"box_{i}"] = box
+        self.scene.sensors["camera"] = self.camera
 
     # ------------------------------------------------------------------
     # Wall helpers
     # ------------------------------------------------------------------
 
     def _spawn_walls(self):
-        """Spawn four kinematic walls enclosing the warehouse."""
-        W = _WAREHOUSE_HALF
-        T = _WALL_T
-        H = _WALL_H
+        W, T, H = _WAREHOUSE_HALF, _WALL_T, _WALL_H
 
-        # Shared visual / physics material
         def _wall_cfg(size):
             return sim_utils.CuboidCfg(
                 size=size,
@@ -209,9 +375,7 @@ class ForkliftEnv(DirectRLEnv):
                 mass_props=sim_utils.MassPropertiesCfg(mass=1e6),
                 collision_props=sim_utils.CollisionPropertiesCfg(),
                 visual_material=sim_utils.PreviewSurfaceCfg(
-                    diffuse_color=(0.78, 0.74, 0.68),
-                    roughness=0.9,
-                ),
+                    diffuse_color=(0.78, 0.74, 0.68), roughness=0.9),
             )
 
         walls = [
@@ -225,49 +389,23 @@ class ForkliftEnv(DirectRLEnv):
             cfg.func(f"/World/{name}", cfg, translation=pos)
 
     # ------------------------------------------------------------------
-    # Procedural layout generator
+    # Procedural layout (target placement)
     # ------------------------------------------------------------------
 
-    def _generate_layout(self) -> tuple[list[tuple[float, float]], tuple[float, float]]:
-        """
-        Build a random warehouse layout on an _GRID_N × _GRID_N grid and
-        guarantee a navigable path from the forklift's starting cell to the
-        target box using BFS.
+    def _generate_layout(self) -> tuple[list, tuple[float, float]]:
+        N, C = _GRID_N, _CELL
 
-        Returns
-        -------
-        box_xy   : list of (x, y) world-frame positions for active common boxes
-        target_xy: (x, y) world-frame position for the unique target box
-        """
-        N = _GRID_N
-        C = _CELL
+        def g2w(r, c):
+            return float((c - (N - 1) / 2.0) * C), float((r - (N - 1) / 2.0) * C)
 
-        # Grid-cell centre → world (x, y)
-        # Cell (row=0, col=0) is the bottom-left corner.
-        # Forklift is at the centre cell (N//2, N//2) = world (0, 0).
-        def g2w(row: int, col: int) -> tuple[float, float]:
-            x = (col - (N - 1) / 2.0) * C
-            y = (row - (N - 1) / 2.0) * C
-            return float(x), float(y)
+        sr, sc = N // 2, N // 2
+        CLEAR = {(sr + dr, sc + dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1)}
 
-        start_r = N // 2   # = 5 for N=11
-        start_c = N // 2
-
-        # 3×3 cells always kept clear so the forklift has room to start
-        CLEAR = {
-            (start_r + dr, start_c + dc)
-            for dr in (-1, 0, 1)
-            for dc in (-1, 0, 1)
-        }
-
-        for _attempt in range(40):
-            grid = np.zeros((N, N), dtype=np.int8)   # 0 = free, 1 = box
-
-            # ── random box clusters ──────────────────────────────────────
-            n_clusters = int(self._rng.integers(4, 8))   # 4–7 clusters
-            for _ in range(n_clusters):
-                ch = int(self._rng.integers(1, 3))        # 1–2 rows tall
-                cw = int(self._rng.integers(2, 5))        # 2–4 cols wide
+        for _ in range(40):
+            grid = np.zeros((N, N), dtype=np.int8)
+            for _ in range(int(self._rng.integers(4, 8))):
+                ch = int(self._rng.integers(1, 3))
+                cw = int(self._rng.integers(2, 5))
                 r0 = int(self._rng.integers(0, N - ch + 1))
                 c0 = int(self._rng.integers(0, N - cw + 1))
                 for r in range(r0, min(r0 + ch, N)):
@@ -275,48 +413,27 @@ class ForkliftEnv(DirectRLEnv):
                         if (r, c) not in CLEAR:
                             grid[r, c] = 1
 
-            # ── BFS from forklift start ──────────────────────────────────
-            visited: set[tuple[int, int]] = set()
-            q: deque[tuple[int, int]] = deque([(start_r, start_c)])
-            visited.add((start_r, start_c))
+            visited: set = set()
+            q: deque = deque([(sr, sc)])
+            visited.add((sr, sc))
             while q:
                 r, c = q.popleft()
                 for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
                     nr, nc = r + dr, c + dc
-                    if (0 <= nr < N and 0 <= nc < N
-                            and grid[nr, nc] == 0
-                            and (nr, nc) not in visited):
+                    if 0 <= nr < N and 0 <= nc < N and grid[nr, nc] == 0 \
+                            and (nr, nc) not in visited:
                         visited.add((nr, nc))
                         q.append((nr, nc))
 
-            # ── candidate cells for the target box ───────────────────────
-            # Must be reachable, outside the clear zone, and at least 4
-            # Manhattan-distance steps away so it's not trivially close.
-            candidates = [
-                (r, c) for r, c in visited
-                if (r, c) not in CLEAR
-                and abs(r - start_r) + abs(c - start_c) >= 4
-            ]
+            candidates = [(r, c) for r, c in visited
+                          if (r, c) not in CLEAR
+                          and abs(r - sr) + abs(c - sc) >= 4]
             if not candidates:
-                continue   # layout too dense — retry
+                continue
 
-            # Pick target cell randomly
-            idx = int(self._rng.integers(0, len(candidates)))
-            t_r, t_c = candidates[idx]
-            grid[t_r, t_c] = 0   # ensure target cell itself is free
+            t_r, t_c = candidates[int(self._rng.integers(0, len(candidates)))]
+            return [], g2w(t_r, t_c)
 
-            # ── collect box world positions ──────────────────────────────
-            box_xy = [
-                g2w(r, c)
-                for r in range(N)
-                for c in range(N)
-                if grid[r, c] == 1
-            ]
-            target_xy = g2w(t_r, t_c)
-            return box_xy, target_xy
-
-        # Fallback: clear warehouse, target in far corner
-        print("[WARN] Layout generator fallback — placing target at far corner.")
         return [], g2w(N - 1, N - 1)
 
     # ------------------------------------------------------------------
@@ -327,7 +444,7 @@ class ForkliftEnv(DirectRLEnv):
         super()._reset_idx(env_ids)
         origins = self.scene.env_origins[env_ids]
 
-        # Reset forklift to its default pose at the centre of the warehouse
+        # Reset forklift
         default_root = self.forklift.data.default_root_state[env_ids].clone()
         default_root[:, :3] += origins
         self.forklift.write_root_pose_to_sim(default_root[:, :7], env_ids=env_ids)
@@ -336,52 +453,52 @@ class ForkliftEnv(DirectRLEnv):
         dj_vel = self.forklift.data.default_joint_vel[env_ids].clone()
         self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
-        # Clear grab state for every resetting env
+        # Clear grab state and reset authoritative fork position
+        self._fork_pos[env_ids] = 0.0
         for env_id in env_ids.tolist():
-            self._box_grabbed[env_id] = False
+            self._pallet_grabbed[env_id] = False
+            self._grab_heading[env_id] = 0.0
+            self._grab_box_offsets[env_id] = list(_BOX_LOCAL_OFFSETS)
 
-        # Per-env layout generation (runs once per reset; num_envs=1 typical)
+        # Per-env layout + object placement
         for i, env_id in enumerate(env_ids.tolist()):
             origin = origins[i].cpu().numpy()
             ox, oy = float(origin[0]), float(origin[1])
+            _, target_xy = self._generate_layout()
+            tx, ty = target_xy[0] + ox, target_xy[1] + oy
 
-            box_xy, target_xy = self._generate_layout()
+            env_t = torch.tensor([env_id], device=self.device)
 
-            # ── place active common boxes ────────────────────────────────
-            env_id_t = torch.tensor([env_id], device=self.device)
-            for j, (bx, by) in enumerate(box_xy[:_N_BOXES]):
-                pose = torch.zeros(1, 7, device=self.device)
-                pose[0, 0] = bx + ox
-                pose[0, 1] = by + oy
-                pose[0, 2] = _BOX_SIZE / 2   # sit on the floor
-                pose[0, 6] = 1.0             # quaternion w
-                self.common_boxes[j].write_root_pose_to_sim(pose, env_ids=env_id_t)
+            # ── Place pallet ──────────────────────────────────────────
+            pal_pose = torch.zeros(1, 7, device=self.device)
+            pal_pose[0, 0] = tx
+            pal_pose[0, 1] = ty
+            pal_pose[0, 2] = _PALLET_H / 2     # pallet centre height (half its height)
+            pal_pose[0, 6] = 1.0                # w=1 (no rotation)
+            self.pallet.write_root_pose_to_sim(pal_pose, env_ids=env_t)
 
-            # ── park unused common boxes underground ─────────────────────
-            for j in range(len(box_xy), _N_BOXES):
-                pose = torch.zeros(1, 7, device=self.device)
-                pose[0, 0] = ox
-                pose[0, 1] = oy
-                pose[0, 2] = _PARK_Z
-                pose[0, 6] = 1.0
-                self.common_boxes[j].write_root_pose_to_sim(pose, env_ids=env_id_t)
+            # ── Place cargo boxes on pallet ────────────────────────────
+            for bi, (lx, ly, lz) in enumerate(_BOX_LOCAL_OFFSETS):
+                # Small random nudge for realism (±1 cm)
+                jitter_x = float(self._rng.uniform(-0.01, 0.01))
+                jitter_y = float(self._rng.uniform(-0.01, 0.01))
+                bx = tx + lx + jitter_x
+                by = ty + ly + jitter_y
+                bz = lz   # z is relative to pallet bottom which is at z=0
 
-            # ── place target box ─────────────────────────────────────────
-            tpose = torch.zeros(1, 7, device=self.device)
-            tpose[0, 0] = target_xy[0] + ox
-            tpose[0, 1] = target_xy[1] + oy
-            tpose[0, 2] = _BOX_SIZE / 2
-            tpose[0, 6] = 1.0
-            self.target_box.write_root_pose_to_sim(tpose, env_ids=env_id_t)
-            self.target_box.write_root_velocity_to_sim(
-                torch.zeros(1, 6, device=self.device), env_ids=env_id_t
-            )
+                bp = torch.zeros(1, 7, device=self.device)
+                bp[0, 0], bp[0, 1], bp[0, 2], bp[0, 6] = bx, by, bz, 1.0
+                self.boxes[bi].write_root_pose_to_sim(bp, env_ids=env_t)
+                self.boxes[bi].write_root_velocity_to_sim(
+                    torch.zeros(1, 6, device=self.device), env_ids=env_t)
 
-            n_active = min(len(box_xy), _N_BOXES)
-            print(
-                f"[INFO] Env {env_id}: {n_active} obstacle boxes placed, "
-                f"target at ({target_xy[0]:.1f}, {target_xy[1]:.1f}) world"
-            )
+                # Record grab offsets (with jitter baked in)
+                self._grab_box_offsets[env_id][bi] = (lx + jitter_x, ly + jitter_y, lz)
+
+            print(f"[INFO] Env {env_id}: pallet at ({target_xy[0]:.1f}, {target_xy[1]:.1f})")
+
+        # Snap driver camera immediately
+        self._update_driver_cam()
 
     # ------------------------------------------------------------------
     # Actions
@@ -393,145 +510,270 @@ class ForkliftEnv(DirectRLEnv):
     def _apply_action(self):
         v_x      = self.actions[:, 0]
         omega_z  = self.actions[:, 1]
-        fork_cmd = self.actions[:, 2]   # +1 raise, -1 lower, 0 hold
+        fork_cmd = self.actions[:, 2]
 
-        # ── base: integrate heading directly, then drive root velocity ───────
-        # Writing omega_z to velocity AND immediately overwriting the pose with
-        # the old heading causes the rotation to be lost.  Instead, advance the
-        # heading by omega_z * sim_dt ourselves and bake it into the pose write.
-        heading = self.forklift.data.heading_w
-        dt = self.cfg.sim.dt                     # one physics sub-step
+        # ── Heading + root velocity ───────────────────────────────────
+        heading     = self.forklift.data.heading_w
+        dt          = self.cfg.sim.dt
         new_heading = heading + omega_z * dt
 
         vel = torch.zeros(self.num_envs, 6, device=self.device)
         vel[:, 0] = v_x * torch.cos(new_heading)
         vel[:, 1] = v_x * torch.sin(new_heading)
-        # angular velocity left at 0 — heading is managed by the pose write below
         self.forklift.write_root_velocity_to_sim(vel)
 
-        # ── constrain to ground plane with updated heading ─────────────────
-        # chassis centre is 0.6 m above ground (wheel radius 0.3 + joint offset 0.3)
+        # ── Constrain to ground plane ─────────────────────────────────
         pose = self.forklift.data.root_state_w[:, :7].clone()
-        ground_z = self.scene.env_origins[:, 2] + 0.6   # chassis centre height
+
+        # During carry the kinematic load's collision shapes push the
+        # forklift via PhysX.  Ignore the solver's X,Y and integrate
+        # velocity ourselves so the forklift only moves when commanded.
+        grabbed_mask = torch.tensor(self._pallet_grabbed, device=self.device)
+        if grabbed_mask.any():
+            new_x = self._carry_pos[:, 0] + vel[:, 0] * dt
+            new_y = self._carry_pos[:, 1] + vel[:, 1] * dt
+            pose[:, 0] = torch.where(grabbed_mask, new_x, pose[:, 0])
+            pose[:, 1] = torch.where(grabbed_mask, new_y, pose[:, 1])
+        # Sync tracked position (solver value when free, tracked when carrying)
+        self._carry_pos[:, 0] = pose[:, 0]
+        self._carry_pos[:, 1] = pose[:, 1]
+
+        ground_z = self.scene.env_origins[:, 2] + self.cfg.chassis_z_offset
         pose[:, 2] = ground_z
         half_yaw = new_heading / 2.0
-        pose[:, 3] = torch.cos(half_yaw)   # qw
-        pose[:, 4] = 0.0                   # qx  (zero roll)
-        pose[:, 5] = 0.0                   # qy  (zero pitch)
-        pose[:, 6] = torch.sin(half_yaw)   # qz
+        pose[:, 3] = torch.cos(half_yaw)
+        pose[:, 4] = 0.0
+        pose[:, 5] = 0.0
+        pose[:, 6] = torch.sin(half_yaw)
         self.forklift.write_root_pose_to_sim(pose)
 
-        # Cosmetic wheel spin
+        # ── Cosmetic wheel spin + steering ───────────────────────────
         R = self.cfg.wheel_radius
         L = self.cfg.wheel_base
-        omega_left  = (v_x - omega_z * L / 2.0) / R
-        omega_right = (v_x + omega_z * L / 2.0) / R
+        omega_wheel = v_x / R
         jvt = self.forklift.data.joint_vel_target.clone()
-        jvt[:, self._left_wheel_idx]  = omega_left
-        jvt[:, self._right_wheel_idx] = omega_right
+        jvt[:, self._lf_wheel_idx] = omega_wheel
+        jvt[:, self._rf_wheel_idx] = omega_wheel
+        jvt[:, self._lb_wheel_idx] = omega_wheel
+        jvt[:, self._rb_wheel_idx] = omega_wheel
         self.forklift.set_joint_velocity_target(jvt)
 
-        # ── fork: direct state write — bypasses actuator spring forces ───
-        # Lower limit 0.0 m (tines at ground level); upper 1.5 m.
-        fork_pos   = self.forklift.data.joint_pos[:, self._fork_idx].clone()
-        fork_delta = fork_cmd * 0.04   # 0.04 m/step at 30 Hz → 1.2 m/s
-        new_fork   = torch.clamp(fork_pos + fork_delta, -0.3, 1.5)
+        speed = v_x.abs().clamp(min=0.05)
+        steer_angle = torch.atan2(L * omega_z, speed).clamp(-0.785, 0.785)
 
-        # Teleport the fork joint directly (no actuator spring force on chassis)
+        # Visual rear-wheel angle: steer_angle flips sign between forward
+        # and backward because omega_z flips, but the physical wheel angle
+        # should stay the same for a given steering input.  Multiply by
+        # sign(v_x) so the visual is consistent regardless of direction.
+        fwd_sign = torch.sign(v_x)
+        fwd_sign[fwd_sign == 0] = 1.0          # default to forward when stopped
+        visual_steer = -steer_angle * fwd_sign  # negate for rear-steer convention
+
+        # ── Fork — direct state write ─────────────────────────────────
+        # Use authoritative fork state (not physics solver, which gets
+        # corrupted by collision with the carried kinematic pallet)
+        fork_pos   = self._fork_pos.clone()
+        fork_delta = fork_cmd * 0.04
+        new_fork   = torch.clamp(fork_pos + fork_delta, -0.3, 1.5)
+        self._fork_pos = new_fork
+
         all_jpos = self.forklift.data.joint_pos.clone()
         all_jvel = self.forklift.data.joint_vel.clone()
         all_jpos[:, self._fork_idx] = new_fork
         all_jvel[:, self._fork_idx] = 0.0
+        # Force steering state ONLY during carry — collision with the
+        # kinematic pallet/boxes corrupts the solver's steering values.
+        # When not carrying, the actuator drives steering normally.
+        for i in range(self.num_envs):
+            if self._pallet_grabbed[i]:
+                all_jpos[i, self._l_steer_idx] = visual_steer[i].item()
+                all_jpos[i, self._r_steer_idx] = visual_steer[i].item()
+                all_jvel[i, self._l_steer_idx] = 0.0
+                all_jvel[i, self._r_steer_idx] = 0.0
         self.forklift.write_joint_state_to_sim(all_jpos, all_jvel)
 
-        # Sync position target → actuator spring force stays at zero
         jpt = self.forklift.data.joint_pos_target.clone()
-        jpt[:, self._fork_idx] = new_fork
+        jpt[:, self._l_steer_idx] = visual_steer
+        jpt[:, self._r_steer_idx] = visual_steer
+        jpt[:, self._fork_idx]    = new_fork
         self.forklift.set_joint_position_target(jpt)
 
-        # ── kinematic box grab ───────────────────────────────────────────
-        self._update_box_grab(fork_cmd, new_fork)
+        # ── Pallet + box grab / carry ─────────────────────────────────
+        # Use pre-raise fork position for grab detection so the raise
+        # command doesn't push tine_z past the pocket threshold in one step.
+        self._update_pallet_grab(fork_cmd, new_fork, fork_pos)
+
+        # ── Driver camera ─────────────────────────────────────────────
+        self._update_driver_cam()
 
     # ------------------------------------------------------------------
-    # Kinematic grab
+    # Pallet grab & carry
     # ------------------------------------------------------------------
 
-    def _update_box_grab(self, fork_cmd: torch.Tensor, fork_joint: torch.Tensor):
-        """
-        Detect when the forklift's forks are positioned under the target box
-        and kinematically attach / detach it.
+    def _update_pallet_grab(self, fork_cmd: torch.Tensor, fork_joint: torch.Tensor,
+                            fork_joint_prev: torch.Tensor):
+        """Detect fork insertion into the pallet pocket and carry the load.
 
-        Grab triggers when ALL of:
-          - Box is 0.5–2.2 m forward of chassis in the forklift's body frame
-          - Box is within ±0.5 m laterally
-          - fork_cmd > 0  (operator is pressing raise)
-          - Box is within 0.5 m vertically of where it would sit on the tines
+        Grab conditions (all must be satisfied):
+          - Pallet is 0.3–(PALLET_L + 0.5) m forward of the forklift centre
+          - Pallet is within ±(PALLET_W/2 + 0.15) m laterally
+          - fork_cmd > 0  (operator pressing raise)
+          - pre-raise tine_z < PALLET_CL + 0.15  (forks were inside the fork pocket)
 
-        Carry: each step the box position is set to follow the tine position.
-        Release: when fork_joint drops below 0.03 m (forks near the floor).
+        While grabbed:
+          - Pallet pose follows the forklift kinematically
+          - All boxes follow the pallet (kinematic carry)
+
+        Release:
+          - fork_joint drops below -0.25 (forks near floor)
         """
-        fl_pos     = self.forklift.data.root_pos_w   # (N, 3)
-        fl_heading = self.forklift.data.heading_w    # (N,)
-        box_pos    = self.target_box.data.root_pos_w # (N, 3)
+        fl_pos     = self.forklift.data.root_pos_w    # (N, 3)
+        fl_heading = self.forklift.data.heading_w     # (N,)
+        pal_pos    = self.pallet.data.root_pos_w      # (N, 3)
 
         cos_h = torch.cos(fl_heading)
         sin_h = torch.sin(fl_heading)
 
         for i in range(self.num_envs):
             j       = fork_joint[i].item()
+            j_prev  = fork_joint_prev[i].item()
             cmd     = fork_cmd[i].item()
             cos_i   = cos_h[i].item()
             sin_i   = sin_h[i].item()
             fl_x    = fl_pos[i, 0].item()
             fl_y    = fl_pos[i, 1].item()
-            box_x   = box_pos[i, 0].item()
-            box_y   = box_pos[i, 1].item()
-            box_z   = box_pos[i, 2].item()
+            pl_x    = pal_pos[i, 0].item()
+            pl_y    = pal_pos[i, 1].item()
 
-            # Box in forklift body frame
-            dx  = box_x - fl_x
-            dy  = box_y - fl_y
-            fwd = dx * cos_i + dy * sin_i          # positive = in front
-            lat = abs(-dx * sin_i + dy * cos_i)    # unsigned lateral
+            # Pallet centre in forklift body frame
+            dx  = pl_x - fl_x
+            dy  = pl_y - fl_y
+            fwd = dx * cos_i + dy * sin_i
+            lat = abs(-dx * sin_i + dy * cos_i)
 
-            # Tine centre height: chassis(0.6) + mast_joint(-0.3) + fork_lift_origin(0.15)
-            #                     + fork_carriage_to_tine(-0.125) = 0.325 + j
-            tine_z = j + 0.325
+            # Use PRE-RAISE tine height for grab detection so pressing
+            # raise doesn't jump past the pocket threshold in one step
+            tine_z_prev = j_prev + 0.325
 
             env_t = torch.tensor([i], device=self.device)
 
-            if not self._box_grabbed[i]:
-                # ── try to grab ──────────────────────────────────────────
-                in_zone    = 0.5 < fwd < 2.2 and lat < 0.5
-                height_ok  = abs(box_z - (tine_z + _BOX_SIZE / 2)) < 0.5
-                if in_zone and height_ok and cmd > 0.05:
-                    self._box_grabbed[i] = True
+            if not self._pallet_grabbed[i]:
+                # ── Try to grab ───────────────────────────────────────
+                in_zone  = -0.2 < fwd < (_PALLET_L + 1.0) \
+                           and lat < (_PALLET_W / 2 + 0.3)
+                forks_in = tine_z_prev < _PALLET_CL + 0.15   # forks were inside pocket
+                if in_zone and forks_in and cmd > 0.01:
+                    self._pallet_grabbed[i] = True
                     self._grab_fwd[i] = fwd
-                    self._grab_lat[i] = -dx * sin_i + dy * cos_i  # signed
-                    print(f"[GRAB] env={i}  fork={j:.3f}m  "
-                          f"fwd={fwd:.2f}m  lat={lat:.2f}m")
+                    self._grab_lat[i] = -dx * sin_i + dy * cos_i
+                    self._grab_heading[i] = fl_heading[i].item()
+                    print(f"[GRAB] env={i}  tine_z={tine_z_prev:.3f} m  "
+                          f"fwd={fwd:.2f} m  lat={lat:.2f} m")
             else:
-                # ── release when forks reach the floor ───────────────────
-                if j < 0.03:
-                    self._box_grabbed[i] = False
-                    print(f"[DROP] env={i}  fork={j:.3f}m")
+                # ── Release ───────────────────────────────────────────
+                tine_z = j + 0.325   # current tine height for carry positioning
+                if j < -0.25:
+                    self._pallet_grabbed[i] = False
+                    print(f"[DROP] env={i}  tine_z={tine_z:.3f} m")
                 else:
-                    # ── carry: move box with the forks ───────────────────
+                    # ── Carry — pallet follows forklift ───────────────
                     fwd_i = self._grab_fwd[i]
                     lat_i = self._grab_lat[i]
-                    new_bx = fl_x + fwd_i * cos_i - lat_i * sin_i
-                    new_by = fl_y + fwd_i * sin_i + lat_i * cos_i
-                    new_bz = tine_z + _BOX_SIZE / 2
+                    new_px = fl_x + fwd_i * cos_i - lat_i * sin_i
+                    new_py = fl_y + fwd_i * sin_i + lat_i * cos_i
 
-                    pose = torch.zeros(1, 7, device=self.device)
-                    pose[0, 0] = new_bx
-                    pose[0, 1] = new_by
-                    pose[0, 2] = new_bz
-                    pose[0, 6] = 1.0
-                    self.target_box.write_root_pose_to_sim(pose, env_ids=env_t)
-                    self.target_box.write_root_velocity_to_sim(
-                        torch.zeros(1, 6, device=self.device), env_ids=env_t
-                    )
+                    # Pallet Z: tine_z lifts the bottom of the stringer;
+                    # pallet bottom = tine_z - PALLET_CL (clamped to ≥ 0)
+                    pallet_bottom = max(tine_z - _PALLET_CL, 0.0)
+                    new_pz = pallet_bottom + _PALLET_H / 2   # pallet centre z
+
+                    # Heading delta since grab — rotate pallet & boxes
+                    # by exactly how much the forklift has turned
+                    import math
+                    delta_h = fl_heading[i].item() - self._grab_heading[i]
+                    cos_d = math.cos(delta_h)
+                    sin_d = math.sin(delta_h)
+
+                    # Pallet orientation: preserve original reset yaw
+                    # (qz=1 at reset) and add the heading delta on top.
+                    # Original yaw = π, so carried yaw = π + delta_h.
+                    carried_yaw = math.pi + delta_h
+                    half_yaw = carried_yaw / 2.0
+                    qw = math.cos(half_yaw)
+                    qz_val = math.sin(half_yaw)
+
+                    pal_pose = torch.zeros(1, 7, device=self.device)
+                    pal_pose[0, 0] = new_px
+                    pal_pose[0, 1] = new_py
+                    pal_pose[0, 2] = new_pz
+                    pal_pose[0, 3] = qw
+                    pal_pose[0, 6] = qz_val
+                    self.pallet.write_root_pose_to_sim(pal_pose, env_ids=env_t)
+
+                    # ── Carry boxes kinematically with pallet ─────────
+                    # Rotate local offsets by heading delta so boxes
+                    # stay fixed on the forks during turns
+                    for bi, (lx, ly, lz_local) in enumerate(
+                            self._grab_box_offsets[i]):
+                        bx = new_px + lx * cos_d - ly * sin_d
+                        by = new_py + lx * sin_d + ly * cos_d
+                        bz = pallet_bottom + lz_local
+
+                        bp = torch.zeros(1, 7, device=self.device)
+                        bp[0, 0] = bx
+                        bp[0, 1] = by
+                        bp[0, 2] = bz
+                        bp[0, 3] = qw
+                        bp[0, 6] = qz_val
+                        self.boxes[bi].write_root_pose_to_sim(bp, env_ids=env_t)
+                        self.boxes[bi].write_root_velocity_to_sim(
+                            torch.zeros(1, 6, device=self.device), env_ids=env_t)
+
+    # ------------------------------------------------------------------
+    # Driver camera
+    # ------------------------------------------------------------------
+
+    def _update_driver_cam(self):
+        """First-person cabin camera — positioned at the operator's eye level
+        inside the forklift cabin, looking forward toward the forks and road.
+
+        ForkliftC wheelbase is 1.65 m. The operator seat is roughly at the
+        centre of the vehicle. Eye height for a seated operator ~1.6 m.
+        Slight downward pitch so forks and ground ahead are visible.
+        """
+        fl_pos  = self.forklift.data.root_pos_w   # (N, 3)
+        heading = self.forklift.data.heading_w     # (N,)
+
+        CAM_FORWARD =  0.2   # slightly forward of centre (operator seat position)
+        CAM_UP      =  1.6   # seated eye height
+        PITCH       = -0.10  # radians — tilted further toward the floor
+
+        cos_h = torch.cos(heading)
+        sin_h = torch.sin(heading)
+
+        cam_x = fl_pos[:, 0] + CAM_FORWARD * cos_h
+        cam_y = fl_pos[:, 1] + CAM_FORWARD * sin_h
+        cam_z = fl_pos[:, 2] + CAM_UP
+
+        positions = torch.stack([cam_x, cam_y, cam_z], dim=1)
+
+        # Combined yaw + pitch-down quaternion
+        import math
+        cP = math.cos(PITCH / 2)
+        sP = math.sin(PITCH / 2)
+        half_yaw = heading / 2.0
+        cH = torch.cos(half_yaw)
+        sH = torch.sin(half_yaw)
+        zeros = torch.zeros_like(cH)
+
+        orientations = torch.stack([
+             cH * cP,    #  w
+             sH * sP,    #  x
+            -cH * sP,    #  y  (negative → tilt downward)
+             sH * cP,    #  z
+        ], dim=1)        # (N, 4) as (w, x, y, z)
+
+        self.camera.set_world_poses(positions, orientations, convention="world")
 
     # ------------------------------------------------------------------
     # Observations, rewards, termination
@@ -540,30 +782,31 @@ class ForkliftEnv(DirectRLEnv):
     def _get_observations(self):
         return {
             "rgb":        self.camera.data.output["rgb"],
-            "depth":      self.camera.data.output["depth"],
-            "target_pos": self.target_box.data.root_pos_w,
-            "fork_pos":   self.forklift.data.joint_pos[
-                              :, self._fork_idx : self._fork_idx + 1
-                          ],
+            "pallet_pos": self.pallet.data.root_pos_w,
+            "fork_pos":   self._fork_pos.unsqueeze(1),
+            "grabbed":    torch.tensor(
+                              [[float(self._pallet_grabbed[i])]
+                               for i in range(self.num_envs)],
+                              device=self.device),
         }
 
     def _get_rewards(self) -> torch.Tensor:
         forklift_xy = self.forklift.data.root_pos_w[:, :2]
-        target_xy   = self.target_box.data.root_pos_w[:, :2]
-        dist = torch.norm(forklift_xy - target_xy, dim=1)
+        pallet_xy   = self.pallet.data.root_pos_w[:, :2]
+        dist        = torch.norm(forklift_xy - pallet_xy, dim=1)
         return torch.exp(-dist)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         forklift_xy = self.forklift.data.root_pos_w[:, :2]
-        target_xy   = self.target_box.data.root_pos_w[:, :2]
-        dist = torch.norm(forklift_xy - target_xy, dim=1)
-        success = dist < 0.6
-        timeout = self.episode_length_buf >= self.max_episode_length
+        pallet_xy   = self.pallet.data.root_pos_w[:, :2]
+        dist        = torch.norm(forklift_xy - pallet_xy, dim=1)
+        success     = dist < 0.6
+        timeout     = self.episode_length_buf >= self.max_episode_length
         return success, timeout
 
 
 # ---------------------------------------------------------------------------
-# Standalone entry point (scene inspection only)
+# Standalone entry point
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -580,7 +823,7 @@ if __name__ == "__main__":
 
     env = ForkliftEnv(ForkliftEnvCfg())
     env.reset()
-    print("[INFO] Warehouse environment loaded. Press Ctrl+C to exit.")
+    print("[INFO] Warehouse loaded. Press Ctrl+C to exit.")
 
     while simulation_app.is_running():
         env.step(torch.zeros(1, 3))

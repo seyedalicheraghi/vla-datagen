@@ -1,17 +1,15 @@
 """
-Teleoperate the forklift using a PS4/PS5 controller.
+Teleoperate the forklift using the keyboard.
 
 Controls:
-    Left stick up/down     → drive forward / backward
-    Right stick left/right → turn left / right
-    R2 (right trigger)     → raise forks
-    L2 (left trigger)      → lower forks
-    X button (A on XInput) → reset episode
-
-    Keyboard fallback (if triggers don't respond):
-    E key                  → raise forks
-    Q key                  → lower forks
-    R key                  → reset episode
+    W / Arrow Up       → drive forward
+    S / Arrow Down     → drive backward
+    A / Arrow Left     → turn left
+    D / Arrow Right    → turn right
+    E                  → raise forks
+    Q                  → lower forks
+    R                  → reset episode
+    Escape / Ctrl+C    → quit
 
 Usage:
     ./isaaclab.sh -p scripts/forklift/teleop_forklift.py
@@ -24,7 +22,7 @@ Usage:
 import argparse
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="Forklift teleoperation with PS4 controller.")
+parser = argparse.ArgumentParser(description="Forklift keyboard teleoperation.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.enable_cameras = True
@@ -36,154 +34,200 @@ simulation_app = app_launcher.app
 # Step 2: Import everything else after Isaac Sim is running
 # ---------------------------------------------------------------------------
 
+import math
 import sys
 import os
 import torch
 import carb.input
-
-from isaaclab.devices import Se2Gamepad, Se2GamepadCfg
+import omni.appwindow
 
 sys.path.insert(0, os.path.dirname(__file__))
 from forklift_env import ForkliftEnv, ForkliftEnvCfg
+
+# Optional: OpenCV for camera feed preview (requires GUI build, not headless)
+_HAS_CV2 = False
+try:
+    import cv2
+    import numpy as np
+    # Probe for GUI support before committing
+    _test = np.zeros((1, 1, 3), dtype=np.uint8)
+    cv2.imshow("_probe", _test)
+    cv2.destroyWindow("_probe")
+    _HAS_CV2 = True
+except Exception:
+    pass  # headless build or no display — viewport window is used instead
+
+
+# ---------------------------------------------------------------------------
+# Keyboard state
+# ---------------------------------------------------------------------------
+
+_keys = {
+    "forward":  False,
+    "backward": False,
+    "left":     False,
+    "right":    False,
+    "fork_up":  False,
+    "fork_down": False,
+    "reset":    False,
+}
+
+def _make_keyboard_handler():
+    _input = carb.input.acquire_input_interface()
+    _keyboard = omni.appwindow.get_default_app_window().get_keyboard()
+
+    def _on_key(event: carb.input.KeyboardEvent, *args):
+        pressed  = (event.type == carb.input.KeyboardEventType.KEY_PRESS)
+        released = (event.type == carb.input.KeyboardEventType.KEY_RELEASE)
+        held     = pressed  # KEY_PRESS fires on first press; KEY_REPEAT fires while held
+
+        k = event.input
+        KI = carb.input.KeyboardInput
+
+        if k in (KI.W, KI.UP):
+            _keys["forward"]  = not released
+        elif k in (KI.S, KI.DOWN):
+            _keys["backward"] = not released
+        elif k in (KI.A, KI.LEFT):
+            _keys["left"]     = not released
+        elif k in (KI.D, KI.RIGHT):
+            _keys["right"]    = not released
+        elif k == KI.E:
+            _keys["fork_up"]  = not released
+        elif k == KI.Q:
+            _keys["fork_down"] = not released
+        elif k == KI.R and pressed:
+            _keys["reset"] = True
+        return True
+
+    sub = _input.subscribe_to_keyboard_events(_keyboard, _on_key)
+    return _input, _keyboard, sub
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
+def _switch_viewport_to_sensor_cam():
+    """Switch the Isaac Sim viewport to display the forklift driver camera sensor."""
+    try:
+        import omni.kit.viewport.utility as vp_utils
+        viewport = vp_utils.get_active_viewport()
+        if viewport is not None:
+            cam_path = "/World/envs/env_0/DriverCam"
+            viewport.camera_path = cam_path
+            print(f"[INFO] Viewport switched to sensor camera: {cam_path}")
+        else:
+            print("[WARN] No active viewport found — GUI may not be running.")
+    except Exception as e:
+        print(f"[WARN] Could not switch viewport camera: {e}")
+
+
 def main():
     env = ForkliftEnv(ForkliftEnvCfg())
 
-    gamepad = Se2Gamepad(
-        Se2GamepadCfg(
-            v_x_sensitivity=2.0,
-            v_y_sensitivity=0.0,
-            omega_z_sensitivity=1.5,
-            sim_device=str(env.device),
-        )
-    )
-
-    # -----------------------------------------------------------------------
-    # Fork state — two sources: gamepad triggers + keyboard arrow keys
-    # -----------------------------------------------------------------------
-    fork_trigger = {"up": 0.0, "down": 0.0}   # analog trigger values
-    fork_key     = {"up": False, "down": False} # keyboard held state
-    reset_requested = {"flag": False}
-
-    # Direct gamepad subscription to read analog trigger values continuously.
-    # Prints unknown inputs for the first 5 presses so we can spot wrong mappings.
-    _seen_inputs = set()
-    _known = {carb.input.GamepadInput.RIGHT_TRIGGER, carb.input.GamepadInput.LEFT_TRIGGER}
-
-    def _on_gamepad_event(event: carb.input.GamepadEvent, *args):
-        val = float(event.value)
-        inp = event.input
-        if inp == carb.input.GamepadInput.RIGHT_TRIGGER:
-            fork_trigger["up"] = val
-        elif event.input == carb.input.GamepadInput.LEFT_TRIGGER:
-            fork_trigger["down"] = val
-        # Debug: print any unfamiliar input that has a non-zero value
-        elif val > 0.1 and inp not in _seen_inputs:
-            print(f"  [GAMEPAD DEBUG] input={inp}  value={val:.3f}  "
-                  f"(not mapped — check trigger binding)")
-            _seen_inputs.add(inp)
-        return True
-
-    _input_iface = gamepad._input
-    _gamepad_dev = gamepad._gamepad
-    _fork_sub = _input_iface.subscribe_to_gamepad_events(_gamepad_dev, _on_gamepad_event)
-
-    # Keyboard subscription for fork (arrow keys) and reset (R)
-    import omni.appwindow
-    _keyboard = omni.appwindow.get_default_app_window().get_keyboard()
-
-    def _on_keyboard_event(event: carb.input.KeyboardEvent, *args):
-        pressed  = (event.type == carb.input.KeyboardEventType.KEY_PRESS)
-        released = (event.type == carb.input.KeyboardEventType.KEY_RELEASE)
-        if event.input == carb.input.KeyboardInput.E:
-            fork_key["up"]   = pressed if pressed else (not released and fork_key["up"])
-        elif event.input == carb.input.KeyboardInput.Q:
-            fork_key["down"] = pressed if pressed else (not released and fork_key["down"])
-        elif event.input == carb.input.KeyboardInput.R and pressed:
-            reset_requested["flag"] = True
-        return True
-
-    _keyboard_sub = _input_iface.subscribe_to_keyboard_events(_keyboard, _on_keyboard_event)
-
-    gamepad.add_callback(carb.input.GamepadInput.A, lambda: reset_requested.update({"flag": True}))
+    _input, _keyboard, _kb_sub = _make_keyboard_handler()
 
     obs, _ = env.reset()
-    gamepad.reset()
+
+    # Switch the Isaac Sim viewport to show what the front camera sees
+    _switch_viewport_to_sensor_cam()
 
     print("\n" + "=" * 50)
-    print("Forklift Teleoperation Ready")
+    print("Forklift Keyboard Teleoperation")
     print("=" * 50)
-    print("  Left stick       → drive forward / backward")
-    print("  Right stick      → turn left / right")
-    print("  R2               → raise forks  (or E key)")
-    print("  L2               → lower forks  (or Q key)")
-    print("  X / R key        → reset episode")
-    print("  Ctrl+C           → quit")
-    print("=" * 50)
-    print("  [If R2/L2 do nothing, use E/Q keys instead]")
-    print("  [Any unmapped gamepad input will be printed for debugging]")
+    print("  W / Arrow Up    → forward")
+    print("  S / Arrow Down  → backward")
+    print("  A / Arrow Left  → turn left")
+    print("  D / Arrow Right → turn right")
+    print("  E               → raise forks")
+    print("  Q               → lower forks")
+    print("  R               → reset episode")
+    print("  Ctrl+C          → quit")
+    if _HAS_CV2:
+        print("  [Camera preview window: 'DriverCam RGB']")
     print("=" * 50 + "\n")
 
     step = 0
+    V_MAX       = 2.0   # m/s   — max drive speed
+    STEER_ANGLE = 0.6   # rad   — max steering angle (~34°)
+    WHEEL_BASE  = env.cfg.wheel_base
+    # step dt = sim_dt * decimation
+    STEP_DT     = env.cfg.sim.dt * env.cfg.decimation
+
+    # Smooth velocity state
+    current_v_x = 0.0
+    ACCEL = 4.0   # m/s² — how fast speed builds up
+    DECEL = 6.0   # m/s² — how fast it slows down / brakes
 
     while simulation_app.is_running():
-        if reset_requested["flag"]:
+        if _keys["reset"]:
             obs, _ = env.reset()
-            gamepad.reset()
-            fork_trigger["up"] = fork_trigger["down"] = 0.0
-            fork_key["up"] = fork_key["down"] = False
-            reset_requested["flag"] = False
+            _keys.update({k: False for k in _keys})
+            current_v_x = 0.0
             print("[INFO] Episode reset.")
             step = 0
             continue
 
-        base_cmd = gamepad.advance()
+        target_v_x = (V_MAX if _keys["forward"]  else 0.0) \
+                   - (V_MAX if _keys["backward"] else 0.0)
 
-        # Combine trigger + keyboard: keyboard gives full ±1, trigger gives analog
-        fork_up   = max(fork_trigger["up"],   1.0 if fork_key["up"]   else 0.0)
-        fork_down = max(fork_trigger["down"],  1.0 if fork_key["down"] else 0.0)
-        fork_value = fork_up - fork_down
+        # Accelerate toward target, decelerate faster when releasing
+        if abs(target_v_x) > abs(current_v_x) or (target_v_x * current_v_x < 0):
+            rate = ACCEL * STEP_DT
+        else:
+            rate = DECEL * STEP_DT
+        if current_v_x < target_v_x:
+            current_v_x = min(current_v_x + rate, target_v_x)
+        else:
+            current_v_x = max(current_v_x - rate, target_v_x)
 
-        action = torch.tensor([[
-            base_cmd[0].item(),
-            base_cmd[2].item(),
-            fork_value,
-        ]], device=env.device)
+        v_x = current_v_x
 
+        # Ackermann: omega = v * tan(steer) / wheelbase → zero when stationary
+        steer = (STEER_ANGLE if _keys["left"]  else 0.0) \
+              - (STEER_ANGLE if _keys["right"] else 0.0)
+        omega_z = v_x * math.tan(steer) / WHEEL_BASE
+
+        fork  = (1.0 if _keys["fork_up"]   else 0.0) \
+              - (1.0 if _keys["fork_down"] else 0.0)
+
+        action = torch.tensor([[v_x, omega_z, fork]], device=env.device)
         obs, reward, terminated, truncated, info = env.step(action)
         step += 1
 
+        # Live camera preview (every frame for real-time feel)
+        if _HAS_CV2 and "rgb" in obs:
+            rgb = obs["rgb"][0].cpu().numpy()   # (H, W, 4) RGBA uint8
+            # Convert RGBA → BGR for OpenCV
+            bgr = rgb[:, :, 2::-1]              # drop alpha, swap R↔B
+            cv2.imshow("FrontCam RGB", bgr)
+            cv2.waitKey(1)
+
         if step % 30 == 0:
-            target_pos   = obs["target_pos"][0].cpu()
+            pallet_pos   = obs["pallet_pos"][0].cpu()
             forklift_pos = env.forklift.data.root_pos_w[0].cpu()
-            dist = torch.norm(forklift_pos[:2] - target_pos[:2]).item()
-            fork_pos_m = env.forklift.data.joint_pos[0, env._fork_idx].item()
-            grabbed = env._box_grabbed[0]
+            dist = torch.norm(forklift_pos[:2] - pallet_pos[:2]).item()
+            fork_pos_m = env._fork_pos[0].item()
+            grabbed = env._pallet_grabbed[0]
             print(
                 f"  step={step:4d} | "
-                f"v_x={action[0,0]:.2f}  ω={action[0,1]:.2f}  fork={action[0,2]:+.2f} | "
+                f"v_x={v_x:+.1f}  steer={math.degrees(steer):+.0f}°  fork={fork:+.1f} | "
                 f"fork_height={fork_pos_m:.3f}m | "
                 f"dist={dist:.2f}m | {'[CARRYING]' if grabbed else '          '} | "
                 f"reward={reward[0]:.3f}"
             )
 
         if terminated.any() or truncated.any():
-            r = reward[0].item()
             reason = "SUCCESS" if terminated.any() else "TIMEOUT"
-            print(f"\n[INFO] Episode ended ({reason}) — reward={r:.3f}. Resetting...\n")
+            print(f"\n[INFO] Episode ended ({reason}). Resetting...\n")
             obs, _ = env.reset()
-            gamepad.reset()
-            fork_trigger["up"] = fork_trigger["down"] = 0.0
-            fork_key["up"] = fork_key["down"] = False
+            _keys.update({k: False for k in _keys})
             step = 0
 
-    _input_iface.unsubscribe_to_gamepad_events(_gamepad_dev, _fork_sub)
-    _input_iface.unsubscribe_to_keyboard_events(_keyboard, _keyboard_sub)
+    if _HAS_CV2:
+        cv2.destroyAllWindows()
+    _input.unsubscribe_to_keyboard_events(_keyboard, _kb_sub)
     env.close()
 
 
