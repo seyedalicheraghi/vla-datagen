@@ -197,10 +197,10 @@ def main():
         step += 1
 
         # Live camera preview — 3 views side by side
-        if _HAS_CV2 and "rgb" in obs:
+        if _HAS_CV2 and "rgb_front" in obs:
             THUMB_W, THUMB_H = 320, 240
             views = []
-            for key, label in [("rgb_left", "LEFT"), ("rgb", "CENTER"), ("rgb_right", "RIGHT")]:
+            for key, label in [("rgb_left", "LEFT"), ("rgb_front", "FRONT"), ("rgb_right", "RIGHT")]:
                 if key in obs:
                     frame = obs[key][0].cpu().numpy()[:, :, 2::-1]  # RGBA → BGR
                     frame = cv2.resize(frame, (THUMB_W, THUMB_H))
@@ -214,8 +214,8 @@ def main():
 
         if step % 30 == 0:
             pallet_pos   = obs["pallet_pos"][0].cpu()
-            forklift_pos = env.forklift.data.root_pos_w[0].cpu()
-            dist = torch.norm(forklift_pos[:2] - pallet_pos[:2]).item()
+            forklift_xy  = env._carry_pos[0].cpu()
+            dist = torch.norm(forklift_xy - pallet_pos[:2]).item()
             fork_pos_m = env._fork_pos[0].item()
             grabbed = env._pallet_grabbed[0]
             print(

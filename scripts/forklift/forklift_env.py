@@ -16,6 +16,8 @@ Standalone usage:
 # Isaac Lab imports — safe because caller has already run AppLauncher
 # ---------------------------------------------------------------------------
 
+import math
+import os
 import numpy as np
 from collections import deque
 
@@ -24,7 +26,9 @@ import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
-from isaaclab.sensors import Camera, CameraCfg
+from isaaclab.sensors import Camera, CameraCfg, TiledCamera, TiledCameraCfg
+from isaaclab.sensors import RayCaster, RayCasterCfg
+from isaaclab.sensors.ray_caster import patterns as rc_patterns
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
@@ -116,6 +120,25 @@ _SCATTER_COLORS = [
 ]
 
 _N_SCATTER_PALLETS = 50      # number of pallet+box sets around the warehouse
+
+# ---------------------------------------------------------------------------
+# Sensor constants
+# ---------------------------------------------------------------------------
+
+# Ouster OS1-64 LiDAR defaults
+_LIDAR_CHANNELS     = 64
+_LIDAR_VERT_FOV     = (-16.6, 16.6)    # degrees
+_LIDAR_HORIZ_FOV    = (-180.0, 180.0)  # full 360°
+_LIDAR_HORIZ_RES    = 360.0 / 1024     # ~0.3516° → 1024 horizontal samples
+_LIDAR_MAX_RANGE    = 120.0            # metres
+_LIDAR_UPDATE_HZ    = 10.0             # Hz
+_LIDAR_MOUNT_FWD    = 1.0              # metres forward of forklift root
+_LIDAR_MOUNT_UP     = 2.5              # metres above ground — sees top of stacked cargo
+
+# Camera defaults
+_CAM_W, _CAM_H      = 224, 224         # OpenPI-friendly resolution
+_CAM_UPDATE_HZ       = 15.0            # Hz (10–20 typical for VLA training)
+_DEBUG_SENSOR_DIR    = os.path.join(os.path.dirname(__file__), "debug_sensors")
 
 
 # ---------------------------------------------------------------------------
@@ -347,11 +370,11 @@ class ForkliftEnv(DirectRLEnv):
             ))
             self.boxes.append(box)
 
-        # ── Driver cameras (world-level prims, poses updated every step) ─
+        # ── Three RGB cameras (224×224, ~15 Hz, world-pose updated each step)
         _cam_cfg = dict(
-            update_period=1 / 30,
-            height=480,
-            width=640,
+            update_period=1 / _CAM_UPDATE_HZ,
+            height=_CAM_H,
+            width=_CAM_W,
             data_types=["rgb"],
             spawn=sim_utils.PinholeCameraCfg(
                 focal_length=10.0,
@@ -364,9 +387,33 @@ class ForkliftEnv(DirectRLEnv):
                 convention="world",
             ),
         )
-        self.camera = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCam", **_cam_cfg))
-        self.camera_left = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCamLeft", **_cam_cfg))
-        self.camera_right = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCamRight", **_cam_cfg))
+        self.cam_front = Camera(CameraCfg(
+            prim_path="/World/envs/env_.*/CamFrontCabin", **_cam_cfg))
+        self.cam_top_left = Camera(CameraCfg(
+            prim_path="/World/envs/env_.*/CamTopLeft", **_cam_cfg))
+        self.cam_top_right = Camera(CameraCfg(
+            prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
+
+        # ── Ouster OS1-64 LiDAR (RayCaster with LidarPatternCfg) ─────
+        # prim_path must point to an existing physics body — the forklift
+        self.lidar = RayCaster(RayCasterCfg(
+            prim_path="/World/envs/env_.*/Forklift",
+            mesh_prim_paths=["/World/Ground"],
+            offset=RayCasterCfg.OffsetCfg(
+                pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
+                rot=(1.0, 0.0, 0.0, 0.0),
+            ),
+            ray_alignment="base",
+            pattern_cfg=rc_patterns.LidarPatternCfg(
+                channels=_LIDAR_CHANNELS,
+                vertical_fov_range=_LIDAR_VERT_FOV,
+                horizontal_fov_range=_LIDAR_HORIZ_FOV,
+                horizontal_res=_LIDAR_HORIZ_RES,
+            ),
+            max_distance=_LIDAR_MAX_RANGE,
+            update_period=1 / _LIDAR_UPDATE_HZ,
+            debug_vis=False,
+        ))
 
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
@@ -374,9 +421,13 @@ class ForkliftEnv(DirectRLEnv):
         self.scene.rigid_objects["pallet"]   = self.pallet
         for i, box in enumerate(self.boxes):
             self.scene.rigid_objects[f"box_{i}"] = box
-        self.scene.sensors["camera"] = self.camera
-        self.scene.sensors["camera_left"] = self.camera_left
-        self.scene.sensors["camera_right"] = self.camera_right
+        self.scene.sensors["cam_front"]     = self.cam_front
+        self.scene.sensors["cam_top_left"]  = self.cam_top_left
+        self.scene.sensors["cam_top_right"] = self.cam_top_right
+        self.scene.sensors["lidar"]         = self.lidar
+
+        # Track whether we've saved debug sensor frames this run
+        self._debug_sensors_saved = False
 
     # ------------------------------------------------------------------
     # Wall helpers
@@ -415,7 +466,6 @@ class ForkliftEnv(DirectRLEnv):
         Each scatter unit is identical in structure to the main pallet:
         a compound GMA pallet with a 3×3 grid of cardboard boxes on top.
         """
-        import math
         import omni.usd
 
         rng = np.random.default_rng()  # unseeded — different layout every run
@@ -804,7 +854,6 @@ class ForkliftEnv(DirectRLEnv):
 
                     # Heading delta since grab — rotate pallet & boxes
                     # by exactly how much the forklift has turned
-                    import math
                     delta_h = fl_heading[i].item() - self._grab_heading[i]
                     cos_d = math.cos(delta_h)
                     sin_d = math.sin(delta_h)
@@ -849,97 +898,73 @@ class ForkliftEnv(DirectRLEnv):
     # ------------------------------------------------------------------
 
     def _update_driver_cam(self):
-        """Update all three roof-mounted cameras: center, left-side, right-side.
+        """Update all three cameras each substep.
 
-        Center camera: front-center of the roof, looking forward and down.
-        Left camera:   left side of the roof, looking 90° left.
-        Right camera:  right side of the roof, looking 90° right.
+        cam_front_cabin — inside cabin, forward-facing, pitched down so fork
+                          tips are visible in the lower frame.  Primary VLA camera.
+        cam_top_left    — roof left side, angled slightly down and forward-left.
+        cam_top_right   — roof right side, angled slightly down and forward-right.
         """
-        import math
-
-        # Build authoritative position tensor (x, y from _carry_pos, z from env origin)
+        # Build authoritative position tensor
         ground_z = self.scene.env_origins[:, 2] + self.cfg.chassis_z_offset
         fl_pos = torch.stack([self._carry_pos[:, 0],
                               self._carry_pos[:, 1],
                               ground_z], dim=1)
-        heading = self._heading                     # authoritative heading
+        heading = self._heading
 
         cos_h = torch.cos(heading)
         sin_h = torch.sin(heading)
 
-        # ── Center camera (forward-facing) ────────────────────────────
-        CAM_FWD  = 0.5
-        CAM_UP   = 2.2
-        PITCH    = -0.55  # ~31° down
+        def _yaw_pitch_quat(yaw: torch.Tensor, pitch: float):
+            """Quaternion for yaw (tensor) + pitch (scalar) in ZYX order."""
+            cP = math.cos(pitch / 2)
+            sP = math.sin(pitch / 2)
+            half = yaw / 2.0
+            cH = torch.cos(half)
+            sH = torch.sin(half)
+            return torch.stack([cH * cP, sH * sP, -cH * sP, sH * cP], dim=1)
 
-        ctr_x = fl_pos[:, 0] + CAM_FWD * cos_h
-        ctr_y = fl_pos[:, 1] + CAM_FWD * sin_h
-        ctr_z = fl_pos[:, 2] + CAM_UP
-        ctr_pos = torch.stack([ctr_x, ctr_y, ctr_z], dim=1)
+        # ── Front cabin camera ────────────────────────────────────────
+        # Inside the cabin, forward-facing, pitched ~35° down so fork
+        # tips are visible in the lower portion of the frame.
+        CABIN_FWD   = 0.3     # behind the mast, inside cab
+        CABIN_UP    = 1.8     # operator eye height
+        CABIN_PITCH = -0.60   # ~34° down
 
-        cP = math.cos(PITCH / 2)
-        sP = math.sin(PITCH / 2)
-        half_yaw = heading / 2.0
-        cH = torch.cos(half_yaw)
-        sH = torch.sin(half_yaw)
+        f_x = fl_pos[:, 0] + CABIN_FWD * cos_h
+        f_y = fl_pos[:, 1] + CABIN_FWD * sin_h
+        f_z = fl_pos[:, 2] + CABIN_UP
+        self.cam_front.set_world_poses(
+            torch.stack([f_x, f_y, f_z], dim=1),
+            _yaw_pitch_quat(heading, CABIN_PITCH),
+            convention="world",
+        )
 
-        ctr_ori = torch.stack([
-             cH * cP,
-             sH * sP,
-            -cH * sP,
-             sH * cP,
-        ], dim=1)
+        # ── Top-left camera ──────────────────────────────────────────
+        SIDE_FWD     = 0.2
+        SIDE_LAT     = 0.6
+        SIDE_UP      = 2.3
+        SIDE_PITCH   = -0.35   # ~20° down
+        SIDE_YAW_OFF = 0.4     # ~23° outward from forward
 
-        self.camera.set_world_poses(ctr_pos, ctr_ori, convention="world")
+        tl_x = fl_pos[:, 0] + SIDE_FWD * cos_h - SIDE_LAT * sin_h
+        tl_y = fl_pos[:, 1] + SIDE_FWD * sin_h + SIDE_LAT * cos_h
+        tl_z = fl_pos[:, 2] + SIDE_UP
+        self.cam_top_left.set_world_poses(
+            torch.stack([tl_x, tl_y, tl_z], dim=1),
+            _yaw_pitch_quat(heading + SIDE_YAW_OFF, SIDE_PITCH),
+            convention="world",
+        )
 
-        # ── Side cameras (left / right) ───────────────────────────────
-        SIDE_LATERAL = 0.6   # metres to the side from centre
-        SIDE_UP      = 2.2   # same roof height
-        SIDE_PITCH   = -0.30 # ~17° down
-
-        cPs = math.cos(SIDE_PITCH / 2)
-        sPs = math.sin(SIDE_PITCH / 2)
-
-        # Left camera — yaw + 90° (pi/2)
-        left_yaw = heading + math.pi / 2
-        half_ly = left_yaw / 2.0
-        cHL = torch.cos(half_ly)
-        sHL = torch.sin(half_ly)
-
-        # Position: offset to the left (perpendicular to heading)
-        left_x = fl_pos[:, 0] - SIDE_LATERAL * sin_h
-        left_y = fl_pos[:, 1] + SIDE_LATERAL * cos_h
-        left_z = fl_pos[:, 2] + SIDE_UP
-        left_pos = torch.stack([left_x, left_y, left_z], dim=1)
-
-        left_ori = torch.stack([
-             cHL * cPs,
-             sHL * sPs,
-            -cHL * sPs,
-             sHL * cPs,
-        ], dim=1)
-
-        self.camera_left.set_world_poses(left_pos, left_ori, convention="world")
-
-        # Right camera — yaw - 90° (-pi/2)
-        right_yaw = heading - math.pi / 2
-        half_ry = right_yaw / 2.0
-        cHR = torch.cos(half_ry)
-        sHR = torch.sin(half_ry)
-
-        right_x = fl_pos[:, 0] + SIDE_LATERAL * sin_h
-        right_y = fl_pos[:, 1] - SIDE_LATERAL * cos_h
-        right_z = fl_pos[:, 2] + SIDE_UP
-        right_pos = torch.stack([right_x, right_y, right_z], dim=1)
-
-        right_ori = torch.stack([
-             cHR * cPs,
-             sHR * sPs,
-            -cHR * sPs,
-             sHR * cPs,
-        ], dim=1)
-
-        self.camera_right.set_world_poses(right_pos, right_ori, convention="world")
+        # ── Top-right camera ─────────────────────────────────────────
+        tr_x = fl_pos[:, 0] + SIDE_FWD * cos_h + SIDE_LAT * sin_h
+        tr_y = fl_pos[:, 1] + SIDE_FWD * sin_h - SIDE_LAT * cos_h
+        tr_z = fl_pos[:, 2] + SIDE_UP
+        self.cam_top_right.set_world_poses(
+            torch.stack([tr_x, tr_y, tr_z], dim=1),
+            _yaw_pitch_quat(heading - SIDE_YAW_OFF, SIDE_PITCH),
+            convention="world",
+        )
 
     # ------------------------------------------------------------------
     # Observations, rewards, termination
@@ -947,9 +972,10 @@ class ForkliftEnv(DirectRLEnv):
 
     def _get_observations(self):
         obs = {
-            "rgb":        self.camera.data.output["rgb"],
-            "rgb_left":   self.camera_left.data.output["rgb"],
-            "rgb_right":  self.camera_right.data.output["rgb"],
+            "rgb_front":  self.cam_front.data.output["rgb"],
+            "rgb_left":   self.cam_top_left.data.output["rgb"],
+            "rgb_right":  self.cam_top_right.data.output["rgb"],
+            "lidar":      self.lidar.data.ray_hits_w,
             "pallet_pos": self.pallet.data.root_pos_w,
             "fork_pos":   self._fork_pos.unsqueeze(1),
             "grabbed":    torch.tensor(
@@ -958,6 +984,9 @@ class ForkliftEnv(DirectRLEnv):
                               device=self.device),
             "state":      self._get_proprioception(),
         }
+        # Save debug sensor frames on first observation
+        if not self._debug_sensors_saved:
+            self._save_debug_sensors(obs)
         return obs
 
     def _get_proprioception(self) -> torch.Tensor:
@@ -978,6 +1007,50 @@ class ForkliftEnv(DirectRLEnv):
             torch.tensor([float(g) for g in self._pallet_grabbed],
                          device=self.device),
         ], dim=1)
+
+    def _save_debug_sensors(self, obs: dict):
+        """Save one frame from each camera + top-down LiDAR projection to debug_sensors/."""
+        try:
+            os.makedirs(_DEBUG_SENSOR_DIR, exist_ok=True)
+
+            # Save camera frames
+            for key in ("rgb_front", "rgb_left", "rgb_right"):
+                if key in obs and obs[key] is not None:
+                    frame = obs[key][0].cpu().numpy()
+                    if frame.shape[-1] == 4:  # RGBA → RGB
+                        frame = frame[:, :, :3]
+                    # Save as raw .npy (no cv2 dependency required)
+                    np.save(os.path.join(_DEBUG_SENSOR_DIR, f"{key}.npy"), frame)
+
+            # Save LiDAR top-down projection as 2D image (bird's-eye XY)
+            if "lidar" in obs and obs["lidar"] is not None:
+                hits = obs["lidar"][0].cpu().numpy()  # (N_rays, 3)
+                # Filter out max-range returns (rays that didn't hit anything)
+                valid = np.linalg.norm(hits, axis=-1) < _LIDAR_MAX_RANGE * 0.99
+                pts = hits[valid]
+                if len(pts) > 0:
+                    # Project onto 2D grid for visualization
+                    IMG_SIZE = 256
+                    RANGE_M  = 30.0  # metres per half-side
+                    img = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
+                    # Center on sensor position (LiDAR origin)
+                    sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
+                    px = ((pts[:, 0] - sensor_pos[0]) / RANGE_M * IMG_SIZE / 2
+                          + IMG_SIZE / 2).astype(int)
+                    py = ((pts[:, 1] - sensor_pos[1]) / RANGE_M * IMG_SIZE / 2
+                          + IMG_SIZE / 2).astype(int)
+                    mask = (px >= 0) & (px < IMG_SIZE) & (py >= 0) & (py < IMG_SIZE)
+                    img[py[mask], px[mask]] = 255
+                    np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_topdown.npy"), img)
+
+                # Also save raw point cloud
+                np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_points.npy"), hits)
+
+            self._debug_sensors_saved = True
+            print(f"[INFO] Debug sensor frames saved to {_DEBUG_SENSOR_DIR}/")
+        except Exception as e:
+            print(f"[WARN] Failed to save debug sensor frames: {e}")
+            self._debug_sensors_saved = True  # don't retry
 
     def _get_rewards(self) -> torch.Tensor:
         forklift_xy = self._carry_pos                 # authoritative XY
