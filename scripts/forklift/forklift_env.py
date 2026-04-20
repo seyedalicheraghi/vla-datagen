@@ -67,7 +67,8 @@ _PALLET_CL      = _PALLET_STG_H                                      # 0.200 m
 _PALLET_STG_W   = 0.090   # stringer width  (~3.5 in)
 _PALLET_NOTCH_W = 0.200   # 4-way fork-entry notch width in each stringer (~8 in)
 _PALLET_MASS    = 25.0    # kg — empty GMA pallet
-_PALLET_COLOR   = (0.62, 0.44, 0.22)   # weathered pine
+_PALLET_COLOR        = (0.62, 0.44, 0.22)   # weathered pine
+_PALLET_COLOR_TARGET = (0.20, 0.45, 0.75)   # blue — target pallet stands out
 
 # ---------------------------------------------------------------------------
 # Cargo boxes  (individual rigid bodies stacked on the pallet)
@@ -84,7 +85,7 @@ _PALLET_COLOR   = (0.62, 0.44, 0.22)   # weathered pine
 
 _BOX_L    = 0.35     # m — fits three along pallet length with margin
 _BOX_W    = 0.40     # m — fits three along pallet width with margin
-_BOX_H    = 0.30     # m
+_BOX_H    = 0.60     # m
 _BOX_MASS = 12.0     # kg each
 _BOX_COLS = 3        # columns along pallet L  (X-axis)
 _BOX_ROWS = 3        # rows    along pallet W  (Y-axis)
@@ -100,9 +101,21 @@ for _col in range(_BOX_COLS):
         _BOX_LOCAL_OFFSETS.append((_x, _y, _z))
 
 _BOX_COLOR        = (0.80, 0.65, 0.45)   # cardboard brown
-_BOX_COLOR_TARGET = (0.55, 0.55, 0.55)  # gray — the box to pick up
-_TARGET_BOX_IDX   = 0                    # first box is the gray target
+_BOX_COLOR_TARGET = (0.30, 0.55, 0.85)  # blue — matches target pallet
 _PARK_Z           = -60.0               # underground parking for inactive units
+
+# ---------------------------------------------------------------------------
+# Scattered warehouse boxes (decorative / obstacles)
+# ---------------------------------------------------------------------------
+
+_SCATTER_COLORS = [
+    _BOX_COLOR,            # cardboard brown (same as cargo boxes)
+    _BOX_COLOR_TARGET,     # gray (same as target box)
+    (0.72, 0.55, 0.35),   # lighter cardboard
+    (0.65, 0.45, 0.28),   # darker cardboard
+]
+
+_N_SCATTER_PALLETS = 50      # number of pallet+box sets around the warehouse
 
 
 # ---------------------------------------------------------------------------
@@ -287,13 +300,16 @@ class ForkliftEnv(DirectRLEnv):
         # ── Warehouse walls ───────────────────────────────────────────
         self._spawn_walls()
 
+        # ── Scattered warehouse boxes (decoration / obstacles) ────────
+        self._spawn_scatter_boxes()
+
         # ── Forklift articulation ─────────────────────────────────────
         self.forklift = Articulation(FORKLIFT_CFG)
 
         # ── Compound pallet (pre-built in USD, then wrapped by RigidObject)
         # Build at env_0 BEFORE cloning — the cloner copies it to all envs.
         stage = omni.usd.get_context().get_stage()
-        _build_compound_pallet(stage, "/World/envs/env_0/Pallet")
+        _build_compound_pallet(stage, "/World/envs/env_0/Pallet", color=_PALLET_COLOR_TARGET)
 
         self.pallet = RigidObject(RigidObjectCfg(
             prim_path="/World/envs/env_.*/Pallet",
@@ -306,7 +322,7 @@ class ForkliftEnv(DirectRLEnv):
         # ── Cargo boxes (individual physics rigid bodies) ─────────────
         self.boxes: list[RigidObject] = []
         for i in range(_N_BOXES):
-            color = _BOX_COLOR_TARGET if i == _TARGET_BOX_IDX else _BOX_COLOR
+            color = _BOX_COLOR_TARGET  # all target cargo boxes are blue
             box = RigidObject(RigidObjectCfg(
                 prim_path=f"/World/envs/env_.*/CargoBox_{i}",
                 spawn=sim_utils.CuboidCfg(
@@ -387,6 +403,100 @@ class ForkliftEnv(DirectRLEnv):
             cfg.func(f"/World/{name}", cfg, translation=pos)
 
     # ------------------------------------------------------------------
+    # Scattered warehouse boxes
+    # ------------------------------------------------------------------
+
+    def _spawn_scatter_boxes(self):
+        """Place pallets with cargo boxes at random locations around the warehouse.
+
+        Each scatter unit is identical in structure to the main pallet:
+        a compound GMA pallet with a 3×3 grid of cardboard boxes on top.
+        """
+        import math
+        import omni.usd
+
+        rng = np.random.default_rng()  # unseeded — different layout every run
+        stage = omni.usd.get_context().get_stage()
+
+        # Generate random positions, keeping clear of the corridor between
+        # the forklift (origin) and the target pallet (10m ahead along +X).
+        CLEAR_RADIUS = 3.0          # clear zone around forklift start
+        CORRIDOR_W   = 2.5          # half-width of the clear corridor (metres)
+        CORRIDOR_END = 12.0         # corridor extends past the target pallet
+        MARGIN       = 2.0          # stay away from walls
+        lo = -_WAREHOUSE_HALF + MARGIN
+        hi =  _WAREHOUSE_HALF - MARGIN
+
+        def _in_corridor(x: float, y: float) -> bool:
+            """True if (x,y) is inside the protected corridor from forklift to target."""
+            return -CLEAR_RADIUS < x < CORRIDOR_END and abs(y) < CORRIDOR_W
+
+        positions: list[tuple[float, float]] = []
+        attempts = 0
+        while len(positions) < _N_SCATTER_PALLETS and attempts < 5000:
+            attempts += 1
+            cx = float(rng.uniform(lo, hi))
+            cy = float(rng.uniform(lo, hi))
+            if math.hypot(cx, cy) < CLEAR_RADIUS:
+                continue
+            if _in_corridor(cx, cy):
+                continue
+            too_close = any(math.hypot(cx - ox, cy - oy) < 3.0
+                           for ox, oy in positions)
+            if too_close:
+                continue
+            positions.append((cx, cy))
+
+        for pi, (px, py) in enumerate(positions):
+            # Random yaw for each pallet
+            yaw = float(rng.uniform(0, 2 * math.pi))
+            cos_y = math.cos(yaw)
+            sin_y = math.sin(yaw)
+            qw = math.cos(yaw / 2)
+            qz = math.sin(yaw / 2)
+
+            # ── Build compound pallet ─────────────────────────────────
+            pallet_path = f"/World/ScatterPallet_{pi}"
+            _build_compound_pallet(stage, pallet_path)
+
+            # Position the pallet root via UsdGeom
+            from pxr import UsdGeom, Gf
+            pallet_prim = stage.GetPrimAtPath(pallet_path)
+            xf = UsdGeom.XformCommonAPI(pallet_prim)
+            xf.SetTranslate(Gf.Vec3d(px, py, _PALLET_H / 2))
+            xf.SetRotate(Gf.Vec3f(0, 0, math.degrees(yaw)))
+
+            # ── Place cargo boxes on top of this pallet ───────────────
+            for bi, (lx, ly, lz) in enumerate(_BOX_LOCAL_OFFSETS):
+                color = _SCATTER_COLORS[rng.integers(len(_SCATTER_COLORS))]
+
+                # Rotate local offset by pallet yaw
+                wx = px + lx * cos_y - ly * sin_y
+                wy = py + lx * sin_y + ly * cos_y
+                wz = lz  # z is already relative to ground
+
+                cfg = sim_utils.CuboidCfg(
+                    size=(_BOX_L, _BOX_W, _BOX_H),
+                    rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True),
+                    mass_props=sim_utils.MassPropertiesCfg(mass=_BOX_MASS),
+                    collision_props=sim_utils.CollisionPropertiesCfg(),
+                    visual_material=sim_utils.PreviewSurfaceCfg(
+                        diffuse_color=color,
+                        roughness=0.85,
+                        metallic=0.0,
+                    ),
+                )
+                cfg.func(
+                    f"/World/ScatterBox_{pi}_{bi}",
+                    cfg,
+                    translation=(wx, wy, wz),
+                    orientation=(qw, 0.0, 0.0, qz),
+                )
+
+        print(f"[INFO] Spawned {_N_SCATTER_PALLETS} pallets with "
+              f"{_N_SCATTER_PALLETS * _N_BOXES} boxes around the warehouse")
+
+    # ------------------------------------------------------------------
     # Procedural layout (target placement)
     # ------------------------------------------------------------------
 
@@ -459,7 +569,7 @@ class ForkliftEnv(DirectRLEnv):
             self._grab_box_offsets[env_id] = list(_BOX_LOCAL_OFFSETS)
 
         # Per-env layout + object placement
-        PALLET_FRONT_DIST = 3.5   # metres in front of forklift
+        PALLET_FRONT_DIST = 10.0  # metres in front of forklift
 
         for i, env_id in enumerate(env_ids.tolist()):
             origin = origins[i].cpu().numpy()
