@@ -410,6 +410,14 @@ class ForkliftEnv(DirectRLEnv):
         self.pallet = self.pallets[0]
         self.boxes  = self.pallet_boxes[0]
 
+        # Collision spawn report
+        for pi in range(_N_INTERACTABLE):
+            print(f"[spawn] pallet_{pi}  rigid=kinematic  collider=compound(13 cubes)  "
+                  f"mass={_PALLET_MASS}kg", flush=True)
+            for bi in range(_N_BOXES):
+                print(f"[spawn] cargo_{pi}_{bi}  rigid=kinematic  collider=cuboid  "
+                      f"mass={_BOX_MASS}kg  size=({_BOX_L},{_BOX_W},{_BOX_H})", flush=True)
+
         # ── Three RGB cameras (224×224, ~15 Hz, world-pose updated each step)
         _cam_cfg = dict(
             update_period=1 / _CAM_UPDATE_HZ,
@@ -976,13 +984,30 @@ class ForkliftEnv(DirectRLEnv):
         self.forklift.write_root_velocity_to_sim(vel)
 
         # ── Constrain to ground plane ─────────────────────────────────
-        # Always integrate position manually — the physics solver's
-        # position gets corrupted by collisions with kinematic loads.
+        # Two modes:
+        #  - FREE (not carrying): use solver position so PhysX collisions
+        #    with cargo/pallets/walls work. The solver moves the forklift.
+        #  - CARRY: integrate manually so kinematic cargo on the forks
+        #    doesn't push the forklift via PhysX collision response.
         pose = self.forklift.data.root_state_w[:, :7].clone()
-        self._carry_pos[:, 0] += vel[:, 0] * dt
-        self._carry_pos[:, 1] += vel[:, 1] * dt
-        pose[:, 0] = self._carry_pos[:, 0]
-        pose[:, 1] = self._carry_pos[:, 1]
+        grabbed_mask = torch.tensor(
+            [g >= 0 for g in self._grabbed_idx],
+            dtype=torch.bool, device=self.device)
+
+        # Manual integration (carry mode)
+        manual_x = self._carry_pos[:, 0] + vel[:, 0] * dt
+        manual_y = self._carry_pos[:, 1] + vel[:, 1] * dt
+
+        # Solver position (free mode — includes collision response)
+        solver_x = pose[:, 0]
+        solver_y = pose[:, 1]
+
+        pose[:, 0] = torch.where(grabbed_mask, manual_x, solver_x)
+        pose[:, 1] = torch.where(grabbed_mask, manual_y, solver_y)
+
+        # Sync tracked position for next step and consistent reads
+        self._carry_pos[:, 0] = pose[:, 0]
+        self._carry_pos[:, 1] = pose[:, 1]
 
         ground_z = self.scene.env_origins[:, 2] + self.cfg.chassis_z_offset
         pose[:, 2] = ground_z
