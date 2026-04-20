@@ -1111,9 +1111,11 @@ class ForkliftEnv(DirectRLEnv):
                 # ── Try to grab closest valid pallet ──────────────────
                 if cmd <= 0.01:
                     continue
-                forks_in = tine_z_prev < _PALLET_CL + 0.15
-                if not forks_in:
-                    continue
+
+                # REMOVED: global forks_in gate that blocked ALL pallets
+                # when tine_z > 0.35m. This made it impossible to grab
+                # stacked pallets (whose pocket starts at ~0.95m).
+                # The per-pallet pocket check below is the correct gate.
 
                 best_pi, best_fwd, best_lat_raw = -1, 1e9, 0.0
                 for pi in range(_N_INTERACTABLE):
@@ -1128,10 +1130,18 @@ class ForkliftEnv(DirectRLEnv):
                     lat_raw = -dx * sin_i + dy * cos_i
                     lat = abs(lat_raw)
 
-                    # Check if forks are at the right height for this pallet
+                    # Per-pallet pocket height check:
+                    # Fork tines must be inside or below the pocket opening.
+                    # pocket_bottom = pal_bottom + _PALLET_BOT_H
+                    # pocket_top = pocket_bottom + _PALLET_STG_H
                     pal_bottom = pl_z - _PALLET_H / 2
-                    pocket_top = pal_bottom + _PALLET_BOT_H + _PALLET_STG_H
+                    pocket_bottom = pal_bottom + _PALLET_BOT_H
+                    pocket_top = pocket_bottom + _PALLET_STG_H
+                    # Tines must be below pocket top + tolerance to enter
                     if tine_z_prev > pocket_top + 0.15:
+                        continue
+                    # Tines must be at least near pocket bottom
+                    if tine_z_prev < pocket_bottom - 0.10:
                         continue
 
                     in_zone = -0.2 < fwd < (_PALLET_L + 1.0) \
@@ -1142,13 +1152,19 @@ class ForkliftEnv(DirectRLEnv):
                         best_lat_raw = lat_raw
 
                 if best_pi >= 0:
+                    pp = self.pallets[best_pi].data.root_pos_w
+                    pl_z = pp[i, 2].item()
+                    pal_bottom = pl_z - _PALLET_H / 2
+                    pocket_bottom = pal_bottom + _PALLET_BOT_H
+                    pocket_top = pocket_bottom + _PALLET_STG_H
                     self._grabbed_idx[i] = best_pi
                     self._grab_fwd[i] = best_fwd
                     self._grab_lat[i] = best_lat_raw
                     self._grab_heading[i] = fl_heading[i].item()
                     print(f"[GRAB] env={i} pallet={best_pi}  "
-                          f"tine_z={tine_z_prev:.3f} m  "
-                          f"fwd={best_fwd:.2f} m", flush=True)
+                          f"tine_z={tine_z_prev:.3f}m  "
+                          f"pocket=[{pocket_bottom:.3f}-{pocket_top:.3f}]m  "
+                          f"fwd={best_fwd:.2f}m", flush=True)
             else:
                 # ── Carry or release grabbed pallet ───────────────────
                 tine_z = j + 0.325
