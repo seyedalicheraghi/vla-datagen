@@ -149,7 +149,7 @@ def main():
     print("=" * 50 + "\n")
 
     step = 0
-    V_MAX       = 2.0   # m/s   — max drive speed
+    V_MAX       = 5.0   # m/s   — max drive speed
     STEER_ANGLE = 0.6   # rad   — max steering angle (~34°)
     WHEEL_BASE  = env.cfg.wheel_base
     # step dt = sim_dt * decimation

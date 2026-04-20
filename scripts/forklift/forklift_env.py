@@ -264,9 +264,12 @@ class ForkliftEnv(DirectRLEnv):
         # (collision with carried pallet corrupts the solver's joint state)
         self._fork_pos = torch.zeros(self.num_envs, device=self.device)
 
-        # Tracked X,Y position — during carry the kinematic load pushes
-        # the forklift via PhysX collision, so we integrate velocity
-        # ourselves and ignore the solver's position.
+        # Authoritative heading — solver heading gets corrupted by collisions
+        # with kinematic pallet/boxes, causing drift even with zero input.
+        self._heading = torch.zeros(self.num_envs, device=self.device)
+
+        # Tracked X,Y position — the physics solver's position gets corrupted
+        # by collisions with kinematic loads, so we integrate ourselves.
         self._carry_pos = torch.zeros(self.num_envs, 2, device=self.device)
 
         # Per-env grab state
@@ -561,8 +564,14 @@ class ForkliftEnv(DirectRLEnv):
         dj_vel = self.forklift.data.default_joint_vel[env_ids].clone()
         self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
-        # Clear grab state and reset authoritative fork position
+        # Clear grab state and reset authoritative position/heading/fork
         self._fork_pos[env_ids] = 0.0
+        self._carry_pos[env_ids, 0] = default_root[:, 0]
+        self._carry_pos[env_ids, 1] = default_root[:, 1]
+        # Extract heading from reset quaternion (default is identity → heading=0)
+        qw = default_root[:, 3]
+        qz = default_root[:, 6]
+        self._heading[env_ids] = 2.0 * torch.atan2(qz, qw)
         for env_id in env_ids.tolist():
             self._pallet_grabbed[env_id] = False
             self._grab_heading[env_id] = 0.0
@@ -623,9 +632,11 @@ class ForkliftEnv(DirectRLEnv):
         fork_cmd = self.actions[:, 2]
 
         # ── Heading + root velocity ───────────────────────────────────
-        heading     = self.forklift.data.heading_w
+        # Use authoritative heading — never read from solver (collisions
+        # with kinematic loads corrupt the solver's orientation).
         dt          = self.cfg.sim.dt
-        new_heading = heading + omega_z * dt
+        self._heading += omega_z * dt
+        new_heading = self._heading
 
         vel = torch.zeros(self.num_envs, 6, device=self.device)
         vel[:, 0] = v_x * torch.cos(new_heading)
@@ -633,20 +644,13 @@ class ForkliftEnv(DirectRLEnv):
         self.forklift.write_root_velocity_to_sim(vel)
 
         # ── Constrain to ground plane ─────────────────────────────────
+        # Always integrate position manually — the physics solver's
+        # position gets corrupted by collisions with kinematic loads.
         pose = self.forklift.data.root_state_w[:, :7].clone()
-
-        # During carry the kinematic load's collision shapes push the
-        # forklift via PhysX.  Ignore the solver's X,Y and integrate
-        # velocity ourselves so the forklift only moves when commanded.
-        grabbed_mask = torch.tensor(self._pallet_grabbed, device=self.device)
-        if grabbed_mask.any():
-            new_x = self._carry_pos[:, 0] + vel[:, 0] * dt
-            new_y = self._carry_pos[:, 1] + vel[:, 1] * dt
-            pose[:, 0] = torch.where(grabbed_mask, new_x, pose[:, 0])
-            pose[:, 1] = torch.where(grabbed_mask, new_y, pose[:, 1])
-        # Sync tracked position (solver value when free, tracked when carrying)
-        self._carry_pos[:, 0] = pose[:, 0]
-        self._carry_pos[:, 1] = pose[:, 1]
+        self._carry_pos[:, 0] += vel[:, 0] * dt
+        self._carry_pos[:, 1] += vel[:, 1] * dt
+        pose[:, 0] = self._carry_pos[:, 0]
+        pose[:, 1] = self._carry_pos[:, 1]
 
         ground_z = self.scene.env_origins[:, 2] + self.cfg.chassis_z_offset
         pose[:, 2] = ground_z
@@ -691,15 +695,17 @@ class ForkliftEnv(DirectRLEnv):
         all_jvel = self.forklift.data.joint_vel.clone()
         all_jpos[:, self._fork_idx] = new_fork
         all_jvel[:, self._fork_idx] = 0.0
-        # Force steering state ONLY during carry — collision with the
-        # kinematic pallet/boxes corrupts the solver's steering values.
-        # When not carrying, the actuator drives steering normally.
-        for i in range(self.num_envs):
-            if self._pallet_grabbed[i]:
-                all_jpos[i, self._l_steer_idx] = visual_steer[i].item()
-                all_jpos[i, self._r_steer_idx] = visual_steer[i].item()
-                all_jvel[i, self._l_steer_idx] = 0.0
-                all_jvel[i, self._r_steer_idx] = 0.0
+        # Always force-write steering and wheel state — collisions with
+        # kinematic pallet/boxes corrupt the solver's joint values during
+        # carry, and the corruption persists after dropping.
+        all_jpos[:, self._l_steer_idx] = visual_steer
+        all_jpos[:, self._r_steer_idx] = visual_steer
+        all_jvel[:, self._l_steer_idx] = 0.0
+        all_jvel[:, self._r_steer_idx] = 0.0
+        all_jvel[:, self._lf_wheel_idx] = omega_wheel
+        all_jvel[:, self._rf_wheel_idx] = omega_wheel
+        all_jvel[:, self._lb_wheel_idx] = omega_wheel
+        all_jvel[:, self._rb_wheel_idx] = omega_wheel
         self.forklift.write_joint_state_to_sim(all_jpos, all_jvel)
 
         jpt = self.forklift.data.joint_pos_target.clone()
@@ -737,8 +743,7 @@ class ForkliftEnv(DirectRLEnv):
         Release:
           - fork_joint drops below -0.25 (forks near floor)
         """
-        fl_pos     = self.forklift.data.root_pos_w    # (N, 3)
-        fl_heading = self.forklift.data.heading_w     # (N,)
+        fl_heading = self._heading                     # authoritative heading
         pal_pos    = self.pallet.data.root_pos_w      # (N, 3)
 
         cos_h = torch.cos(fl_heading)
@@ -750,8 +755,8 @@ class ForkliftEnv(DirectRLEnv):
             cmd     = fork_cmd[i].item()
             cos_i   = cos_h[i].item()
             sin_i   = sin_h[i].item()
-            fl_x    = fl_pos[i, 0].item()
-            fl_y    = fl_pos[i, 1].item()
+            fl_x    = self._carry_pos[i, 0].item()    # authoritative position
+            fl_y    = self._carry_pos[i, 1].item()
             pl_x    = pal_pos[i, 0].item()
             pl_y    = pal_pos[i, 1].item()
 
@@ -852,8 +857,12 @@ class ForkliftEnv(DirectRLEnv):
         """
         import math
 
-        fl_pos  = self.forklift.data.root_pos_w   # (N, 3)
-        heading = self.forklift.data.heading_w     # (N,)
+        # Build authoritative position tensor (x, y from _carry_pos, z from env origin)
+        ground_z = self.scene.env_origins[:, 2] + self.cfg.chassis_z_offset
+        fl_pos = torch.stack([self._carry_pos[:, 0],
+                              self._carry_pos[:, 1],
+                              ground_z], dim=1)
+        heading = self._heading                     # authoritative heading
 
         cos_h = torch.cos(heading)
         sin_h = torch.sin(heading)
@@ -937,7 +946,7 @@ class ForkliftEnv(DirectRLEnv):
     # ------------------------------------------------------------------
 
     def _get_observations(self):
-        return {
+        obs = {
             "rgb":        self.camera.data.output["rgb"],
             "rgb_left":   self.camera_left.data.output["rgb"],
             "rgb_right":  self.camera_right.data.output["rgb"],
@@ -947,16 +956,37 @@ class ForkliftEnv(DirectRLEnv):
                               [[float(self._pallet_grabbed[i])]
                                for i in range(self.num_envs)],
                               device=self.device),
+            "state":      self._get_proprioception(),
         }
+        return obs
+
+    def _get_proprioception(self) -> torch.Tensor:
+        """Proprioception vector: [x, y, yaw, vx, vy, omega_z,
+           fork_height, grabbed] — shape (N, 8)."""
+        vx = self.actions[:, 0]
+        omega = self.actions[:, 1]
+        cos_h = torch.cos(self._heading)
+        sin_h = torch.sin(self._heading)
+        return torch.stack([
+            self._carry_pos[:, 0],
+            self._carry_pos[:, 1],
+            self._heading,
+            vx * cos_h,
+            vx * sin_h,
+            omega,
+            self._fork_pos,
+            torch.tensor([float(g) for g in self._pallet_grabbed],
+                         device=self.device),
+        ], dim=1)
 
     def _get_rewards(self) -> torch.Tensor:
-        forklift_xy = self.forklift.data.root_pos_w[:, :2]
+        forklift_xy = self._carry_pos                 # authoritative XY
         pallet_xy   = self.pallet.data.root_pos_w[:, :2]
         dist        = torch.norm(forklift_xy - pallet_xy, dim=1)
         return torch.exp(-dist)
 
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
-        forklift_xy = self.forklift.data.root_pos_w[:, :2]
+        forklift_xy = self._carry_pos                 # authoritative XY
         pallet_xy   = self.pallet.data.root_pos_w[:, :2]
         dist        = torch.norm(forklift_xy - pallet_xy, dim=1)
         success     = dist < 0.6
