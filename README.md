@@ -36,6 +36,26 @@ Isaac Lab offers a comprehensive set of tools and environments designed to facil
 - **Sensors**: RGB/depth/segmentation cameras, camera annotations, IMU, contact sensors, ray casters.
 
 
+## Forklift VLA Data Generation
+
+This fork adds a forklift warehouse environment for generating training data
+in LeRobot format, targeting fine-tuning of pi0 (OpenPI) on pick-and-place
+stacking tasks. See [docs/FORKLIFT_DATASET.md](docs/FORKLIFT_DATASET.md)
+for the full dataset specification and [FORKLIFT_TUTORIAL.md](FORKLIFT_TUTORIAL.md)
+for the setup tutorial.
+
+Quick start:
+```bash
+# Teleoperate the forklift
+./isaaclab.sh -p scripts/forklift/teleop_forklift.py
+
+# Record episodes to LeRobot format
+./isaaclab.sh -p scripts/forklift/record_lerobot.py --num_episodes 10
+
+# Run tests
+pytest tests/forklift/test_unit.py -v
+```
+
 ## Getting Started
 
 ### Documentation
