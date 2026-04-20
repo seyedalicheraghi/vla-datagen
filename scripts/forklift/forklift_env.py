@@ -33,12 +33,12 @@ from isaaclab.utils import configclass
 # Warehouse layout constants
 # ---------------------------------------------------------------------------
 
-_WAREHOUSE_HALF = 8.5    # half-width of warehouse floor → 17 m × 17 m
+_WAREHOUSE_HALF = 16.0   # half-width of warehouse floor → 32 m × 32 m
 _WALL_T         = 0.3
 _WALL_H         = 4.0
 
-_GRID_N = 9              # grid cells per axis (keeps placements inside walls)
-_CELL   = 1.8            # metres per cell
+_GRID_N = 15             # grid cells per axis (keeps placements inside walls)
+_CELL   = 2.0            # metres per cell
 
 # ---------------------------------------------------------------------------
 # GMA 48×40 pallet geometry  (all dimensions in metres)
@@ -82,13 +82,13 @@ _PALLET_COLOR   = (0.62, 0.44, 0.22)   # weathered pine
 #   └───────┴───────┘
 #   ← 1.219 m pallet →
 
-_BOX_L    = 0.55     # m — fits two along pallet length with margin
-_BOX_W    = 0.45     # m — fits two along pallet width with margin
-_BOX_H    = 0.35     # m
-_BOX_MASS = 15.0     # kg each (4 boxes → 60 kg total load)
-_BOX_COLS = 2        # columns along pallet L  (X-axis)
-_BOX_ROWS = 2        # rows    along pallet W  (Y-axis)
-_N_BOXES  = _BOX_COLS * _BOX_ROWS    # = 4
+_BOX_L    = 0.35     # m — fits three along pallet length with margin
+_BOX_W    = 0.40     # m — fits three along pallet width with margin
+_BOX_H    = 0.30     # m
+_BOX_MASS = 12.0     # kg each
+_BOX_COLS = 3        # columns along pallet L  (X-axis)
+_BOX_ROWS = 3        # rows    along pallet W  (Y-axis)
+_N_BOXES  = _BOX_COLS * _BOX_ROWS    # = 9
 
 # Pre-compute each box's LOCAL offset from pallet centre (z = 0 = pallet bottom)
 _BOX_LOCAL_OFFSETS: list[tuple[float, float, float]] = []
@@ -99,8 +99,10 @@ for _col in range(_BOX_COLS):
         _z = _PALLET_H + _BOX_H / 2.0
         _BOX_LOCAL_OFFSETS.append((_x, _y, _z))
 
-_BOX_COLOR  = (0.80, 0.65, 0.45)   # cardboard brown
-_PARK_Z     = -60.0                 # underground parking for inactive units
+_BOX_COLOR        = (0.80, 0.65, 0.45)   # cardboard brown
+_BOX_COLOR_TARGET = (0.55, 0.55, 0.55)  # gray — the box to pick up
+_TARGET_BOX_IDX   = 0                    # first box is the gray target
+_PARK_Z           = -60.0               # underground parking for inactive units
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +198,7 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
 
     sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=4)
     decimation: int = 4
-    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=40.0)
+    scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=70.0)
     episode_length_s: float = 120.0
 
     observation_space: int = 64
@@ -270,19 +272,10 @@ class ForkliftEnv(DirectRLEnv):
     def _setup_scene(self):
         import omni.usd
         from isaaclab_assets.robots.forklift import FORKLIFT_CFG
-        from isaaclab.utils.assets import NVIDIA_NUCLEUS_DIR
-        from isaaclab.sim.utils import bind_visual_material
 
-        # ── Warehouse floor (concrete MDL) ────────────────────────────
+        # ── Warehouse floor (flat gray) ───────────────────────────────
         spawn_ground_plane("/World/Ground",
-                           cfg=GroundPlaneCfg(color=None, size=(200.0, 200.0)))
-        mat_cfg = sim_utils.MdlFileCfg(
-            mdl_path=f"{NVIDIA_NUCLEUS_DIR}/Materials/Base/Concrete/Concrete_Rough.mdl",
-            project_uvw=True,
-            texture_scale=(0.25, 0.25),
-        )
-        mat_cfg.func("/World/Ground/material", mat_cfg)
-        bind_visual_material("/World/Ground", "/World/Ground/material")
+                           cfg=GroundPlaneCfg(color=(0.45, 0.45, 0.45), size=(200.0, 200.0)))
 
         # ── Lighting ─────────────────────────────────────────────────
         sim_utils.DomeLightCfg(
@@ -310,9 +303,10 @@ class ForkliftEnv(DirectRLEnv):
             ),
         ))
 
-        # ── 4 cargo boxes (individual physics rigid bodies) ───────────
+        # ── Cargo boxes (individual physics rigid bodies) ─────────────
         self.boxes: list[RigidObject] = []
         for i in range(_N_BOXES):
+            color = _BOX_COLOR_TARGET if i == _TARGET_BOX_IDX else _BOX_COLOR
             box = RigidObject(RigidObjectCfg(
                 prim_path=f"/World/envs/env_.*/CargoBox_{i}",
                 spawn=sim_utils.CuboidCfg(
@@ -325,7 +319,7 @@ class ForkliftEnv(DirectRLEnv):
                     mass_props=sim_utils.MassPropertiesCfg(mass=_BOX_MASS),
                     collision_props=sim_utils.CollisionPropertiesCfg(),
                     visual_material=sim_utils.PreviewSurfaceCfg(
-                        diffuse_color=_BOX_COLOR,
+                        diffuse_color=color,
                         roughness=0.85,
                         metallic=0.0,
                     ),
@@ -334,9 +328,8 @@ class ForkliftEnv(DirectRLEnv):
             ))
             self.boxes.append(box)
 
-        # ── Driver camera (world-level prim, pose updated every step) ─
-        self.camera = Camera(CameraCfg(
-            prim_path="/World/envs/env_.*/DriverCam",
+        # ── Driver cameras (world-level prims, poses updated every step) ─
+        _cam_cfg = dict(
             update_period=1 / 30,
             height=480,
             width=640,
@@ -351,7 +344,10 @@ class ForkliftEnv(DirectRLEnv):
                 rot=(1.0, 0.0, 0.0, 0.0),
                 convention="world",
             ),
-        ))
+        )
+        self.camera = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCam", **_cam_cfg))
+        self.camera_left = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCamLeft", **_cam_cfg))
+        self.camera_right = Camera(CameraCfg(prim_path="/World/envs/env_.*/DriverCamRight", **_cam_cfg))
 
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
@@ -360,6 +356,8 @@ class ForkliftEnv(DirectRLEnv):
         for i, box in enumerate(self.boxes):
             self.scene.rigid_objects[f"box_{i}"] = box
         self.scene.sensors["camera"] = self.camera
+        self.scene.sensors["camera_left"] = self.camera_left
+        self.scene.sensors["camera_right"] = self.camera_right
 
     # ------------------------------------------------------------------
     # Wall helpers
@@ -461,15 +459,17 @@ class ForkliftEnv(DirectRLEnv):
             self._grab_box_offsets[env_id] = list(_BOX_LOCAL_OFFSETS)
 
         # Per-env layout + object placement
+        PALLET_FRONT_DIST = 3.5   # metres in front of forklift
+
         for i, env_id in enumerate(env_ids.tolist()):
             origin = origins[i].cpu().numpy()
             ox, oy = float(origin[0]), float(origin[1])
-            _, target_xy = self._generate_layout()
-            tx, ty = target_xy[0] + ox, target_xy[1] + oy
 
             env_t = torch.tensor([env_id], device=self.device)
 
-            # ── Place pallet ──────────────────────────────────────────
+            # ── Place pallet directly in front of forklift ────────────
+            tx = ox + PALLET_FRONT_DIST
+            ty = oy
             pal_pose = torch.zeros(1, 7, device=self.device)
             pal_pose[0, 0] = tx
             pal_pose[0, 1] = ty
@@ -495,7 +495,7 @@ class ForkliftEnv(DirectRLEnv):
                 # Record grab offsets (with jitter baked in)
                 self._grab_box_offsets[env_id][bi] = (lx + jitter_x, ly + jitter_y, lz)
 
-            print(f"[INFO] Env {env_id}: pallet at ({target_xy[0]:.1f}, {target_xy[1]:.1f})")
+            print(f"[INFO] Env {env_id}: pallet at ({PALLET_FRONT_DIST:.1f}m ahead)")
 
         # Snap driver camera immediately
         self._update_driver_cam()
@@ -734,46 +734,93 @@ class ForkliftEnv(DirectRLEnv):
     # ------------------------------------------------------------------
 
     def _update_driver_cam(self):
-        """First-person cabin camera — positioned at the operator's eye level
-        inside the forklift cabin, looking forward toward the forks and road.
+        """Update all three roof-mounted cameras: center, left-side, right-side.
 
-        ForkliftC wheelbase is 1.65 m. The operator seat is roughly at the
-        centre of the vehicle. Eye height for a seated operator ~1.6 m.
-        Slight downward pitch so forks and ground ahead are visible.
+        Center camera: front-center of the roof, looking forward and down.
+        Left camera:   left side of the roof, looking 90° left.
+        Right camera:  right side of the roof, looking 90° right.
         """
+        import math
+
         fl_pos  = self.forklift.data.root_pos_w   # (N, 3)
         heading = self.forklift.data.heading_w     # (N,)
-
-        CAM_FORWARD =  0.2   # slightly forward of centre (operator seat position)
-        CAM_UP      =  1.6   # seated eye height
-        PITCH       = -0.10  # radians — tilted further toward the floor
 
         cos_h = torch.cos(heading)
         sin_h = torch.sin(heading)
 
-        cam_x = fl_pos[:, 0] + CAM_FORWARD * cos_h
-        cam_y = fl_pos[:, 1] + CAM_FORWARD * sin_h
-        cam_z = fl_pos[:, 2] + CAM_UP
+        # ── Center camera (forward-facing) ────────────────────────────
+        CAM_FWD  = 0.5
+        CAM_UP   = 2.2
+        PITCH    = -0.55  # ~31° down
 
-        positions = torch.stack([cam_x, cam_y, cam_z], dim=1)
+        ctr_x = fl_pos[:, 0] + CAM_FWD * cos_h
+        ctr_y = fl_pos[:, 1] + CAM_FWD * sin_h
+        ctr_z = fl_pos[:, 2] + CAM_UP
+        ctr_pos = torch.stack([ctr_x, ctr_y, ctr_z], dim=1)
 
-        # Combined yaw + pitch-down quaternion
-        import math
         cP = math.cos(PITCH / 2)
         sP = math.sin(PITCH / 2)
         half_yaw = heading / 2.0
         cH = torch.cos(half_yaw)
         sH = torch.sin(half_yaw)
-        zeros = torch.zeros_like(cH)
 
-        orientations = torch.stack([
-             cH * cP,    #  w
-             sH * sP,    #  x
-            -cH * sP,    #  y  (negative → tilt downward)
-             sH * cP,    #  z
-        ], dim=1)        # (N, 4) as (w, x, y, z)
+        ctr_ori = torch.stack([
+             cH * cP,
+             sH * sP,
+            -cH * sP,
+             sH * cP,
+        ], dim=1)
 
-        self.camera.set_world_poses(positions, orientations, convention="world")
+        self.camera.set_world_poses(ctr_pos, ctr_ori, convention="world")
+
+        # ── Side cameras (left / right) ───────────────────────────────
+        SIDE_LATERAL = 0.6   # metres to the side from centre
+        SIDE_UP      = 2.2   # same roof height
+        SIDE_PITCH   = -0.30 # ~17° down
+
+        cPs = math.cos(SIDE_PITCH / 2)
+        sPs = math.sin(SIDE_PITCH / 2)
+
+        # Left camera — yaw + 90° (pi/2)
+        left_yaw = heading + math.pi / 2
+        half_ly = left_yaw / 2.0
+        cHL = torch.cos(half_ly)
+        sHL = torch.sin(half_ly)
+
+        # Position: offset to the left (perpendicular to heading)
+        left_x = fl_pos[:, 0] - SIDE_LATERAL * sin_h
+        left_y = fl_pos[:, 1] + SIDE_LATERAL * cos_h
+        left_z = fl_pos[:, 2] + SIDE_UP
+        left_pos = torch.stack([left_x, left_y, left_z], dim=1)
+
+        left_ori = torch.stack([
+             cHL * cPs,
+             sHL * sPs,
+            -cHL * sPs,
+             sHL * cPs,
+        ], dim=1)
+
+        self.camera_left.set_world_poses(left_pos, left_ori, convention="world")
+
+        # Right camera — yaw - 90° (-pi/2)
+        right_yaw = heading - math.pi / 2
+        half_ry = right_yaw / 2.0
+        cHR = torch.cos(half_ry)
+        sHR = torch.sin(half_ry)
+
+        right_x = fl_pos[:, 0] + SIDE_LATERAL * sin_h
+        right_y = fl_pos[:, 1] - SIDE_LATERAL * cos_h
+        right_z = fl_pos[:, 2] + SIDE_UP
+        right_pos = torch.stack([right_x, right_y, right_z], dim=1)
+
+        right_ori = torch.stack([
+             cHR * cPs,
+             sHR * sPs,
+            -cHR * sPs,
+             sHR * cPs,
+        ], dim=1)
+
+        self.camera_right.set_world_poses(right_pos, right_ori, convention="world")
 
     # ------------------------------------------------------------------
     # Observations, rewards, termination
@@ -782,6 +829,8 @@ class ForkliftEnv(DirectRLEnv):
     def _get_observations(self):
         return {
             "rgb":        self.camera.data.output["rgb"],
+            "rgb_left":   self.camera_left.data.output["rgb"],
+            "rgb_right":  self.camera_right.data.output["rgb"],
             "pallet_pos": self.pallet.data.root_pos_w,
             "fork_pos":   self._fork_pos.unsqueeze(1),
             "grabbed":    torch.tensor(

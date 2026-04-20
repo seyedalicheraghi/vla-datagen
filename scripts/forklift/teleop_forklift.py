@@ -145,7 +145,7 @@ def main():
     print("  R               → reset episode")
     print("  Ctrl+C          → quit")
     if _HAS_CV2:
-        print("  [Camera preview window: 'DriverCam RGB']")
+        print("  [Camera preview: LEFT | CENTER | RIGHT]")
     print("=" * 50 + "\n")
 
     step = 0
@@ -196,13 +196,21 @@ def main():
         obs, reward, terminated, truncated, info = env.step(action)
         step += 1
 
-        # Live camera preview (every frame for real-time feel)
+        # Live camera preview — 3 views side by side
         if _HAS_CV2 and "rgb" in obs:
-            rgb = obs["rgb"][0].cpu().numpy()   # (H, W, 4) RGBA uint8
-            # Convert RGBA → BGR for OpenCV
-            bgr = rgb[:, :, 2::-1]              # drop alpha, swap R↔B
-            cv2.imshow("FrontCam RGB", bgr)
-            cv2.waitKey(1)
+            THUMB_W, THUMB_H = 320, 240
+            views = []
+            for key, label in [("rgb_left", "LEFT"), ("rgb", "CENTER"), ("rgb_right", "RIGHT")]:
+                if key in obs:
+                    frame = obs[key][0].cpu().numpy()[:, :, 2::-1]  # RGBA → BGR
+                    frame = cv2.resize(frame, (THUMB_W, THUMB_H))
+                    cv2.putText(frame, label, (10, 25),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    views.append(frame)
+            if views:
+                combined = np.hstack(views)
+                cv2.imshow("Forklift Cameras", combined)
+                cv2.waitKey(1)
 
         if step % 30 == 0:
             pallet_pos   = obs["pallet_pos"][0].cpu()
