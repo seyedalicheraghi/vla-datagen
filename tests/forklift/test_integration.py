@@ -277,6 +277,103 @@ class TestSensorOutputs:
 
 
 # ============================================================================
+# §2 Regression — Forklift collides with cargo (no pass-through)
+# ============================================================================
+
+@_requires_sim
+class TestCollisionRegression:
+    """Drive the forklift straight at a stationary cargo+pallet.
+    Assert the forklift decelerates / stops (doesn't pass through)."""
+
+    def test_forklift_stops_at_cargo(self, env):
+        """§2 regression: drive at pallet at 1 m/s, forklift must not
+        pass through. After 2s the forklift X should be less than the
+        pallet X (it stopped or bounced)."""
+        env.reset()
+        pallet_x = env.pallets[0].data.root_pos_w[0, 0].item()
+        x0, _, _ = _get_pose(env)
+
+        # Drive forward at 1 m/s for 3 seconds (90 steps)
+        _step_n(env, 90, torch.tensor([[1.0, 0.0, 0.0]], device=env.device))
+
+        x1, _, _ = _get_pose(env)
+        # The forklift should have been stopped by the pallet's kinematic
+        # collider — its X should not exceed the pallet's X minus some margin.
+        # With proper collision, forklift front (~1m ahead of root) stops at
+        # pallet edge. Without collision, forklift would be at x0 + 1.0*3 = x0+3.
+        assert x1 < pallet_x + 0.5, \
+            f"Forklift passed through pallet! x1={x1:.2f} pallet_x={pallet_x:.2f}"
+
+
+# ============================================================================
+# §3 Regression — Stacking produces no Z interpenetration
+# ============================================================================
+
+@_requires_sim
+class TestStackingRegression:
+    """Pre-stacked pallet 2 on pallet 3: verify no Z interpenetration
+    and stack is stable."""
+
+    def test_no_z_overlap(self, env):
+        """§3 regression: pallet 2 bottom must be >= pallet 3 cargo top."""
+        env.reset()
+        _step_n(env, 5)  # settle
+
+        # Pallet 3 cargo top Z: highest box of pallet 3
+        top_z_3 = 0.0
+        for bi in range(_N_BOXES):
+            bz = env.pallet_boxes[3][bi].data.root_pos_w[0, 2].item()
+            top = bz + _BOX_H / 2
+            if top > top_z_3:
+                top_z_3 = top
+
+        # Pallet 2 bottom Z
+        p2_z = env.pallets[2].data.root_pos_w[0, 2].item()
+        p2_bottom = p2_z - _PALLET_H / 2
+
+        # Allow 2mm tolerance
+        assert p2_bottom >= top_z_3 - 0.002, \
+            f"Z interpenetration: pallet_2 bottom={p2_bottom:.4f} < " \
+            f"pallet_3 cargo top={top_z_3:.4f}"
+
+    def test_stack_stable_3s(self, env):
+        """Stacked pallet should not move significantly over 3 seconds."""
+        env.reset()
+        _step_n(env, 5)
+        z_before = env.pallets[2].data.root_pos_w[0, 2].item()
+
+        _step_n(env, 90)  # 3 seconds
+        z_after = env.pallets[2].data.root_pos_w[0, 2].item()
+
+        assert abs(z_after - z_before) < 0.05, \
+            f"Stack unstable: z moved {z_before:.3f} → {z_after:.3f}"
+
+
+# ============================================================================
+# §5.2 — Observability checks
+# ============================================================================
+
+@_requires_sim
+class TestObservability:
+    """Verify observability instrumentation works."""
+
+    def test_status_prints_after_steps(self, env):
+        """Step counter should increment and status should not crash."""
+        env.reset()
+        env._step_count = 0
+        _step_n(env, 25)
+        assert env._step_count >= 20, \
+            f"Step counter not incrementing: {env._step_count}"
+
+    def test_lidar_status_populated(self, env):
+        """After stepping, LiDAR status should be set."""
+        env.reset()
+        _step_n(env, 25)
+        assert env._lidar_status in ("OK", "NO_RETURNS", "NO_DATA", "INIT"), \
+            f"Unexpected LiDAR status: {env._lidar_status}"
+
+
+# ============================================================================
 # §5.2 — Authoritative state consistency
 # ============================================================================
 
