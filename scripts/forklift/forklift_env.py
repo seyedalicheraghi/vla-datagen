@@ -1158,8 +1158,11 @@ class ForkliftEnv(DirectRLEnv):
                     drop_x = drop_pos[0].item()
                     drop_y = drop_pos[1].item()
                     drop_z = max(tine_z - _PALLET_CL, 0.0)
+                    stacked_on = -1
 
-                    # Check if dropping onto another pallet
+                    # Check if dropping onto another pallet — compute
+                    # actual top surface Z from the target's cargo box
+                    # positions, not a fixed constant.
                     for other_pi in range(_N_INTERACTABLE):
                         if other_pi == grabbed_pi:
                             continue
@@ -1167,17 +1170,35 @@ class ForkliftEnv(DirectRLEnv):
                         ox, oy = op[0].item(), op[1].item()
                         if abs(drop_x - ox) < _PALLET_L * 0.8 \
                                 and abs(drop_y - oy) < _PALLET_W * 0.8:
-                            # Stack: place on top of the other pallet's cargo
-                            other_base = self._pallet_base_z[i][other_pi]
-                            drop_z = other_base + _UNIT_H
+                            # Find actual top surface: highest box top Z
+                            target_top_z = op[2].item() + _PALLET_H / 2
+                            for obi in range(_N_BOXES):
+                                bz = self.pallet_boxes[other_pi][obi] \
+                                    .data.root_pos_w[i, 2].item()
+                                box_top = bz + _BOX_H / 2
+                                if box_top > target_top_z:
+                                    target_top_z = box_top
+                            # Place carried pallet bottom on top + epsilon
+                            drop_z = target_top_z + 0.005
+                            stacked_on = other_pi
                             break
 
                     self._pallet_base_z[i][grabbed_pi] = drop_z
                     self._place_pallet_and_cargo(
                         i, env_t, grabbed_pi, drop_x, drop_y, drop_z)
                     self._grabbed_idx[i] = -1
-                    print(f"[DROP] env={i} pallet={grabbed_pi}  "
-                          f"base_z={drop_z:.3f} m", flush=True)
+
+                    if stacked_on >= 0:
+                        # Compute carried cargo top for logging
+                        carried_top = drop_z + _PALLET_H + _BOX_H
+                        print(f"[STACK] env={i} pallet={grabbed_pi} → "
+                              f"on pallet={stacked_on}  "
+                              f"target_top={target_top_z:.3f}m  "
+                              f"placed_base={drop_z:.3f}m  "
+                              f"carried_top={carried_top:.3f}m", flush=True)
+                    else:
+                        print(f"[DROP] env={i} pallet={grabbed_pi}  "
+                              f"base_z={drop_z:.3f} m (ground)", flush=True)
                 else:
                     # Carry — pallet follows forklift kinematically
                     fwd_i = self._grab_fwd[i]
