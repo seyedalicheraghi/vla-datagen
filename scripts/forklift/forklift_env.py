@@ -1176,9 +1176,11 @@ class ForkliftEnv(DirectRLEnv):
                     drop_z = max(tine_z - _PALLET_CL, 0.0)
                     stacked_on = -1
 
-                    # Check if dropping onto another pallet — compute
-                    # actual top surface Z from the target's cargo box
-                    # positions, not a fixed constant.
+                    # Check if dropping onto another pallet.
+                    # CRITICAL: compute target top Z from our authoritative
+                    # _pallet_base_z + known geometry, NOT from
+                    # data.root_pos_w which may be stale (physics buffer
+                    # lags 1+ steps behind write_root_pose_to_sim).
                     for other_pi in range(_N_INTERACTABLE):
                         if other_pi == grabbed_pi:
                             continue
@@ -1186,17 +1188,17 @@ class ForkliftEnv(DirectRLEnv):
                         ox, oy = op[0].item(), op[1].item()
                         if abs(drop_x - ox) < _PALLET_L * 0.8 \
                                 and abs(drop_y - oy) < _PALLET_W * 0.8:
-                            # Find actual top surface: highest box top Z
-                            target_top_z = op[2].item() + _PALLET_H / 2
-                            for obi in range(_N_BOXES):
-                                bz = self.pallet_boxes[other_pi][obi] \
-                                    .data.root_pos_w[i, 2].item()
-                                box_top = bz + _BOX_H / 2
-                                if box_top > target_top_z:
-                                    target_top_z = box_top
-                            # Place carried pallet bottom on top + epsilon
+                            # Target top = base + pallet height + box height
+                            other_base = self._pallet_base_z[i][other_pi]
+                            target_top_z = other_base + _PALLET_H + _BOX_H
+                            # Place carried pallet bottom on target top + epsilon
                             drop_z = target_top_z + 0.005
                             stacked_on = other_pi
+                            print(f"[STACK_DIAG] env={i} target_pallet={other_pi}  "
+                                  f"target_base_z={other_base:.4f}  "
+                                  f"target_top_z={target_top_z:.4f}  "
+                                  f"drop_z={drop_z:.4f}  "
+                                  f"carried_pallet={grabbed_pi}", flush=True)
                             break
 
                     self._pallet_base_z[i][grabbed_pi] = drop_z
