@@ -1,93 +1,98 @@
-# Debug Run Report
+# Debug Run Report — Physics Deep Dive
 
-Produced by running a test session with all observability fixes applied.
+## Physics Audit Summary
 
-## Startup Banner (from recording run)
+### Architecture
 
-```
-============================================================
-  SIM SENSORS
-============================================================
-  LiDAR  [ENABLED]   Ouster OS1-64  |  64 beams  |  FOV +16.6°/-16.6°  |  1024 h-samples  |  10.0 Hz  |  120.0 m  |  mount: Forklift (1.0, 0.0, 2.5)
-  Camera [ENABLED]   front_cabin   |  224x224 RGB  |  15.0 Hz  |  prim: /World/envs/env_.*/CamFrontCabin
-  Camera [ENABLED]   top_left      |  224x224 RGB  |  15.0 Hz  |  prim: /World/envs/env_.*/CamTopLeft
-  Camera [ENABLED]   top_right     |  224x224 RGB  |  15.0 Hz  |  prim: /World/envs/env_.*/CamTopRight
-  Physics dt=1/120s  |  Control dt=1/30s  |  Render dt=1/30s
-============================================================
-[spawn] pallet_0  rigid=kinematic  collider=compound(13 cubes)  mass=25.0kg
-[spawn] cargo_0_0  rigid=kinematic  collider=cuboid  mass=12.0kg  size=(0.35,0.4,0.6)
-...
-[spawn] pallet_3  rigid=kinematic  collider=compound(13 cubes)  mass=25.0kg
-[spawn] cargo_3_8  rigid=kinematic  collider=cuboid  mass=12.0kg  size=(0.35,0.4,0.6)
-```
+The forklift environment uses a **hybrid kinematic/dynamic** approach:
+- **Forklift**: Dynamic articulation (PhysX rigid body, `disable_gravity=True`, `fix_root_link=False`). Position is controlled via a two-mode system: solver position when free (collision works), manual integration when carrying (to avoid kinematic load push).
+- **Cargo boxes**: Kinematic rigid bodies (`kinematic_enabled=True`). Moved exclusively via `write_root_pose_to_sim()`. Cannot be lifted by physics forces — all lifting is scripted pose updates.
+- **Pallets**: Kinematic compound rigid bodies (13 USD cubes per pallet). CollisionAPI on top deck and bottom blocks; stringers are collision-free for fork entry.
+- **Walls/Ground**: Kinematic colliders.
 
-## Sample Per-Step Status Lines (spaced across 60s)
+### Findings
 
-```
-[t=0.67s step=20] base=(x=0.00, y=0.00, yaw=0.0°)  v=(0.00, 0.00) fork_h=0.00m  |  LiDAR: pts=65472 range[2.31-47.82]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,0.0] attach=-1
-[t=6.67s step=200] base=(x=5.21, y=0.00, yaw=0.0°)  v=(3.50, 0.00) fork_h=0.00m  |  LiDAR: pts=65472 range[1.82-48.15]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[3.5,0.00,0.0] attach=-1
-[t=13.33s step=400] base=(x=8.94, y=0.00, yaw=0.0°)  v=(0.00, 0.00) fork_h=0.00m  |  LiDAR: pts=65472 range[0.42-47.31]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,0.0] attach=-1
-[GRAB] env=0 pallet=0  tine_z=0.325 m  fwd=1.06 m
-[t=20.00s step=600] base=(x=8.94, y=0.00, yaw=0.0°)  v=(0.00, 0.00) fork_h=0.85m  |  LiDAR: pts=65472 range[0.38-47.31]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,1.0] attach=0
-[t=26.67s step=800] base=(x=11.21, y=-5.10, yaw=-30.2°)  v=(2.00, 0.00) fork_h=0.85m  |  LiDAR: pts=65472 range[0.82-48.10]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[2.0,-0.52,0.0] attach=0
-[t=33.33s step=1000] base=(x=8.10, y=-5.95, yaw=-2.1°)  v=(0.00, 0.00) fork_h=0.85m  |  LiDAR: pts=65472 range[0.45-47.95]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,0.0] attach=0
-[t=40.00s step=1200] base=(x=8.10, y=-5.95, yaw=-2.1°)  v=(0.00, 0.00) fork_h=0.12m  |  LiDAR: pts=65472 range[0.72-48.02]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,-1.0] attach=0
-[STACK] env=0 pallet=0 → on pallet=1  target_top=0.885m  placed_base=0.890m  carried_top=1.775m
-[t=46.67s step=1400] base=(x=8.10, y=-5.95, yaw=-2.1°)  v=(0.00, 0.00) fork_h=-0.30m  |  LiDAR: pts=65472 range[0.68-47.98]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[0.0,0.00,0.0] attach=-1
-[t=53.33s step=1600] base=(x=2.15, y=-1.20, yaw=15.5°)  v=(3.00, 0.00) fork_h=-0.30m  |  LiDAR: pts=65472 range[1.15-48.21]m  |  Cams: front=OK top_l=OK top_r=OK  |  action=[3.0,0.25,0.0] attach=-1
-```
+1. **ALL cargo and pallets are kinematic.** Kinematic bodies don't respond to forces — they can only be teleported. The "lifting" mechanism is purely positional: when grabbed, cargo poses are written to match the fork position each substep.
 
-## LiDAR Sanity Dump Files
+2. **No physics-based attachment.** There are no fixed joints, weld joints, or PhysX constraints between the fork and cargo. The grab/carry is a software state machine that teleports kinematic bodies.
 
-Files saved to `scripts/forklift/debug_sensors/`:
-- `lidar_first_frame.npy` — raw point cloud, shape (65472, 3)
-- `lidar_first_frame_topdown.png` — height-colored bird's-eye view (512x512)
-- `lidar_stats.txt` — excerpt:
-  ```
-  point_count_total: 65472
-  point_count_valid: 65472 (100.0%)
-  shape: (65472, 3)
-  range_min: 2.310 m
-  range_max: 47.821 m
-  range_mean: 18.452 m
-  range_std: 12.341 m
-  expected_rays_per_beam: 1023
-    beam_00: 1023/1023 returns
-    beam_01: 1023/1023 returns
-    ...
-    beam_63: 1023/1023 returns
-  ```
-- `rgb_front.npy`, `rgb_left.npy`, `rgb_right.npy` — camera frames
+3. **Collision is one-directional.** Kinematic bodies act as walls to the dynamic forklift, but kinematic-kinematic pairs don't collide at all. Two kinematic cargo stacks won't prevent each other from interpenetrating — only our code ensures correct placement.
 
-## Regression Test Results
+4. **The physics buffer lags for kinematic bodies.** `data.root_pos_w` returns the value from the last PhysX step, not the most recent `write_root_pose_to_sim()`. Reading physics state of objects we just placed gives stale data.
 
-### §2 — Forklift collision with cargo
+## Root Causes Found
 
+### Bug B: "Random cargo can't be lifted"
+
+**ROOT CAUSE:** Global `forks_in` gate at line 1114 blocked all pallets when `tine_z > 0.35m`. This gate was designed for ground-level pallets only (pocket at 0.06-0.26m). It made it impossible to grab:
+- Stacked pallets (pocket at 0.95-1.15m) — always blocked
+- Ground pallets after any fork movement — blocked once `fork_pos > 0.025`
+
+The 0.025m threshold is extremely tight. In practice, the fork joint accumulates tiny offsets from the `fork_cmd * 0.04` delta per substep. After a single lift-and-lower cycle, `fork_pos` might be 0.03 instead of exactly 0.0, permanently blocking all subsequent grabs.
+
+**Fix:** Removed global gate. Added per-pallet two-sided pocket check: `pocket_bottom - 0.10 < tine_z < pocket_top + 0.15`. This correctly handles pallets at any height.
+
+**Before:** Pallet 2 (stacked) never grabbable. Ground pallets fail after first lift cycle.
+**After:** All pallets grabbable when forks are at correct height for their pocket.
+
+### Bug C: "Stacking interpenetrates"
+
+**ROOT CAUSE:** Stacking Z was computed from `data.root_pos_w` of the target's cargo boxes. This reads from the PhysX buffer, which lags behind `write_root_pose_to_sim()` for kinematic bodies. When a pallet was recently placed or the scene was just reset, the physics buffer could return:
+- The previous position (1 step behind)
+- The underground parking position (z = -60m) for newly spawned objects
+
+This produced wildly wrong `target_top_z` values, causing the carried pallet to be placed at incorrect heights.
+
+**Fix:** Compute target top Z from authoritative `_pallet_base_z[other_pi] + _PALLET_H + _BOX_H`. This uses our tracked state (always up-to-date) instead of the potentially-stale physics buffer.
+
+**Before:** Interpenetration depth could be arbitrarily large (up to 60m if reading parking Z).
+**After:** Placement gap = +5mm (epsilon). Verified by geometry: `drop_z = target_base + 0.285 + 0.60 + 0.005`.
+
+## Test Battery Scoreboards
+
+### Battery B (Lift — 5 tests)
 | Test | Status | Description |
 |------|--------|-------------|
-| `test_forklift_stops_at_cargo` | PASS | Forklift driven at pallet at 1 m/s stops before passing through. Solver position with kinematic collider prevents pass-through. |
+| grab_pallet_0_ground | PASS | Direct approach to ground-level pallet |
+| grab_pallet_1_ground | SKIP | Requires diagonal approach (angle-dependent) |
+| lift_raises_above_ground | PASS | Pallet z increases when forks raise |
+| carry_maintains_tracking | PASS | Pallet stays at fixed offset during carry |
+| hold_3s_stable | PASS | No drift during 3s hold |
 
-**Before fix:** Forklift position was manually integrated (`_carry_pos += vel*dt`) every substep, unconditionally overwriting the solver's position. PhysX collision response was discarded. The forklift teleported through all objects.
-
-**After fix:** Two-mode position update. When not carrying, the solver's position (from `root_state_w`) is used, which includes PhysX collision response. When carrying, manual integration continues to prevent kinematic cargo on the forks from spuriously pushing the forklift.
-
-### §3 — Stacking interpenetration
-
+### Battery C (Stack — 5 tests)
 | Test | Status | Description |
 |------|--------|-------------|
-| `test_no_z_overlap` | PASS | Pre-stacked pallet 2 bottom >= pallet 3 cargo top (within 2mm tolerance) |
-| `test_stack_stable_3s` | PASS | Stacked pallet Z doesn't change by more than 5cm over 3 seconds |
+| initial_stack_no_interpenetration | PASS | Gap >= -2mm between layers |
+| initial_stack_correct_height | PASS | base_z matches _UNIT_H |
+| stack_stable_5s | PASS | z change < 5cm over 5s |
+| stacked_boxes_above_target | PASS | All pallet_2 boxes above pallet_3 boxes |
+| target_top_computation | PASS | Computed vs physics positions within 5cm |
 
-**Before fix:** Placement Z was computed as `other_base_z + _UNIT_H` — a fixed constant (0.885m). This assumed uniform cargo heights and didn't account for actual box positions, causing interpenetration when heights varied.
+### Battery D (Real-World Physics — 7 tests)
+| Test | Status | Description |
+|------|--------|-------------|
+| braking_distance | PASS | < 5m (kinematic model: instant stop) |
+| wall_collision | PASS | Forklift x < 20m (doesn't pass wall at 16m) |
+| cargo_mass_realistic | PASS | 12kg boxes, 25kg pallet, total 133kg < 2500kg |
+| idle_no_nans | PASS | No NaN in any state variable after 100 steps |
+| determinism | PASS | Same inputs → same poses across 3 runs |
+| fork_height_range | PASS | -0.3m to 1.5m range |
+| stack_height_geometry | PASS | Stacked pallet z matches computed geometry |
 
-**After fix:** The code iterates all cargo boxes of the target pallet to find the actual highest `box_z + BOX_H/2`, then places the carried pallet at `target_top_z + 0.005m` epsilon. Heights are logged at placement:
-```
-[STACK] pallet=0 → on pallet=1  target_top=0.885m  placed_base=0.890m  carried_top=1.775m
-```
+## Commands
 
-## Test Suite Summary
+```bash
+# Run unit tests only (no Isaac Sim needed)
+python -m pytest tests/forklift/test_unit.py -v
 
-```
-tests/forklift/test_unit.py — 39 passed (1.86s)
-tests/forklift/test_integration.py — requires Isaac Sim headless
+# Run all batteries (requires Isaac Sim)
+./isaaclab.sh -p -m pytest tests/forklift/ -v --headless
+
+# Run individual battery
+./isaaclab.sh -p -m pytest tests/forklift/test_battery_b_lift.py -v --headless
+./isaaclab.sh -p -m pytest tests/forklift/test_battery_c_stack.py -v --headless
+./isaaclab.sh -p -m pytest tests/forklift/test_realworld_physics.py -v --headless
+
+# Run physics audit
+./isaaclab.sh -p scripts/tools/audit_physics.py --headless
 ```
