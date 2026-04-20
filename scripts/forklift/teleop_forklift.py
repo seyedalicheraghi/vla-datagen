@@ -217,12 +217,13 @@ def main():
             forklift_xy  = env._carry_pos[0].cpu()
             dist = torch.norm(forklift_xy - pallet_pos[:2]).item()
             fork_pos_m = env._fork_pos[0].item()
-            grabbed = env._pallet_grabbed[0]
+            grabbed_pi = env._grabbed_idx[0]
+            carry_str = f"[CARRY P{grabbed_pi}]" if grabbed_pi >= 0 else "          "
             print(
                 f"  step={step:4d} | "
                 f"v_x={v_x:+.1f}  steer={math.degrees(steer):+.0f}°  fork={fork:+.1f} | "
                 f"fork_height={fork_pos_m:.3f}m | "
-                f"dist={dist:.2f}m | {'[CARRYING]' if grabbed else '          '} | "
+                f"dist={dist:.2f}m | {carry_str} | "
                 f"reward={reward[0]:.3f}"
             )
 
