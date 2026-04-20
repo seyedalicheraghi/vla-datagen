@@ -278,7 +278,7 @@ class ForkliftEnv(DirectRLEnv):
         self.actions = torch.zeros(self.num_envs, 3, device=self.device)
 
         all_joints = self.forklift.joint_names
-        print(f"[INFO] ForkliftC joints: {all_joints}")
+        print(f"[INFO] ForkliftC joints: {all_joints}", flush=True)
 
         # Drive wheels (all 4 spun cosmetically)
         self._lf_wheel_idx = self.forklift.find_joints("left_front_wheel_joint")[0][0]
@@ -296,9 +296,12 @@ class ForkliftEnv(DirectRLEnv):
         print(f"[INFO] lf={self._lf_wheel_idx} rf={self._rf_wheel_idx} "
               f"lb={self._lb_wheel_idx} rb={self._rb_wheel_idx} "
               f"l_steer={self._l_steer_idx} r_steer={self._r_steer_idx} "
-              f"fork={self._fork_idx}")
+              f"fork={self._fork_idx}", flush=True)
 
         self._rng = np.random.default_rng()
+
+        # Print sensor banner after scene is set up
+        self._print_sensor_banner()
 
         # Authoritative fork position — never read back from physics solver
         # (collision with carried pallet corrupts the solver's joint state)
@@ -464,8 +467,212 @@ class ForkliftEnv(DirectRLEnv):
         self.scene.sensors["cam_top_right"] = self.cam_top_right
         self.scene.sensors["lidar"]         = self.lidar
 
-        # Track whether we've saved debug sensor frames this run
+        # Observability state
         self._debug_sensors_saved = False
+        self._step_count = 0           # global step counter (not reset per episode)
+        self._status_interval = 20     # print status every N control steps
+        self._lidar_status = "INIT"    # last known LiDAR health
+        self._cam_status = {"front": "INIT", "top_l": "INIT", "top_r": "INIT"}
+        self._last_lidar_pts = 0
+        self._last_lidar_range = (0.0, 0.0)
+
+    # ------------------------------------------------------------------
+    # Observability — banner, per-step status, LiDAR sanity dump
+    # ------------------------------------------------------------------
+
+    def _print_sensor_banner(self):
+        """Print a startup banner listing every sensor and its config."""
+        sim_dt = self.cfg.sim.dt
+        ctrl_dt = sim_dt * self.cfg.decimation
+        render_dt = sim_dt * self.cfg.sim.render_interval
+
+        lines = ["=" * 60, "  SIM SENSORS", "=" * 60]
+
+        # LiDAR
+        try:
+            n_rays = self.lidar.num_rays if hasattr(self.lidar, 'num_rays') else "?"
+            lines.append(
+                f"  LiDAR  [ENABLED]   Ouster OS1-64  |  {_LIDAR_CHANNELS} beams  |  "
+                f"FOV +{_LIDAR_VERT_FOV[1]}\u00b0/{_LIDAR_VERT_FOV[0]}\u00b0  |  "
+                f"1024 h-samples  |  {_LIDAR_UPDATE_HZ} Hz  |  {_LIDAR_MAX_RANGE} m  |  "
+                f"mount: Forklift ({_LIDAR_MOUNT_FWD}, 0.0, {_LIDAR_MOUNT_UP})")
+        except Exception as e:
+            lines.append(f"  LiDAR  [DISABLED: {e}]")
+
+        # Cameras
+        for name, cam in [("front_cabin", self.cam_front),
+                          ("top_left", self.cam_top_left),
+                          ("top_right", self.cam_top_right)]:
+            try:
+                lines.append(
+                    f"  Camera [ENABLED]   {name:12s}  |  {_CAM_W}x{_CAM_H} RGB  |  "
+                    f"{_CAM_UPDATE_HZ} Hz  |  "
+                    f"prim: {cam.cfg.prim_path}")
+            except Exception as e:
+                lines.append(f"  Camera [DISABLED: {name} — {e}]")
+
+        lines.append(
+            f"  Physics dt=1/{int(1/sim_dt)}s  |  Control dt=1/{int(1/ctrl_dt)}s  |  "
+            f"Render dt=1/{int(1/render_dt)}s")
+        lines.append("=" * 60)
+
+        for ln in lines:
+            print(ln, flush=True)
+
+    def _print_step_status(self, obs: dict):
+        """Print one status line with LiDAR + camera health."""
+        self._step_count += 1
+        if self._step_count % self._status_interval != 0:
+            return
+
+        sim_time = self._step_count * self.cfg.sim.dt * self.cfg.decimation
+        x = self._carry_pos[0, 0].item()
+        y = self._carry_pos[0, 1].item()
+        yaw = math.degrees(self._heading[0].item())
+        vx = self.actions[0, 0].item()
+        vy = 0.0  # no lateral in Ackermann
+        fork_h = self._fork_pos[0].item()
+
+        # LiDAR health
+        lidar_data = obs.get("lidar")
+        if lidar_data is not None:
+            hits = lidar_data[0].cpu().numpy()
+            sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
+            dists = np.linalg.norm(hits - sensor_pos[np.newaxis, :], axis=-1)
+            valid = dists < _LIDAR_MAX_RANGE * 0.99
+            n_valid = int(valid.sum())
+            if n_valid == 0:
+                self._lidar_status = "NO_RETURNS"
+                self._last_lidar_pts = 0
+                self._last_lidar_range = (0.0, 0.0)
+            else:
+                valid_dists = dists[valid]
+                self._lidar_status = "OK"
+                self._last_lidar_pts = n_valid
+                self._last_lidar_range = (float(valid_dists.min()), float(valid_dists.max()))
+        else:
+            self._lidar_status = "NO_DATA"
+            self._last_lidar_pts = 0
+
+        lidar_str = (f"LiDAR: {self._lidar_status}"
+                     if self._lidar_status != "OK"
+                     else f"LiDAR: pts={self._last_lidar_pts} "
+                          f"range[{self._last_lidar_range[0]:.2f}-"
+                          f"{self._last_lidar_range[1]:.2f}]m")
+
+        # Camera health
+        cam_strs = []
+        for key, label in [("rgb_front", "front"), ("rgb_left", "top_l"), ("rgb_right", "top_r")]:
+            img = obs.get(key)
+            if img is None:
+                self._cam_status[label] = "NONE"
+            else:
+                arr = img[0]
+                if arr.max().item() == 0:
+                    self._cam_status[label] = "BLACK"
+                else:
+                    self._cam_status[label] = "OK"
+            cam_strs.append(f"{label}={self._cam_status[label]}")
+
+        grabbed = self._grabbed_idx[0]
+        act = self.actions[0].cpu().tolist()
+        act_str = f"[{act[0]:.1f},{act[1]:.2f},{act[2]:.1f}]"
+
+        print(
+            f"[t={sim_time:.2f}s step={self._step_count}] "
+            f"base=(x={x:.2f}, y={y:.2f}, yaw={yaw:.1f}\u00b0)  "
+            f"v=({vx:.2f}, {vy:.2f}) fork_h={fork_h:.2f}m  |  "
+            f"{lidar_str}  |  Cams: {' '.join(cam_strs)}  |  "
+            f"action={act_str} attach={grabbed}",
+            flush=True)
+
+    def _save_lidar_sanity_dump(self, obs: dict):
+        """Save LiDAR first-frame dump to debug_sensors/."""
+        os.makedirs(_DEBUG_SENSOR_DIR, exist_ok=True)
+
+        lidar_data = obs.get("lidar")
+        if lidar_data is None:
+            with open(os.path.join(_DEBUG_SENSOR_DIR, "lidar_stats.txt"), "w") as f:
+                f.write("LiDAR returned None — sensor may not be initialized\n")
+            print("[WARN] LiDAR sanity dump: NO DATA", flush=True)
+            return
+
+        hits = lidar_data[0].cpu().numpy()
+        sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
+        dists = np.linalg.norm(hits - sensor_pos[np.newaxis, :], axis=-1)
+        valid_mask = dists < _LIDAR_MAX_RANGE * 0.99
+        n_total = len(dists)
+        n_valid = int(valid_mask.sum())
+
+        # Save raw point cloud
+        np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_first_frame.npy"), hits)
+
+        # Save top-down PNG
+        try:
+            from PIL import Image as PILImage
+            IMG_SIZE = 512
+            RANGE_M = 40.0
+            img = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
+            if n_valid > 0:
+                pts = hits[valid_mask]
+                vd = dists[valid_mask]
+                px = ((pts[:, 0] - sensor_pos[0]) / RANGE_M * IMG_SIZE / 2
+                      + IMG_SIZE / 2).astype(int)
+                py = ((pts[:, 1] - sensor_pos[1]) / RANGE_M * IMG_SIZE / 2
+                      + IMG_SIZE / 2).astype(int)
+                mask = (px >= 0) & (px < IMG_SIZE) & (py >= 0) & (py < IMG_SIZE)
+                # Color by height: low=blue, mid=green, high=red
+                hz = pts[mask, 2]
+                r = np.clip((hz * 80).astype(int), 0, 255).astype(np.uint8)
+                g = np.clip((120 - abs(hz - 1.5) * 60).astype(int), 0, 255).astype(np.uint8)
+                b = np.clip((255 - hz * 80).astype(int), 0, 255).astype(np.uint8)
+                img[py[mask], px[mask]] = np.stack([r, g, b], axis=-1)
+            pil_img = PILImage.fromarray(img)
+            pil_img.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_first_frame_topdown.png"))
+        except Exception as e:
+            print(f"[WARN] Could not save LiDAR PNG: {e}", flush=True)
+
+        # Save stats
+        stats_lines = [
+            f"point_count_total: {n_total}",
+            f"point_count_valid: {n_valid} ({100*n_valid/max(n_total,1):.1f}%)",
+            f"shape: {hits.shape}",
+        ]
+        if n_valid > 0:
+            valid_dists = dists[valid_mask]
+            stats_lines += [
+                f"range_min: {valid_dists.min():.3f} m",
+                f"range_max: {valid_dists.max():.3f} m",
+                f"range_mean: {valid_dists.mean():.3f} m",
+                f"range_std: {valid_dists.std():.3f} m",
+            ]
+            # Per-beam histogram (how many returns per vertical channel)
+            n_h = max(n_total // _LIDAR_CHANNELS, 1)
+            stats_lines.append(f"expected_rays_per_beam: {n_h}")
+            for ch in range(_LIDAR_CHANNELS):
+                ch_start = ch * n_h
+                ch_end = min(ch_start + n_h, n_total)
+                ch_valid = int(valid_mask[ch_start:ch_end].sum())
+                stats_lines.append(f"  beam_{ch:02d}: {ch_valid}/{n_h} returns")
+        else:
+            stats_lines.append("WARNING: ZERO VALID RETURNS — DEAD SENSOR")
+
+        stats_path = os.path.join(_DEBUG_SENSOR_DIR, "lidar_stats.txt")
+        with open(stats_path, "w") as f:
+            f.write("\n".join(stats_lines) + "\n")
+
+        # Also save camera debug frames
+        for key in ("rgb_front", "rgb_left", "rgb_right"):
+            img_data = obs.get(key)
+            if img_data is not None:
+                frame = img_data[0].cpu().numpy()
+                if frame.shape[-1] == 4:
+                    frame = frame[:, :, :3]
+                np.save(os.path.join(_DEBUG_SENSOR_DIR, f"{key}.npy"), frame)
+
+        status = "OK" if n_valid > 0 else "DEAD"
+        print(f"[INFO] LiDAR sanity dump → {_DEBUG_SENSOR_DIR}/  "
+              f"({n_valid}/{n_total} valid returns — {status})", flush=True)
 
     # ------------------------------------------------------------------
     # Wall helpers
@@ -585,7 +792,7 @@ class ForkliftEnv(DirectRLEnv):
                 )
 
         print(f"[INFO] Spawned {_N_SCATTER_PALLETS} pallets with "
-              f"{_N_SCATTER_PALLETS * _N_BOXES} boxes around the warehouse")
+              f"{_N_SCATTER_PALLETS * _N_BOXES} boxes around the warehouse", flush=True)
 
     # ------------------------------------------------------------------
     # Pallet placement helper
@@ -739,7 +946,7 @@ class ForkliftEnv(DirectRLEnv):
                     env_id, env_t, pi, tx, ty, base_z, yaw=0.0)
 
             print(f"[INFO] Env {env_id}: {_N_INTERACTABLE} pallets placed "
-                  f"(pallet 2 stacked on pallet 3)")
+                  f"(pallet 2 stacked on pallet 3)", flush=True)
 
         # Snap driver camera immediately
         self._update_driver_cam()
@@ -916,7 +1123,7 @@ class ForkliftEnv(DirectRLEnv):
                     self._grab_heading[i] = fl_heading[i].item()
                     print(f"[GRAB] env={i} pallet={best_pi}  "
                           f"tine_z={tine_z_prev:.3f} m  "
-                          f"fwd={best_fwd:.2f} m")
+                          f"fwd={best_fwd:.2f} m", flush=True)
             else:
                 # ── Carry or release grabbed pallet ───────────────────
                 tine_z = j + 0.325
@@ -945,7 +1152,7 @@ class ForkliftEnv(DirectRLEnv):
                         i, env_t, grabbed_pi, drop_x, drop_y, drop_z)
                     self._grabbed_idx[i] = -1
                     print(f"[DROP] env={i} pallet={grabbed_pi}  "
-                          f"base_z={drop_z:.3f} m")
+                          f"base_z={drop_z:.3f} m", flush=True)
                 else:
                     # Carry — pallet follows forklift kinematically
                     fwd_i = self._grab_fwd[i]
@@ -1078,9 +1285,13 @@ class ForkliftEnv(DirectRLEnv):
                               device=self.device),
             "state":      self._get_proprioception(),
         }
-        # Save debug sensor frames on first observation
-        if not self._debug_sensors_saved:
-            self._save_debug_sensors(obs)
+        # LiDAR sanity dump after first 10 steps
+        if not self._debug_sensors_saved and self._step_count >= 10:
+            self._save_lidar_sanity_dump(obs)
+            self._debug_sensors_saved = True
+
+        # Per-step status line
+        self._print_step_status(obs)
         return obs
 
     def _get_proprioception(self) -> torch.Tensor:
@@ -1102,50 +1313,6 @@ class ForkliftEnv(DirectRLEnv):
             torch.tensor([float(g) for g in self._grabbed_idx],
                          device=self.device),
         ], dim=1)
-
-    def _save_debug_sensors(self, obs: dict):
-        """Save one frame from each camera + top-down LiDAR projection to debug_sensors/."""
-        try:
-            os.makedirs(_DEBUG_SENSOR_DIR, exist_ok=True)
-
-            # Save camera frames
-            for key in ("rgb_front", "rgb_left", "rgb_right"):
-                if key in obs and obs[key] is not None:
-                    frame = obs[key][0].cpu().numpy()
-                    if frame.shape[-1] == 4:  # RGBA → RGB
-                        frame = frame[:, :, :3]
-                    # Save as raw .npy (no cv2 dependency required)
-                    np.save(os.path.join(_DEBUG_SENSOR_DIR, f"{key}.npy"), frame)
-
-            # Save LiDAR top-down projection as 2D image (bird's-eye XY)
-            if "lidar" in obs and obs["lidar"] is not None:
-                hits = obs["lidar"][0].cpu().numpy()  # (N_rays, 3)
-                # Filter out max-range returns (rays that didn't hit anything)
-                valid = np.linalg.norm(hits, axis=-1) < _LIDAR_MAX_RANGE * 0.99
-                pts = hits[valid]
-                if len(pts) > 0:
-                    # Project onto 2D grid for visualization
-                    IMG_SIZE = 256
-                    RANGE_M  = 30.0  # metres per half-side
-                    img = np.zeros((IMG_SIZE, IMG_SIZE), dtype=np.uint8)
-                    # Center on sensor position (LiDAR origin)
-                    sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
-                    px = ((pts[:, 0] - sensor_pos[0]) / RANGE_M * IMG_SIZE / 2
-                          + IMG_SIZE / 2).astype(int)
-                    py = ((pts[:, 1] - sensor_pos[1]) / RANGE_M * IMG_SIZE / 2
-                          + IMG_SIZE / 2).astype(int)
-                    mask = (px >= 0) & (px < IMG_SIZE) & (py >= 0) & (py < IMG_SIZE)
-                    img[py[mask], px[mask]] = 255
-                    np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_topdown.npy"), img)
-
-                # Also save raw point cloud
-                np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_points.npy"), hits)
-
-            self._debug_sensors_saved = True
-            print(f"[INFO] Debug sensor frames saved to {_DEBUG_SENSOR_DIR}/")
-        except Exception as e:
-            print(f"[WARN] Failed to save debug sensor frames: {e}")
-            self._debug_sensors_saved = True  # don't retry
 
     def _get_rewards(self) -> torch.Tensor:
         forklift_xy = self._carry_pos                 # authoritative XY
@@ -1180,7 +1347,7 @@ if __name__ == "__main__":
 
     env = ForkliftEnv(ForkliftEnvCfg())
     env.reset()
-    print("[INFO] Warehouse loaded. Press Ctrl+C to exit.")
+    print("[INFO] Warehouse loaded. Press Ctrl+C to exit.", flush=True)
 
     while simulation_app.is_running():
         env.step(torch.zeros(1, 3))
