@@ -777,7 +777,7 @@ class ForkliftEnv(DirectRLEnv):
             from pxr import UsdGeom, Gf
             pallet_prim = stage.GetPrimAtPath(pallet_path)
             xf = UsdGeom.XformCommonAPI(pallet_prim)
-            xf.SetTranslate(Gf.Vec3d(px, py, _PALLET_H / 2))
+            xf.SetTranslate(Gf.Vec3d(px, py, 0.0))  # root is at pallet bottom
             xf.SetRotate(Gf.Vec3f(0, 0, math.degrees(yaw)))
 
             # ── Place cargo boxes on top of this pallet ───────────────
@@ -822,6 +822,9 @@ class ForkliftEnv(DirectRLEnv):
         base_z is the z-coordinate of the pallet's bottom surface:
           - 0.0 for ground level
           - _UNIT_H for stacked on one pallet+cargo layer
+
+        The pallet root Xform is at LOCAL z=0 (bottom of geometry),
+        so we set root z = base_z directly (NOT base_z + _PALLET_H/2).
         """
         cos_y = math.cos(yaw)
         sin_y = math.sin(yaw)
@@ -831,7 +834,7 @@ class ForkliftEnv(DirectRLEnv):
         pal_pose = torch.zeros(1, 7, device=self.device)
         pal_pose[0, 0] = tx
         pal_pose[0, 1] = ty
-        pal_pose[0, 2] = base_z + _PALLET_H / 2
+        pal_pose[0, 2] = base_z   # root is at pallet bottom, not center
         pal_pose[0, 3] = qw
         pal_pose[0, 6] = qz
         self.pallets[pi].write_root_pose_to_sim(pal_pose, env_ids=env_t)
@@ -1142,9 +1145,8 @@ class ForkliftEnv(DirectRLEnv):
 
                     # Per-pallet pocket height check:
                     # Fork tines must be inside or below the pocket opening.
-                    # pocket_bottom = pal_bottom + _PALLET_BOT_H
-                    # pocket_top = pocket_bottom + _PALLET_STG_H
-                    pal_bottom = pl_z - _PALLET_H / 2
+                    # Root z IS the pallet bottom (local z=0).
+                    pal_bottom = pl_z   # root = bottom
                     pocket_bottom = pal_bottom + _PALLET_BOT_H
                     pocket_top = pocket_bottom + _PALLET_STG_H
                     # Tines must be below pocket top + tolerance to enter
@@ -1164,7 +1166,7 @@ class ForkliftEnv(DirectRLEnv):
                 if best_pi >= 0:
                     pp = self.pallets[best_pi].data.root_pos_w
                     pl_z = pp[i, 2].item()
-                    pal_bottom = pl_z - _PALLET_H / 2
+                    pal_bottom = pl_z   # root = bottom
                     pocket_bottom = pal_bottom + _PALLET_BOT_H
                     pocket_top = pocket_bottom + _PALLET_STG_H
                     self._grabbed_idx[i] = best_pi
@@ -1235,7 +1237,7 @@ class ForkliftEnv(DirectRLEnv):
                     new_py = fl_y + fwd_i * sin_i + lat_i * cos_i
 
                     pallet_bottom = max(tine_z - _PALLET_CL, 0.0)
-                    new_pz = pallet_bottom + _PALLET_H / 2
+                    new_pz = pallet_bottom   # root is at pallet bottom
 
                     delta_h = fl_heading[i].item() - self._grab_heading[i]
                     cos_d = math.cos(delta_h)
