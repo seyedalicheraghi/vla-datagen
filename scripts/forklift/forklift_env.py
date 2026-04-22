@@ -1180,49 +1180,50 @@ class ForkliftEnv(DirectRLEnv):
             else:
                 # ── Carry or release grabbed pallet ───────────────────
                 tine_z = j + 0.325
-                if j < -0.25:
-                    # Release — check for stacking
-                    drop_pos = self.pallets[grabbed_pi].data.root_pos_w[i]
-                    drop_x = drop_pos[0].item()
-                    drop_y = drop_pos[1].item()
-                    drop_z = max(tine_z - _PALLET_CL, 0.0)
-                    stacked_on = -1
+                pallet_bottom = max(tine_z - _PALLET_CL, 0.0)
 
-                    # Check if dropping onto another pallet.
-                    # CRITICAL: compute target top Z from our authoritative
-                    # _pallet_base_z + known geometry, NOT from
-                    # data.root_pos_w which may be stale (physics buffer
-                    # lags 1+ steps behind write_root_pose_to_sim).
-                    for other_pi in range(_N_INTERACTABLE):
-                        if other_pi == grabbed_pi:
-                            continue
-                        op = self.pallets[other_pi].data.root_pos_w[i]
-                        ox, oy = op[0].item(), op[1].item()
-                        if abs(drop_x - ox) < _PALLET_L * 0.8 \
-                                and abs(drop_y - oy) < _PALLET_W * 0.8:
-                            # Target top = base + pallet height + box height
-                            other_base = self._pallet_base_z[i][other_pi]
-                            target_top_z = other_base + _PALLET_H + _BOX_H
-                            # Place carried pallet bottom on target top + epsilon
-                            drop_z = target_top_z + 0.005
-                            stacked_on = other_pi
-                            print(f"[STACK_DIAG] env={i} target_pallet={other_pi}  "
-                                  f"target_base_z={other_base:.4f}  "
-                                  f"target_top_z={target_top_z:.4f}  "
-                                  f"drop_z={drop_z:.4f}  "
-                                  f"carried_pallet={grabbed_pi}", flush=True)
-                            break
+                # Current carried pallet XY (from last carry update)
+                carried_pos = self.pallets[grabbed_pi].data.root_pos_w[i]
+                carried_x = carried_pos[0].item()
+                carried_y = carried_pos[1].item()
+
+                # Check if carried pallet is above any other pallet.
+                # We do this EVERY frame (not just on release) to know
+                # the correct stacking height at all times.
+                stack_target_pi = -1
+                stack_drop_z = pallet_bottom
+                for other_pi in range(_N_INTERACTABLE):
+                    if other_pi == grabbed_pi:
+                        continue
+                    op = self.pallets[other_pi].data.root_pos_w[i]
+                    ox, oy = op[0].item(), op[1].item()
+                    if abs(carried_x - ox) < _PALLET_L * 0.8 \
+                            and abs(carried_y - oy) < _PALLET_W * 0.8:
+                        other_base = self._pallet_base_z[i][other_pi]
+                        target_top_z = other_base + _PALLET_H + _BOX_H
+                        stack_drop_z = target_top_z + 0.005
+                        stack_target_pi = other_pi
+                        break
+
+                # Clamp: during carry, don't let pallet descend INTO
+                # the target. The carried pallet bottom must stay at or
+                # above the target top.
+                if stack_target_pi >= 0:
+                    pallet_bottom = max(pallet_bottom, stack_drop_z)
+
+                if j < -0.25:
+                    # Release
+                    drop_z = stack_drop_z if stack_target_pi >= 0 else max(tine_z - _PALLET_CL, 0.0)
 
                     self._pallet_base_z[i][grabbed_pi] = drop_z
                     self._place_pallet_and_cargo(
-                        i, env_t, grabbed_pi, drop_x, drop_y, drop_z)
+                        i, env_t, grabbed_pi, carried_x, carried_y, drop_z)
                     self._grabbed_idx[i] = -1
 
-                    if stacked_on >= 0:
-                        # Compute carried cargo top for logging
+                    if stack_target_pi >= 0:
                         carried_top = drop_z + _PALLET_H + _BOX_H
                         print(f"[STACK] env={i} pallet={grabbed_pi} → "
-                              f"on pallet={stacked_on}  "
+                              f"on pallet={stack_target_pi}  "
                               f"target_top={target_top_z:.3f}m  "
                               f"placed_base={drop_z:.3f}m  "
                               f"carried_top={carried_top:.3f}m", flush=True)
@@ -1236,7 +1237,6 @@ class ForkliftEnv(DirectRLEnv):
                     new_px = fl_x + fwd_i * cos_i - lat_i * sin_i
                     new_py = fl_y + fwd_i * sin_i + lat_i * cos_i
 
-                    pallet_bottom = max(tine_z - _PALLET_CL, 0.0)
                     new_pz = pallet_bottom   # root is at pallet bottom
 
                     delta_h = fl_heading[i].item() - self._grab_heading[i]
