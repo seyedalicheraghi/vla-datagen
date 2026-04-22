@@ -136,7 +136,7 @@ _SCATTER_COLORS = [
     (0.65, 0.45, 0.28),   # darker cardboard
 ]
 
-_N_SCATTER_PALLETS = 50      # number of pallet+box sets around the warehouse
+_N_SCATTER_PALLETS = 5       # number of pallet+box sets around the warehouse
 
 # ---------------------------------------------------------------------------
 # Sensor constants
@@ -262,6 +262,9 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
     wheel_radius: float = 0.325
     wheel_base:   float = 1.65
     chassis_z_offset: float = 0.0   # ForkliftC USD root at ground level
+
+    # Set False for headless physics-only tests (no camera/lidar)
+    enable_sensors: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -418,50 +421,54 @@ class ForkliftEnv(DirectRLEnv):
                 print(f"[spawn] cargo_{pi}_{bi}  rigid=kinematic  collider=cuboid  "
                       f"mass={_BOX_MASS}kg  size=({_BOX_L},{_BOX_W},{_BOX_H})", flush=True)
 
-        # ── Three RGB cameras (224×224, ~15 Hz, world-pose updated each step)
-        _cam_cfg = dict(
-            update_period=1 / _CAM_UPDATE_HZ,
-            height=_CAM_H,
-            width=_CAM_W,
-            data_types=["rgb"],
-            spawn=sim_utils.PinholeCameraCfg(
-                focal_length=10.0,
-                horizontal_aperture=20.955,
-                clipping_range=(0.1, 80.0),
-            ),
-            offset=CameraCfg.OffsetCfg(
-                pos=(0.0, 0.0, 0.0),
-                rot=(1.0, 0.0, 0.0, 0.0),
-                convention="world",
-            ),
-        )
-        self.cam_front = Camera(CameraCfg(
-            prim_path="/World/envs/env_.*/CamFrontCabin", **_cam_cfg))
-        self.cam_top_left = Camera(CameraCfg(
-            prim_path="/World/envs/env_.*/CamTopLeft", **_cam_cfg))
-        self.cam_top_right = Camera(CameraCfg(
-            prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
+        # ── Sensors (cameras + LiDAR) — skip for headless physics tests ─
+        self.cam_front = None
+        self.cam_top_left = None
+        self.cam_top_right = None
+        self.lidar = None
 
-        # ── Ouster OS1-64 LiDAR (RayCaster with LidarPatternCfg) ─────
-        # prim_path must point to an existing physics body — the forklift
-        self.lidar = RayCaster(RayCasterCfg(
-            prim_path="/World/envs/env_.*/Forklift",
-            mesh_prim_paths=["/World/Ground"],
-            offset=RayCasterCfg.OffsetCfg(
-                pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
-                rot=(1.0, 0.0, 0.0, 0.0),
-            ),
-            ray_alignment="base",
-            pattern_cfg=rc_patterns.LidarPatternCfg(
-                channels=_LIDAR_CHANNELS,
-                vertical_fov_range=_LIDAR_VERT_FOV,
-                horizontal_fov_range=_LIDAR_HORIZ_FOV,
-                horizontal_res=_LIDAR_HORIZ_RES,
-            ),
-            max_distance=_LIDAR_MAX_RANGE,
-            update_period=1 / _LIDAR_UPDATE_HZ,
-            debug_vis=False,
-        ))
+        if self.cfg.enable_sensors:
+            _cam_cfg = dict(
+                update_period=1 / _CAM_UPDATE_HZ,
+                height=_CAM_H,
+                width=_CAM_W,
+                data_types=["rgb"],
+                spawn=sim_utils.PinholeCameraCfg(
+                    focal_length=10.0,
+                    horizontal_aperture=20.955,
+                    clipping_range=(0.1, 80.0),
+                ),
+                offset=CameraCfg.OffsetCfg(
+                    pos=(0.0, 0.0, 0.0),
+                    rot=(1.0, 0.0, 0.0, 0.0),
+                    convention="world",
+                ),
+            )
+            self.cam_front = Camera(CameraCfg(
+                prim_path="/World/envs/env_.*/CamFrontCabin", **_cam_cfg))
+            self.cam_top_left = Camera(CameraCfg(
+                prim_path="/World/envs/env_.*/CamTopLeft", **_cam_cfg))
+            self.cam_top_right = Camera(CameraCfg(
+                prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
+
+            self.lidar = RayCaster(RayCasterCfg(
+                prim_path="/World/envs/env_.*/Forklift",
+                mesh_prim_paths=["/World/Ground"],
+                offset=RayCasterCfg.OffsetCfg(
+                    pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
+                    rot=(1.0, 0.0, 0.0, 0.0),
+                ),
+                ray_alignment="base",
+                pattern_cfg=rc_patterns.LidarPatternCfg(
+                    channels=_LIDAR_CHANNELS,
+                    vertical_fov_range=_LIDAR_VERT_FOV,
+                    horizontal_fov_range=_LIDAR_HORIZ_FOV,
+                    horizontal_res=_LIDAR_HORIZ_RES,
+                ),
+                max_distance=_LIDAR_MAX_RANGE,
+                update_period=1 / _LIDAR_UPDATE_HZ,
+                debug_vis=False,
+            ))
 
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
@@ -470,10 +477,12 @@ class ForkliftEnv(DirectRLEnv):
             self.scene.rigid_objects[f"pallet_{pi}"] = pallet
             for bi, box in enumerate(self.pallet_boxes[pi]):
                 self.scene.rigid_objects[f"box_{pi}_{bi}"] = box
-        self.scene.sensors["cam_front"]     = self.cam_front
-        self.scene.sensors["cam_top_left"]  = self.cam_top_left
-        self.scene.sensors["cam_top_right"] = self.cam_top_right
-        self.scene.sensors["lidar"]         = self.lidar
+        if self.cam_front is not None:
+            self.scene.sensors["cam_front"]     = self.cam_front
+            self.scene.sensors["cam_top_left"]  = self.cam_top_left
+            self.scene.sensors["cam_top_right"] = self.cam_top_right
+        if self.lidar is not None:
+            self.scene.sensors["lidar"]         = self.lidar
 
         # Observability state
         self._debug_sensors_saved = False
@@ -497,27 +506,26 @@ class ForkliftEnv(DirectRLEnv):
         lines = ["=" * 60, "  SIM SENSORS", "=" * 60]
 
         # LiDAR
-        try:
-            n_rays = self.lidar.num_rays if hasattr(self.lidar, 'num_rays') else "?"
+        if self.lidar is not None:
             lines.append(
                 f"  LiDAR  [ENABLED]   Ouster OS1-64  |  {_LIDAR_CHANNELS} beams  |  "
                 f"FOV +{_LIDAR_VERT_FOV[1]}\u00b0/{_LIDAR_VERT_FOV[0]}\u00b0  |  "
                 f"1024 h-samples  |  {_LIDAR_UPDATE_HZ} Hz  |  {_LIDAR_MAX_RANGE} m  |  "
                 f"mount: Forklift ({_LIDAR_MOUNT_FWD}, 0.0, {_LIDAR_MOUNT_UP})")
-        except Exception as e:
-            lines.append(f"  LiDAR  [DISABLED: {e}]")
+        else:
+            lines.append(f"  LiDAR  [DISABLED: enable_sensors=False]")
 
         # Cameras
         for name, cam in [("front_cabin", self.cam_front),
                           ("top_left", self.cam_top_left),
                           ("top_right", self.cam_top_right)]:
-            try:
+            if cam is not None:
                 lines.append(
                     f"  Camera [ENABLED]   {name:12s}  |  {_CAM_W}x{_CAM_H} RGB  |  "
                     f"{_CAM_UPDATE_HZ} Hz  |  "
                     f"prim: {cam.cfg.prim_path}")
-            except Exception as e:
-                lines.append(f"  Camera [DISABLED: {name} — {e}]")
+            else:
+                lines.append(f"  Camera [DISABLED: {name} — enable_sensors=False]")
 
         lines.append(
             f"  Physics dt=1/{int(1/sim_dt)}s  |  Control dt=1/{int(1/ctrl_dt)}s  |  "
@@ -957,7 +965,8 @@ class ForkliftEnv(DirectRLEnv):
                   f"(pallet 2 stacked on pallet 3)", flush=True)
 
         # Snap driver camera immediately
-        self._update_driver_cam()
+        if self.cam_front is not None:
+            self._update_driver_cam()
 
     # ------------------------------------------------------------------
     # Actions
@@ -1077,7 +1086,8 @@ class ForkliftEnv(DirectRLEnv):
         self._update_pallet_grab(fork_cmd, new_fork, fork_pos)
 
         # ── Driver camera ─────────────────────────────────────────────
-        self._update_driver_cam()
+        if self.cam_front is not None:
+            self._update_driver_cam()
 
     # ------------------------------------------------------------------
     # Pallet grab & carry
@@ -1337,10 +1347,6 @@ class ForkliftEnv(DirectRLEnv):
 
     def _get_observations(self):
         obs = {
-            "rgb_front":  self.cam_front.data.output["rgb"],
-            "rgb_left":   self.cam_top_left.data.output["rgb"],
-            "rgb_right":  self.cam_top_right.data.output["rgb"],
-            "lidar":      self.lidar.data.ray_hits_w,
             "pallet_pos": self.pallet.data.root_pos_w,
             "fork_pos":   self._fork_pos.unsqueeze(1),
             "grabbed":    torch.tensor(
@@ -1349,9 +1355,17 @@ class ForkliftEnv(DirectRLEnv):
                               device=self.device),
             "state":      self._get_proprioception(),
         }
+        if self.cam_front is not None:
+            obs["rgb_front"] = self.cam_front.data.output["rgb"]
+            obs["rgb_left"]  = self.cam_top_left.data.output["rgb"]
+            obs["rgb_right"] = self.cam_top_right.data.output["rgb"]
+        if self.lidar is not None:
+            obs["lidar"] = self.lidar.data.ray_hits_w
+
         # LiDAR sanity dump after first 10 steps
         if not self._debug_sensors_saved and self._step_count >= 10:
-            self._save_lidar_sanity_dump(obs)
+            if self.lidar is not None:
+                self._save_lidar_sanity_dump(obs)
             self._debug_sensors_saved = True
 
         # Per-step status line
