@@ -87,7 +87,7 @@ print("--- TEST 1: Ground contact (all objects at correct heights) ---", flush=T
 for pi in range(_N_INTERACTABLE):
     base_z = env._pallet_base_z[0][pi]
     pal_z = env.pallets[pi].data.root_pos_w[0, 2].item()
-    expected_pal_z = base_z + _PALLET_H / 2
+    expected_pal_z = base_z  # root is at pallet bottom
 
     check(f"pallet_{pi}_height",
           abs(pal_z - expected_pal_z) < 0.02,
@@ -104,7 +104,7 @@ for pi in range(_N_INTERACTABLE):
             continue
 
 # Pallet 2 must be above pallet 3
-p2_bottom = env.pallets[2].data.root_pos_w[0, 2].item() - _PALLET_H / 2
+p2_bottom = env.pallets[2].data.root_pos_w[0, 2].item()  # root = bottom
 p3_top_box = max(env.pallet_boxes[3][bi].data.root_pos_w[0, 2].item()
                  for bi in range(_N_BOXES)) + _BOX_H / 2
 check("stack_no_interpenetration",
@@ -188,7 +188,7 @@ if grabbed:
     step_n(env, 45, torch.tensor([[0.0, 0.0, 1.0]], device=env.device))
 
     pal_z = env.pallets[pi].data.root_pos_w[0, 2].item()
-    pal_bottom = pal_z - _PALLET_H / 2
+    pal_bottom = pal_z  # root = bottom
     check("lift_above_ground",
           pal_bottom > 0.05,
           f"pallet_bottom_z={pal_bottom:.3f}m (expected >0.05m)")
@@ -265,7 +265,7 @@ if grabbed:
                   f"base_z={base_z_0:.4f} expected={expected_base:.4f}")
 
             # Verify no interpenetration
-            p0_bottom = p0_z - _PALLET_H / 2
+            p0_bottom = p0_z  # root = bottom
             p1_cargo_top = max(env.pallet_boxes[1][bi].data.root_pos_w[0, 2].item()
                                for bi in range(_N_BOXES)) + _BOX_H / 2
             gap = p0_bottom - p1_cargo_top
