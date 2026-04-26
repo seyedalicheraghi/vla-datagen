@@ -1,0 +1,72 @@
+point_count_total: 65536
+point_count_valid: 30720 (46.9%)
+shape: (65536, 3)
+range_min: 7.264 m
+range_max: 109.764 m
+range_mean: 24.916 m
+range_std: 22.510 m
+expected_rays_per_beam: 1024
+  beam_00: 1024/1024 returns
+  beam_01: 1024/1024 returns
+  beam_02: 1024/1024 returns
+  beam_03: 1024/1024 returns
+  beam_04: 1024/1024 returns
+  beam_05: 1024/1024 returns
+  beam_06: 1024/1024 returns
+  beam_07: 1024/1024 returns
+  beam_08: 1024/1024 returns
+  beam_09: 1024/1024 returns
+  beam_10: 1024/1024 returns
+  beam_11: 1024/1024 returns
+  beam_12: 1024/1024 returns
+  beam_13: 1024/1024 returns
+  beam_14: 1024/1024 returns
+  beam_15: 1024/1024 returns
+  beam_16: 1024/1024 returns
+  beam_17: 1024/1024 returns
+  beam_18: 1024/1024 returns
+  beam_19: 1024/1024 returns
+  beam_20: 1024/1024 returns
+  beam_21: 1024/1024 returns
+  beam_22: 1024/1024 returns
+  beam_23: 1024/1024 returns
+  beam_24: 1024/1024 returns
+  beam_25: 1024/1024 returns
+  beam_26: 1024/1024 returns
+  beam_27: 1024/1024 returns
+  beam_28: 1024/1024 returns
+  beam_29: 1024/1024 returns
+  beam_30: 0/1024 returns
+  beam_31: 0/1024 returns
+  beam_32: 0/1024 returns
+  beam_33: 0/1024 returns
+  beam_34: 0/1024 returns
+  beam_35: 0/1024 returns
+  beam_36: 0/1024 returns
+  beam_37: 0/1024 returns
+  beam_38: 0/1024 returns
+  beam_39: 0/1024 returns
+  beam_40: 0/1024 returns
+  beam_41: 0/1024 returns
+  beam_42: 0/1024 returns
+  beam_43: 0/1024 returns
+  beam_44: 0/1024 returns
+  beam_45: 0/1024 returns
+  beam_46: 0/1024 returns
+  beam_47: 0/1024 returns
+  beam_48: 0/1024 returns
+  beam_49: 0/1024 returns
+  beam_50: 0/1024 returns
+  beam_51: 0/1024 returns
+  beam_52: 0/1024 returns
+  beam_53: 0/1024 returns
+  beam_54: 0/1024 returns
+  beam_55: 0/1024 returns
+  beam_56: 0/1024 returns
+  beam_57: 0/1024 returns
+  beam_58: 0/1024 returns
+  beam_59: 0/1024 returns
+  beam_60: 0/1024 returns
+  beam_61: 0/1024 returns
+  beam_62: 0/1024 returns
+  beam_63: 0/1024 returns

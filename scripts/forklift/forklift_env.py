@@ -109,7 +109,7 @@ _BOX_COLOR_TARGET = (0.30, 0.55, 0.85)  # blue — matches target pallet
 _PARK_Z           = -60.0               # underground parking for inactive units
 
 # Interactable pallets (can be picked up, carried, stacked)
-_N_INTERACTABLE   = 4                   # number of interactable pallet+cargo sets
+_N_INTERACTABLE   = 1                   # number of interactable pallet+cargo sets
 _PALLET_COLORS    = [
     _PALLET_COLOR_TARGET,               # pallet 0: blue (primary pick target)
     _PALLET_COLOR,                      # pallet 1: brown
@@ -136,7 +136,7 @@ _SCATTER_COLORS = [
     (0.65, 0.45, 0.28),   # darker cardboard
 ]
 
-_N_SCATTER_PALLETS = 5       # number of pallet+box sets around the warehouse
+_N_SCATTER_PALLETS = 0       # number of pallet+box sets around the warehouse
 
 # ---------------------------------------------------------------------------
 # Sensor constants
@@ -265,6 +265,8 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
 
     # Set False for headless physics-only tests (no camera/lidar)
     enable_sensors: bool = True
+    # Set False to skip LiDAR creation even when other sensors are enabled
+    enable_lidar: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -451,24 +453,25 @@ class ForkliftEnv(DirectRLEnv):
             self.cam_top_right = Camera(CameraCfg(
                 prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
 
-            self.lidar = RayCaster(RayCasterCfg(
-                prim_path="/World/envs/env_.*/Forklift",
-                mesh_prim_paths=["/World/Ground"],
-                offset=RayCasterCfg.OffsetCfg(
-                    pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
-                    rot=(1.0, 0.0, 0.0, 0.0),
-                ),
-                ray_alignment="base",
-                pattern_cfg=rc_patterns.LidarPatternCfg(
-                    channels=_LIDAR_CHANNELS,
-                    vertical_fov_range=_LIDAR_VERT_FOV,
-                    horizontal_fov_range=_LIDAR_HORIZ_FOV,
-                    horizontal_res=_LIDAR_HORIZ_RES,
-                ),
-                max_distance=_LIDAR_MAX_RANGE,
-                update_period=1 / _LIDAR_UPDATE_HZ,
-                debug_vis=False,
-            ))
+            if self.cfg.enable_lidar:
+                self.lidar = RayCaster(RayCasterCfg(
+                    prim_path="/World/envs/env_.*/Forklift",
+                    mesh_prim_paths=["/World/Ground"],
+                    offset=RayCasterCfg.OffsetCfg(
+                        pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
+                        rot=(1.0, 0.0, 0.0, 0.0),
+                    ),
+                    ray_alignment="base",
+                    pattern_cfg=rc_patterns.LidarPatternCfg(
+                        channels=_LIDAR_CHANNELS,
+                        vertical_fov_range=_LIDAR_VERT_FOV,
+                        horizontal_fov_range=_LIDAR_HORIZ_FOV,
+                        horizontal_res=_LIDAR_HORIZ_RES,
+                    ),
+                    max_distance=_LIDAR_MAX_RANGE,
+                    update_period=1 / _LIDAR_UPDATE_HZ,
+                    debug_vis=False,
+                ))
 
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
@@ -913,13 +916,22 @@ class ForkliftEnv(DirectRLEnv):
         super()._reset_idx(env_ids)
         origins = self.scene.env_origins[env_ids]
 
-        # Reset forklift
+        # Reset forklift — spawn 1.5 m behind the pallet at (10, 0) so its
+        # tines sit in the pocket, ready to lift. Pallet length is 1.219 m
+        # (centered on root); forklift root + 1.5 m forward puts tine tips
+        # well inside the pocket.
+        _FORKLIFT_SPAWN_X = 8.5
+        _FORK_LIFT_J = -0.15        # tine_z = j + wheel_radius ≈ 0.175 m,
+                                    # squarely inside pocket (0.06–0.26 m)
+
         default_root = self.forklift.data.default_root_state[env_ids].clone()
         default_root[:, :3] += origins
+        default_root[:, 0] += _FORKLIFT_SPAWN_X
         self.forklift.write_root_pose_to_sim(default_root[:, :7], env_ids=env_ids)
         self.forklift.write_root_velocity_to_sim(default_root[:, 7:], env_ids=env_ids)
         dj_pos = self.forklift.data.default_joint_pos[env_ids].clone()
         dj_vel = self.forklift.data.default_joint_vel[env_ids].clone()
+        dj_pos[:, self._fork_idx] = _FORK_LIFT_J
         self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
         # Clear grab state and reset authoritative position/heading/fork
@@ -937,17 +949,9 @@ class ForkliftEnv(DirectRLEnv):
                 self._grab_box_offsets[env_id][pi] = list(_BOX_LOCAL_OFFSETS)
                 self._pallet_base_z[env_id][pi] = 0.0
 
-        # Per-env layout: place interactable pallets
-        # Layout:
-        #   Pallet 0 (blue): 10m ahead — primary pick target
-        #   Pallet 1: 6m right, 8m ahead — on ground
-        #   Pallet 2: 6m left, 8m ahead — already stacked on pallet 3
-        #   Pallet 3: 6m left, 8m ahead — bottom of a stack (same XY as pallet 2)
+        # Per-env layout: single interactable pallet in front of the forklift
         _POSITIONS = [
-            (10.0,   0.0, 0.0),         # pallet 0: ground level
-            ( 8.0,  -6.0, 0.0),         # pallet 1: ground level
-            ( 8.0,   6.0, _UNIT_H),     # pallet 2: stacked on pallet 3
-            ( 8.0,   6.0, 0.0),         # pallet 3: ground level (under pallet 2)
+            (10.0, 0.0, 0.0),           # pallet 0: ground level, 10m ahead
         ]
 
         for i, env_id in enumerate(env_ids.tolist()):
@@ -964,8 +968,8 @@ class ForkliftEnv(DirectRLEnv):
                 self._place_pallet_and_cargo(
                     env_id, env_t, pi, tx, ty, base_z, yaw=0.0)
 
-            print(f"[INFO] Env {env_id}: {_N_INTERACTABLE} pallets placed "
-                  f"(pallet 2 stacked on pallet 3)", flush=True)
+            print(f"[INFO] Env {env_id}: {_N_INTERACTABLE} pallet placed "
+                  f"at (+{_POSITIONS[0][0]:.1f}, {_POSITIONS[0][1]:+.1f}) m", flush=True)
 
         # Snap driver camera immediately
         if self.cam_front is not None:
