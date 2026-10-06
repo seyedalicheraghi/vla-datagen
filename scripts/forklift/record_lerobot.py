@@ -8,20 +8,16 @@ Usage:
     ./isaaclab.sh -p scripts/forklift/record_lerobot.py [--num_episodes 10]
     ./isaaclab.sh -p scripts/forklift/record_lerobot.py --headless  # no GUI
 
-Schema:
+Schema (image-only — cameras are the only sensors):
     observation.images.front_cabin  — 224×224 RGB (primary VLA camera)
     observation.images.top_left     — 224×224 RGB
     observation.images.top_right    — 224×224 RGB
-    observation.lidar               — (N_rays, 3) float32 point cloud
     observation.state               — (8,) float32 proprioception
     action                          — (5,) float32 teleop commands
     task                            — str (natural language instruction)
 
-LiDAR note:
-    LeRobot has no first-class point-cloud type. We store LiDAR as a
-    range image of shape (64, 1024) with dtype float32, where each pixel
-    is the range in metres. This is fixed-shape and video-pipeline-friendly,
-    matching π₀-style patch tokenization. Rays that missed return max_range.
+One frame is recorded per env.step, so the dataset fps equals the 30 Hz
+control rate.
 """
 
 # ---------------------------------------------------------------------------
@@ -38,9 +34,32 @@ parser.add_argument("--max_steps", type=int, default=3000,
                     help="Max steps per episode before auto-reset.")
 parser.add_argument("--task_instruction", type=str,
                     default="pick up the blue pallet and place it on top of the brown pallet",
-                    help="Natural language task instruction.")
+                    help="Fallback task instruction (used only if --prompt-template is empty).")
 parser.add_argument("--dataset_dir", type=str, default="datasets/forklift_teleop",
                     help="Output directory for the dataset.")
+
+# Language-instruction templating + randomization
+parser.add_argument("--prompt-template", type=str, default=None,
+                    help="format-string with {cx}{cy}{cz}{cyaw_deg}{fx}{fy}{fz}"
+                         "{fyaw_deg}{pallet_idx}{dx}{dy}{distance_m}{bearing_deg}. "
+                         "Default: prompt_builder.DEFAULT_TEMPLATE.")
+parser.add_argument("--prompt-include-forklift", type=lambda s: s.lower() != "false",
+                    default=True,
+                    help="If false, template must not reference any {f*} placeholders.")
+parser.add_argument("--target-pallet", type=int, default=0,
+                    help="Index of the interactable pallet that is the goal.")
+parser.add_argument("--randomize-spawn", action="store_true",
+                    help="Randomize forklift spawn pose each episode.")
+parser.add_argument("--randomize-cargo", type=lambda s: s.lower() != "false",
+                    default=True,
+                    help="Randomize cargo positions each episode (default ON).")
+parser.add_argument("--spawn-seed", type=int, default=0,
+                    help="Master seed; spawn uses this, cargo uses spawn_seed+1.")
+parser.add_argument("--spawn-region", type=str, default="-2,-3,2,3",
+                    help="Forklift spawn region 'xmin,ymin,xmax,ymax' (env-local).")
+parser.add_argument("--cargo-region", type=str, default="5,-3,11,3",
+                    help="Cargo spawn region 'xmin,ymin,xmax,ymax' (env-local).")
+
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.enable_cameras = True
@@ -61,7 +80,10 @@ from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
 from forklift_env import ForkliftEnv, ForkliftEnvCfg
-from forklift_env import _LIDAR_CHANNELS, _LIDAR_MAX_RANGE
+from forklift_env import _N_INTERACTABLE
+from randomizers import SpawnRandomizer, CargoRandomizer, parse_region
+import prompt_builder
+import json
 
 # LeRobot
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
@@ -71,11 +93,8 @@ import carb.input
 import omni.appwindow
 
 # ---------------------------------------------------------------------------
-# Sensor constants
+# Dataset constants
 # ---------------------------------------------------------------------------
-
-# Compute expected LiDAR horizontal samples from the pattern config
-_LIDAR_H_SAMPLES = 1024   # from 360° / 0.3516° resolution
 
 # State vector: [x, y, yaw, vx, vy, omega_z, fork_height, grabbed_idx]
 _STATE_DIM = 8
@@ -83,6 +102,11 @@ _STATE_DIM = 8
 # Action vector: [v_forward, yaw_rate, fork_lift_vel, fork_tilt_vel, attach_toggle]
 # fork_tilt_vel and attach_toggle are reserved (always 0 for now)
 _ACTION_DIM = 5
+
+# LeRobot v3 datasets are only loadable after finalize() (it writes the
+# parquet footers). Datasets registered here are finalized on every exit
+# path, including crashes and Ctrl+C (see _finalize_lerobot / __main__).
+_LEROBOT_DATASETS: list = []
 
 # ---------------------------------------------------------------------------
 # Keyboard handler
@@ -127,42 +151,143 @@ def _make_keyboard_handler():
     return _input, _keyboard, sub
 
 
-def _lidar_to_range_image(hits: np.ndarray, sensor_pos: np.ndarray,
-                          channels: int, h_samples: int,
-                          max_range: float) -> np.ndarray:
-    """Convert raw LiDAR hit points to a range image (channels, h_samples).
-
-    The RayCaster returns ray_hits_w of shape (N_rays, 3). Rays are ordered
-    channels × h_samples (vertical × horizontal). Convert to distances.
-    """
-    # hits shape: (channels * h_samples, 3)
-    # Compute distances from sensor origin
-    diffs = hits - sensor_pos[np.newaxis, :]
-    distances = np.linalg.norm(diffs, axis=-1)  # (N_rays,)
-
-    # Clamp to max range (missed rays report very large values)
-    distances = np.clip(distances, 0.0, max_range)
-
-    # Reshape to (channels, h_samples)
-    expected_rays = channels * h_samples
-    if distances.shape[0] != expected_rays:
-        # Pad or truncate if ray count doesn't match exactly
-        if distances.shape[0] < expected_rays:
-            distances = np.pad(distances, (0, expected_rays - distances.shape[0]),
-                               constant_values=max_range)
-        else:
-            distances = distances[:expected_rays]
-
-    return distances.reshape(channels, h_samples).astype(np.float32)
+def _finalize_lerobot() -> None:
+    """Finalize every registered dataset once (LeRobot v3 needs this to
+    write valid files; v2.1 has no finalize() and needs nothing)."""
+    while _LEROBOT_DATASETS:
+        ds = _LEROBOT_DATASETS.pop()
+        if hasattr(ds, "finalize"):
+            ds.finalize()
 
 
 # ---------------------------------------------------------------------------
 # Main recording loop
 # ---------------------------------------------------------------------------
 
+def _make_extras_writer(ds_root: str):
+    """Return a callable(record_dict) that appends one JSON line."""
+    path = os.path.join(ds_root, "extras_episodes.jsonl")
+    os.makedirs(ds_root, exist_ok=True)
+
+    def _write(record: dict) -> None:
+        with open(path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+    return _write, path
+
+
+def _resolve_task_index(dataset, prompt: str) -> int:
+    """Best-effort lookup of the task_index LeRobot assigned to a string."""
+    meta = getattr(dataset, "meta", None)
+    if meta is None:
+        return -1
+    # get_task_index() exists in LeRobot v2.1 and v3 (v3 keeps tasks in a
+    # DataFrame, which the fallbacks below don't understand).
+    get_task_index = getattr(meta, "get_task_index", None)
+    if callable(get_task_index):
+        idx = get_task_index(prompt)
+        if idx is not None:
+            return int(idx)
+    task_to_idx = getattr(meta, "task_to_task_index", None)
+    if isinstance(task_to_idx, dict) and prompt in task_to_idx:
+        return int(task_to_idx[prompt])
+    tasks = getattr(meta, "tasks", None)
+    if isinstance(tasks, dict):
+        for k, v in tasks.items():
+            if v == prompt:
+                return int(k)
+    if isinstance(tasks, list):
+        try:
+            return tasks.index(prompt)
+        except ValueError:
+            return -1
+    return -1
+
+
 def main():
-    env = ForkliftEnv(ForkliftEnvCfg())
+    env_cfg = ForkliftEnvCfg()
+    env = ForkliftEnv(env_cfg)
     _input, _keyboard, _kb_sub = _make_keyboard_handler()
+
+    # ── Randomizers (only used when the corresponding flag is set) ────
+    spawn_rng = SpawnRandomizer(
+        region_xyxy=parse_region(args_cli.spawn_region),
+        seed=args_cli.spawn_seed,
+    )
+    cargo_rng = CargoRandomizer(
+        region_xyxy=parse_region(args_cli.cargo_region),
+        seed=args_cli.spawn_seed + 1,
+    )
+    template = args_cli.prompt_template or prompt_builder.DEFAULT_TEMPLATE
+
+    # Distance from forklift root to pallet root when tines are inserted in
+    # the pocket. Matches the fixed-scene default (forklift at 8.5, pallet at 10).
+    _PARK_DIST = 1.5
+
+    def _begin_episode():
+        """Sample spawn + cargo, set env overrides, render the prompt.
+
+        Caller must call env.reset() AFTER this returns.
+        Returns (prompt_str, placeholders, episode_meta).
+
+        Default behaviour: cargo is sampled (or fixed), then the forklift
+        is parked 1.5 m behind the cargo, facing it, with tines in the pocket.
+        --randomize-spawn decouples the forklift pose from the cargo.
+        """
+        # Cargo first (need its pose to position the forklift under it).
+        if args_cli.randomize_cargo:
+            # Use a far-away dummy "forklift" point so the cargo keepout
+            # does not interfere with the to-be-derived spawn pose.
+            cargo_xy_yaw = cargo_rng.sample(_N_INTERACTABLE, (-1e6, -1e6))
+        else:
+            cargo_xy_yaw = [(10.0, 0.0, 0.0)]
+
+        ti = max(0, min(args_cli.target_pallet, _N_INTERACTABLE - 1))
+        cx, cy, cyaw = cargo_xy_yaw[ti]
+
+        # Forklift spawn — parked under the target cargo by default,
+        # or independently randomized when --randomize-spawn is set.
+        if args_cli.randomize_spawn:
+            sx, sy, syaw = spawn_rng.sample()
+        else:
+            sx = cx - _PARK_DIST * math.cos(cyaw)
+            sy = cy - _PARK_DIST * math.sin(cyaw)
+            syaw = cyaw
+
+        env.cfg.spawn_override = (sx, sy, syaw)
+        env.cfg.cargo_override = tuple(cargo_xy_yaw)
+
+        # Target pallet → render prompt from its (quantized) coords
+        rendered, placeholders = prompt_builder.render(
+            template=template,
+            cargo_xyz=(cx, cy, 0.0),
+            cargo_yaw_rad=cyaw,
+            forklift_xyz=(sx, sy, 0.0),
+            forklift_yaw_rad=syaw,
+            pallet_idx=ti,
+            include_forklift=args_cli.prompt_include_forklift,
+        )
+
+        meta = {
+            "spawn": {"x": sx, "y": sy, "yaw_rad": syaw,
+                      "seed": args_cli.spawn_seed},
+            "target": {
+                "pallet_idx": ti,
+                "cargo_xyz": [cx, cy, 0.0],
+                "cargo_yaw_rad": cyaw,
+                "cargo_xyz_quantized": [
+                    placeholders["cx"], placeholders["cy"], placeholders["cz"],
+                ],
+            },
+            "spawn_to_cargo": {
+                "dx": placeholders.get("dx", cx - sx),
+                "dy": placeholders.get("dy", cy - sy),
+                "distance_m": placeholders.get("distance_m",
+                                               math.hypot(cx - sx, cy - sy)),
+                "bearing_deg": placeholders.get("bearing_deg", 0.0),
+            },
+            "language_template": template,
+        }
+        return rendered, meta
 
     # ── Create LeRobot dataset ────────────────────────────────────────
     ds_root = os.path.abspath(args_cli.dataset_dir)
@@ -170,7 +295,9 @@ def main():
 
     dataset = LeRobotDataset.create(
         repo_id="forklift/teleop",
-        fps=15,  # matches camera update rate
+        # One frame per env.step → fps = control rate (30 Hz). Timestamps
+        # must be right: OmniVLA-style waypoint labels are sampled by time.
+        fps=round(1.0 / (env.cfg.sim.dt * env.cfg.decimation)),
         root=ds_root,
         robot_type="forklift",
         features={
@@ -189,11 +316,6 @@ def main():
                 "shape": (224, 224, 3),
                 "names": ["height", "width", "channel"],
             },
-            "observation.lidar": {
-                "dtype": "float32",
-                "shape": (_LIDAR_CHANNELS, _LIDAR_H_SAMPLES),
-                "names": ["channels", "horizontal_samples"],
-            },
             "observation.state": {
                 "dtype": "float32",
                 "shape": (_STATE_DIM,),
@@ -208,8 +330,13 @@ def main():
         use_videos=True,
         image_writer_threads=4,
     )
+    _LEROBOT_DATASETS.append(dataset)
 
+    extras_write, extras_path = _make_extras_writer(ds_root)
+
+    current_prompt, current_meta = _begin_episode()
     obs, _ = env.reset()
+    print(f"[EPISODE] task: {current_prompt}")
 
     V_MAX = 5.0
     STEER_ANGLE = 0.6
@@ -240,12 +367,26 @@ def main():
             _keys["save"] = False
             if frame_count > 10:  # need minimum frames
                 dataset.save_episode()
+                ep_idx = episode_count       # 0-based, matches LeRobot convention
                 episode_count += 1
+                extras_write({
+                    "episode_index": ep_idx,
+                    "task_index": _resolve_task_index(dataset, current_prompt),
+                    "tasks": [current_prompt],
+                    **current_meta,
+                    "distractors": list(getattr(env, "last_distractors", [])),
+                    "length": frame_count,
+                })
                 print(f"\n[SAVED] Episode {episode_count}/{args_cli.num_episodes} "
                       f"({frame_count} frames)\n")
             else:
                 print(f"[SKIP] Episode too short ({frame_count} frames)")
+                # LeRobot keeps buffered frames until save/clear — drop them
+                # so they don't leak into the next saved episode.
+                dataset.clear_episode_buffer()
+            current_prompt, current_meta = _begin_episode()
             obs, _ = env.reset()
+            print(f"[EPISODE] task: {current_prompt}")
             _keys.update({k: False for k in _keys})
             current_v_x = 0.0
             step = 0
@@ -255,8 +396,12 @@ def main():
         if _keys["reset"]:
             _keys["reset"] = False
             print("[DISCARD] Episode discarded.")
-            # Clear any buffered frames by not calling save_episode
+            # Not calling save_episode() is not enough: LeRobot keeps the
+            # buffered frames and would prepend them to the next episode.
+            dataset.clear_episode_buffer()
+            current_prompt, current_meta = _begin_episode()
             obs, _ = env.reset()
+            print(f"[EPISODE] task: {current_prompt}")
             _keys.update({k: False for k in _keys})
             current_v_x = 0.0
             step = 0
@@ -298,13 +443,6 @@ def main():
                 arr = arr[:, :, :3]
             return Image.fromarray(arr.astype(np.uint8))
 
-        # LiDAR range image
-        lidar_hits = obs["lidar"][0].cpu().numpy()
-        lidar_sensor_pos = env.lidar.data.pos_w[0].cpu().numpy()
-        range_image = _lidar_to_range_image(
-            lidar_hits, lidar_sensor_pos,
-            _LIDAR_CHANNELS, _LIDAR_H_SAMPLES, _LIDAR_MAX_RANGE)
-
         # State
         state_vec = obs["state"][0].cpu().numpy().astype(np.float32)
 
@@ -312,10 +450,9 @@ def main():
             "observation.images.front_cabin": _to_pil(obs["rgb_front"]),
             "observation.images.top_left": _to_pil(obs["rgb_left"]),
             "observation.images.top_right": _to_pil(obs["rgb_right"]),
-            "observation.lidar": range_image,
             "observation.state": state_vec,
             "action": action_vec,
-            "task": args_cli.task_instruction,
+            "task": current_prompt,
         }
         dataset.add_frame(frame_data)
         frame_count += 1
@@ -324,10 +461,23 @@ def main():
         if step >= args_cli.max_steps or terminated.any() or truncated.any():
             if frame_count > 10:
                 dataset.save_episode()
+                ep_idx = episode_count
                 episode_count += 1
+                extras_write({
+                    "episode_index": ep_idx,
+                    "task_index": _resolve_task_index(dataset, current_prompt),
+                    "tasks": [current_prompt],
+                    **current_meta,
+                    "distractors": list(getattr(env, "last_distractors", [])),
+                    "length": frame_count,
+                })
                 print(f"\n[AUTO-SAVED] Episode {episode_count}/{args_cli.num_episodes} "
                       f"({frame_count} frames)\n")
+            else:
+                dataset.clear_episode_buffer()   # too short — don't leak frames
+            current_prompt, current_meta = _begin_episode()
             obs, _ = env.reset()
+            print(f"[EPISODE] task: {current_prompt}")
             _keys.update({k: False for k in _keys})
             current_v_x = 0.0
             step = 0
@@ -340,6 +490,12 @@ def main():
 
     # ── Cleanup ──────────────────────────────────────────────────────
     print(f"\n[DONE] Recorded {episode_count} episodes to {ds_root}")
+
+    # Drop an unfinished episode (window closed mid-episode), then finalize —
+    # LeRobot v3 can't load the dataset until finalize() has run.
+    if frame_count > 0:
+        dataset.clear_episode_buffer()
+    _finalize_lerobot()
 
     # Verify: load back and check
     try:
@@ -364,5 +520,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        # Keep the episodes saved so far loadable even after a crash or Ctrl+C.
+        _finalize_lerobot()
     simulation_app.close()

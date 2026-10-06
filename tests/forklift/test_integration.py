@@ -45,8 +45,7 @@ if _SIM_AVAILABLE:
     sys.path.insert(0, os.path.join(os.path.dirname(__file__),
                                      "..", "..", "scripts", "forklift"))
     from forklift_env import (ForkliftEnv, ForkliftEnvCfg,
-                              _N_INTERACTABLE, _PALLET_H, _BOX_H, _UNIT_H,
-                              _LIDAR_CHANNELS, _LIDAR_MAX_RANGE)
+                              _N_INTERACTABLE, _N_BOXES, _PALLET_H, _BOX_H, _UNIT_H)
 
 
 def _requires_sim(fn):
@@ -255,14 +254,12 @@ class TestSensorOutputs:
             assert img.shape[1] == 224, f"{key} height: {img.shape[1]}"
             assert img.shape[2] == 224, f"{key} width: {img.shape[2]}"
 
-    def test_lidar_output_shape(self, env):
-        """LiDAR output should be (1, N_rays, 3)."""
+    def test_cameras_are_the_only_sensors(self, env):
+        """The dataset is image-only: no LiDAR / ray-cast output anywhere."""
         obs = env._get_observations()
-        assert "lidar" in obs
-        lidar = obs["lidar"]
-        assert lidar.ndim == 3, f"LiDAR ndim: {lidar.ndim}"
-        assert lidar.shape[0] == 1, f"LiDAR batch: {lidar.shape[0]}"
-        assert lidar.shape[2] == 3, f"LiDAR channels: {lidar.shape[2]}"
+        assert "lidar" not in obs
+        assert set(env.scene.sensors.keys()) == {
+            "cam_front", "cam_top_left", "cam_top_right"}
 
     def test_state_vector_shape(self, env):
         """State vector should be (1, 8)."""
@@ -364,13 +361,6 @@ class TestObservability:
         _step_n(env, 25)
         assert env._step_count >= 20, \
             f"Step counter not incrementing: {env._step_count}"
-
-    def test_lidar_status_populated(self, env):
-        """After stepping, LiDAR status should be set."""
-        env.reset()
-        _step_n(env, 25)
-        assert env._lidar_status in ("OK", "NO_RETURNS", "NO_DATA", "INIT"), \
-            f"Unexpected LiDAR status: {env._lidar_status}"
 
 
 # ============================================================================

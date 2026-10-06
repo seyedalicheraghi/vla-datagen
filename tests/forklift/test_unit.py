@@ -74,43 +74,6 @@ class TestKeyboardActionMapping:
 
 
 # ============================================================================
-# §5.1 — LiDAR configuration
-# ============================================================================
-
-class TestLidarConfig:
-    """Verify LiDAR sensor parameters match Ouster OS1-64 defaults.
-    Values hardcoded here to avoid importing forklift_env (needs Isaac Sim)."""
-
-    # Expected values (must match forklift_env.py constants)
-    CHANNELS = 64
-    VERT_FOV = (-16.6, 16.6)
-    HORIZ_FOV = (-180.0, 180.0)
-    HORIZ_RES = 360.0 / 1024
-    MAX_RANGE = 120.0
-    UPDATE_HZ = 10.0
-
-    def test_beam_count(self):
-        assert self.CHANNELS == 64
-
-    def test_vertical_fov(self):
-        total_fov = self.VERT_FOV[1] - self.VERT_FOV[0]
-        assert abs(total_fov - 33.2) < 0.01
-
-    def test_horizontal_fov_360(self):
-        assert self.HORIZ_FOV == (-180.0, 180.0)
-
-    def test_horizontal_resolution_1024_samples(self):
-        samples = 360.0 / self.HORIZ_RES
-        assert abs(samples - 1024) < 1
-
-    def test_max_range(self):
-        assert self.MAX_RANGE == 120.0
-
-    def test_update_rate(self):
-        assert self.UPDATE_HZ == 10.0
-
-
-# ============================================================================
 # §5.1 — Camera configuration
 # ============================================================================
 
@@ -217,22 +180,6 @@ class TestLeRobotSchema:
         [v_forward, yaw_rate, fork_lift_vel, fork_tilt_vel, attach_toggle]."""
         ACTION_DIM = 5
         assert ACTION_DIM == 5
-
-    def test_lidar_range_image_shape(self):
-        """Range image should be (64, 1024) float32."""
-        channels, h_samples = 64, 1024
-        n_rays = channels * h_samples
-        hits = np.random.randn(n_rays, 3).astype(np.float32) * 10
-        sensor_pos = np.zeros(3, dtype=np.float32)
-
-        diffs = hits - sensor_pos[np.newaxis, :]
-        distances = np.linalg.norm(diffs, axis=-1)
-        distances = np.clip(distances, 0.0, 120.0)
-        range_img = distances.reshape(channels, h_samples).astype(np.float32)
-
-        assert range_img.shape == (64, 1024)
-        assert range_img.dtype == np.float32
-        assert range_img.max() <= 120.0
 
 
 # ============================================================================

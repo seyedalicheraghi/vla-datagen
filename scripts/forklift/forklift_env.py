@@ -17,7 +17,6 @@ Standalone usage:
 # ---------------------------------------------------------------------------
 
 import math
-import os
 import numpy as np
 from collections import deque
 
@@ -27,8 +26,6 @@ from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import Camera, CameraCfg, TiledCamera, TiledCameraCfg
-from isaaclab.sensors import RayCaster, RayCasterCfg
-from isaaclab.sensors.ray_caster import patterns as rc_patterns
 from isaaclab.sim import SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
@@ -89,7 +86,7 @@ _PALLET_COLOR_TARGET = (0.20, 0.45, 0.75)   # blue — target pallet stands out
 
 _BOX_L    = 0.35     # m — fits three along pallet length with margin
 _BOX_W    = 0.40     # m — fits three along pallet width with margin
-_BOX_H    = 0.60     # m
+_BOX_H    = 1.20     # m  (doubled from 0.60 — taller cargo)
 _BOX_MASS = 12.0     # kg each
 _BOX_COLS = 3        # columns along pallet L  (X-axis)
 _BOX_ROWS = 3        # rows    along pallet W  (Y-axis)
@@ -142,20 +139,9 @@ _N_SCATTER_PALLETS = 0       # number of pallet+box sets around the warehouse
 # Sensor constants
 # ---------------------------------------------------------------------------
 
-# Ouster OS1-64 LiDAR defaults
-_LIDAR_CHANNELS     = 64
-_LIDAR_VERT_FOV     = (-16.6, 16.6)    # degrees
-_LIDAR_HORIZ_FOV    = (-180.0, 180.0)  # full 360°
-_LIDAR_HORIZ_RES    = 360.0 / 1024     # ~0.3516° → 1024 horizontal samples
-_LIDAR_MAX_RANGE    = 120.0            # metres
-_LIDAR_UPDATE_HZ    = 10.0             # Hz
-_LIDAR_MOUNT_FWD    = 1.0              # metres forward of forklift root
-_LIDAR_MOUNT_UP     = 2.5              # metres above ground — sees top of stacked cargo
-
-# Camera defaults
+# Camera defaults (cameras are the only sensors in this env)
 _CAM_W, _CAM_H      = 224, 224         # OpenPI-friendly resolution
 _CAM_UPDATE_HZ       = 15.0            # Hz (10–20 typical for VLA training)
-_DEBUG_SENSOR_DIR    = os.path.join(os.path.dirname(__file__), "debug_sensors")
 
 
 # ---------------------------------------------------------------------------
@@ -263,10 +249,38 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
     wheel_base:   float = 1.65
     chassis_z_offset: float = 0.0   # ForkliftC USD root at ground level
 
-    # Set False for headless physics-only tests (no camera/lidar)
+    # Set False for headless physics-only tests (no cameras)
     enable_sensors: bool = True
-    # Set False to skip LiDAR creation even when other sensors are enabled
-    enable_lidar: bool = False
+
+    # Render again after every reset so the first camera frame of an episode
+    # shows the new scene instead of the previous episode's last frame
+    # (Isaac Lab's default is 0 re-renders → stale images). 3 renders let
+    # temporal anti-aliasing settle; upstream visuomotor tasks use the same.
+    num_rerenders_on_reset: int = 3
+
+    # Per-reset overrides — set to env-local (x, y, yaw_rad) tuples to
+    # randomize spawn / cargo from outside. None = use the hardcoded
+    # _FORKLIFT_SPAWN_X and _POSITIONS defaults.
+    spawn_override: tuple = ()      # () → unset; (x, y, yaw_rad) → use it
+    cargo_override: tuple = ()      # () → unset; tuple of (x, y, yaw_rad) per pallet
+
+    # When True, _reset_idx will call self._spawn_rng / self._cargo_rng
+    # (set via env.set_randomizers) and write through to the override
+    # fields above. Off by default so teleop / record_lerobot are unaffected.
+    randomize_on_reset: bool = False
+
+    # Camera output resolution (W, H). Default matches the OpenPI 224 path.
+    # Bag-collection scripts can set higher resolution for human inspection.
+    camera_resolution: tuple = (224, 224)
+
+    # Visual distractor cargos — pre-instantiated up to n_distractors_max
+    # at scene build, sampled to a fresh count + layout each reset. They
+    # use the same asset as the target cargo but are NEVER in the
+    # interactable pallet list, so _update_pallet_grab cannot grab them.
+    # Defaults to 0 → no distractor prims spawned, behavior unchanged.
+    n_distractors_min: int = 0
+    n_distractors_max: int = 0
+    distractor_region: tuple = (0.0, -8.0, 15.0, 8.0)
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +429,42 @@ class ForkliftEnv(DirectRLEnv):
         self.pallet = self.pallets[0]
         self.boxes  = self.pallet_boxes[0]
 
+        # ── Distractor pallets + cargo (visual clutter, NOT grabbable) ──
+        # Pre-instantiate cfg.n_distractors_max units; each reset toggles
+        # visibility by parking unused units at z = _PARK_Z_DISTRACTOR.
+        self.distractor_pallets: list[RigidObject] = []
+        self.distractor_boxes: list[list[RigidObject]] = []
+        for di in range(self.cfg.n_distractors_max):
+            pal_color = _PALLET_COLORS[di % len(_PALLET_COLORS)]
+            box_color = _CARGO_COLORS[di % len(_CARGO_COLORS)]
+            _build_compound_pallet(
+                stage, f"/World/envs/env_0/DistractorPallet_{di}",
+                color=pal_color)
+            self.distractor_pallets.append(RigidObject(RigidObjectCfg(
+                prim_path=f"/World/envs/env_.*/DistractorPallet_{di}",
+                spawn=None,
+                init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, _PARK_Z)),
+            )))
+            d_boxes: list[RigidObject] = []
+            for bi in range(_N_BOXES):
+                d_boxes.append(RigidObject(RigidObjectCfg(
+                    prim_path=f"/World/envs/env_.*/DistractorCargoBox_{di}_{bi}",
+                    spawn=sim_utils.CuboidCfg(
+                        size=(_BOX_L, _BOX_W, _BOX_H),
+                        rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                            kinematic_enabled=True,
+                            linear_damping=0.5,
+                            angular_damping=2.0,
+                        ),
+                        mass_props=sim_utils.MassPropertiesCfg(mass=_BOX_MASS),
+                        collision_props=sim_utils.CollisionPropertiesCfg(),
+                        visual_material=sim_utils.PreviewSurfaceCfg(
+                            diffuse_color=box_color, roughness=0.85, metallic=0.0),
+                    ),
+                    init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, _PARK_Z)),
+                )))
+            self.distractor_boxes.append(d_boxes)
+
         # Collision spawn report
         for pi in range(_N_INTERACTABLE):
             print(f"[spawn] pallet_{pi}  rigid=kinematic  collider=compound(13 cubes)  "
@@ -423,17 +473,17 @@ class ForkliftEnv(DirectRLEnv):
                 print(f"[spawn] cargo_{pi}_{bi}  rigid=kinematic  collider=cuboid  "
                       f"mass={_BOX_MASS}kg  size=({_BOX_L},{_BOX_W},{_BOX_H})", flush=True)
 
-        # ── Sensors (cameras + LiDAR) — skip for headless physics tests ─
+        # ── Sensors (cameras only) — skip for headless physics tests ───
         self.cam_front = None
         self.cam_top_left = None
         self.cam_top_right = None
-        self.lidar = None
 
         if self.cfg.enable_sensors:
+            _cam_w, _cam_h = self.cfg.camera_resolution
             _cam_cfg = dict(
                 update_period=1 / _CAM_UPDATE_HZ,
-                height=_CAM_H,
-                width=_CAM_W,
+                height=_cam_h,
+                width=_cam_w,
                 data_types=["rgb"],
                 spawn=sim_utils.PinholeCameraCfg(
                     focal_length=10.0,
@@ -453,26 +503,6 @@ class ForkliftEnv(DirectRLEnv):
             self.cam_top_right = Camera(CameraCfg(
                 prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
 
-            if self.cfg.enable_lidar:
-                self.lidar = RayCaster(RayCasterCfg(
-                    prim_path="/World/envs/env_.*/Forklift",
-                    mesh_prim_paths=["/World/Ground"],
-                    offset=RayCasterCfg.OffsetCfg(
-                        pos=(_LIDAR_MOUNT_FWD, 0.0, _LIDAR_MOUNT_UP),
-                        rot=(1.0, 0.0, 0.0, 0.0),
-                    ),
-                    ray_alignment="base",
-                    pattern_cfg=rc_patterns.LidarPatternCfg(
-                        channels=_LIDAR_CHANNELS,
-                        vertical_fov_range=_LIDAR_VERT_FOV,
-                        horizontal_fov_range=_LIDAR_HORIZ_FOV,
-                        horizontal_res=_LIDAR_HORIZ_RES,
-                    ),
-                    max_distance=_LIDAR_MAX_RANGE,
-                    update_period=1 / _LIDAR_UPDATE_HZ,
-                    debug_vis=False,
-                ))
-
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
         self.scene.articulations["forklift"] = self.forklift
@@ -480,24 +510,32 @@ class ForkliftEnv(DirectRLEnv):
             self.scene.rigid_objects[f"pallet_{pi}"] = pallet
             for bi, box in enumerate(self.pallet_boxes[pi]):
                 self.scene.rigid_objects[f"box_{pi}_{bi}"] = box
+        for di, dpal in enumerate(self.distractor_pallets):
+            self.scene.rigid_objects[f"distractor_pallet_{di}"] = dpal
+            for bi, box in enumerate(self.distractor_boxes[di]):
+                self.scene.rigid_objects[f"distractor_box_{di}_{bi}"] = box
         if self.cam_front is not None:
             self.scene.sensors["cam_front"]     = self.cam_front
             self.scene.sensors["cam_top_left"]  = self.cam_top_left
             self.scene.sensors["cam_top_right"] = self.cam_top_right
-        if self.lidar is not None:
-            self.scene.sensors["lidar"]         = self.lidar
 
         # Observability state
-        self._debug_sensors_saved = False
         self._step_count = 0           # global step counter (not reset per episode)
         self._status_interval = 20     # print status every N control steps
-        self._lidar_status = "INIT"    # last known LiDAR health
         self._cam_status = {"front": "INIT", "top_l": "INIT", "top_r": "INIT"}
-        self._last_lidar_pts = 0
-        self._last_lidar_range = (0.0, 0.0)
+
+        # Randomizer hooks (consumed by _reset_idx when randomize_on_reset=True)
+        self._spawn_rng = None
+        self._cargo_rng = None
+        self._distractor_rng = None
+        self.last_spawn: dict = {}
+        self.last_target: dict = {}
+        # Filled by _reset_idx whenever distractors are placed; recorder /
+        # bag writer read this. Each entry: {"xy": [x, y], "yaw_rad": y}.
+        self.last_distractors: list = []
 
     # ------------------------------------------------------------------
-    # Observability — banner, per-step status, LiDAR sanity dump
+    # Observability — banner and per-step status
     # ------------------------------------------------------------------
 
     def _print_sensor_banner(self):
@@ -507,16 +545,6 @@ class ForkliftEnv(DirectRLEnv):
         render_dt = sim_dt * self.cfg.sim.render_interval
 
         lines = ["=" * 60, "  SIM SENSORS", "=" * 60]
-
-        # LiDAR
-        if self.lidar is not None:
-            lines.append(
-                f"  LiDAR  [ENABLED]   Ouster OS1-64  |  {_LIDAR_CHANNELS} beams  |  "
-                f"FOV +{_LIDAR_VERT_FOV[1]}\u00b0/{_LIDAR_VERT_FOV[0]}\u00b0  |  "
-                f"1024 h-samples  |  {_LIDAR_UPDATE_HZ} Hz  |  {_LIDAR_MAX_RANGE} m  |  "
-                f"mount: Forklift ({_LIDAR_MOUNT_FWD}, 0.0, {_LIDAR_MOUNT_UP})")
-        else:
-            lines.append(f"  LiDAR  [DISABLED: enable_sensors=False]")
 
         # Cameras
         for name, cam in [("front_cabin", self.cam_front),
@@ -539,7 +567,7 @@ class ForkliftEnv(DirectRLEnv):
             print(ln, flush=True)
 
     def _print_step_status(self, obs: dict):
-        """Print one status line with LiDAR + camera health."""
+        """Print one status line with camera health."""
         self._step_count += 1
         if self._step_count % self._status_interval != 0:
             return
@@ -551,33 +579,6 @@ class ForkliftEnv(DirectRLEnv):
         vx = self.actions[0, 0].item()
         vy = 0.0  # no lateral in Ackermann
         fork_h = self._fork_pos[0].item()
-
-        # LiDAR health
-        lidar_data = obs.get("lidar")
-        if lidar_data is not None:
-            hits = lidar_data[0].cpu().numpy()
-            sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
-            dists = np.linalg.norm(hits - sensor_pos[np.newaxis, :], axis=-1)
-            valid = dists < _LIDAR_MAX_RANGE * 0.99
-            n_valid = int(valid.sum())
-            if n_valid == 0:
-                self._lidar_status = "NO_RETURNS"
-                self._last_lidar_pts = 0
-                self._last_lidar_range = (0.0, 0.0)
-            else:
-                valid_dists = dists[valid]
-                self._lidar_status = "OK"
-                self._last_lidar_pts = n_valid
-                self._last_lidar_range = (float(valid_dists.min()), float(valid_dists.max()))
-        else:
-            self._lidar_status = "NO_DATA"
-            self._last_lidar_pts = 0
-
-        lidar_str = (f"LiDAR: {self._lidar_status}"
-                     if self._lidar_status != "OK"
-                     else f"LiDAR: pts={self._last_lidar_pts} "
-                          f"range[{self._last_lidar_range[0]:.2f}-"
-                          f"{self._last_lidar_range[1]:.2f}]m")
 
         # Camera health
         cam_strs = []
@@ -601,97 +602,9 @@ class ForkliftEnv(DirectRLEnv):
             f"[t={sim_time:.2f}s step={self._step_count}] "
             f"base=(x={x:.2f}, y={y:.2f}, yaw={yaw:.1f}\u00b0)  "
             f"v=({vx:.2f}, {vy:.2f}) fork_h={fork_h:.2f}m  |  "
-            f"{lidar_str}  |  Cams: {' '.join(cam_strs)}  |  "
+            f"Cams: {' '.join(cam_strs)}  |  "
             f"action={act_str} attach={grabbed}",
             flush=True)
-
-    def _save_lidar_sanity_dump(self, obs: dict):
-        """Save LiDAR first-frame dump to debug_sensors/."""
-        os.makedirs(_DEBUG_SENSOR_DIR, exist_ok=True)
-
-        lidar_data = obs.get("lidar")
-        if lidar_data is None:
-            with open(os.path.join(_DEBUG_SENSOR_DIR, "lidar_stats.txt"), "w") as f:
-                f.write("LiDAR returned None — sensor may not be initialized\n")
-            print("[WARN] LiDAR sanity dump: NO DATA", flush=True)
-            return
-
-        hits = lidar_data[0].cpu().numpy()
-        sensor_pos = self.lidar.data.pos_w[0].cpu().numpy()
-        dists = np.linalg.norm(hits - sensor_pos[np.newaxis, :], axis=-1)
-        valid_mask = dists < _LIDAR_MAX_RANGE * 0.99
-        n_total = len(dists)
-        n_valid = int(valid_mask.sum())
-
-        # Save raw point cloud
-        np.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_first_frame.npy"), hits)
-
-        # Save top-down PNG
-        try:
-            from PIL import Image as PILImage
-            IMG_SIZE = 512
-            RANGE_M = 40.0
-            img = np.zeros((IMG_SIZE, IMG_SIZE, 3), dtype=np.uint8)
-            if n_valid > 0:
-                pts = hits[valid_mask]
-                vd = dists[valid_mask]
-                px = ((pts[:, 0] - sensor_pos[0]) / RANGE_M * IMG_SIZE / 2
-                      + IMG_SIZE / 2).astype(int)
-                py = ((pts[:, 1] - sensor_pos[1]) / RANGE_M * IMG_SIZE / 2
-                      + IMG_SIZE / 2).astype(int)
-                mask = (px >= 0) & (px < IMG_SIZE) & (py >= 0) & (py < IMG_SIZE)
-                # Color by height: low=blue, mid=green, high=red
-                hz = pts[mask, 2]
-                r = np.clip((hz * 80).astype(int), 0, 255).astype(np.uint8)
-                g = np.clip((120 - abs(hz - 1.5) * 60).astype(int), 0, 255).astype(np.uint8)
-                b = np.clip((255 - hz * 80).astype(int), 0, 255).astype(np.uint8)
-                img[py[mask], px[mask]] = np.stack([r, g, b], axis=-1)
-            pil_img = PILImage.fromarray(img)
-            pil_img.save(os.path.join(_DEBUG_SENSOR_DIR, "lidar_first_frame_topdown.png"))
-        except Exception as e:
-            print(f"[WARN] Could not save LiDAR PNG: {e}", flush=True)
-
-        # Save stats
-        stats_lines = [
-            f"point_count_total: {n_total}",
-            f"point_count_valid: {n_valid} ({100*n_valid/max(n_total,1):.1f}%)",
-            f"shape: {hits.shape}",
-        ]
-        if n_valid > 0:
-            valid_dists = dists[valid_mask]
-            stats_lines += [
-                f"range_min: {valid_dists.min():.3f} m",
-                f"range_max: {valid_dists.max():.3f} m",
-                f"range_mean: {valid_dists.mean():.3f} m",
-                f"range_std: {valid_dists.std():.3f} m",
-            ]
-            # Per-beam histogram (how many returns per vertical channel)
-            n_h = max(n_total // _LIDAR_CHANNELS, 1)
-            stats_lines.append(f"expected_rays_per_beam: {n_h}")
-            for ch in range(_LIDAR_CHANNELS):
-                ch_start = ch * n_h
-                ch_end = min(ch_start + n_h, n_total)
-                ch_valid = int(valid_mask[ch_start:ch_end].sum())
-                stats_lines.append(f"  beam_{ch:02d}: {ch_valid}/{n_h} returns")
-        else:
-            stats_lines.append("WARNING: ZERO VALID RETURNS — DEAD SENSOR")
-
-        stats_path = os.path.join(_DEBUG_SENSOR_DIR, "lidar_stats.txt")
-        with open(stats_path, "w") as f:
-            f.write("\n".join(stats_lines) + "\n")
-
-        # Also save camera debug frames
-        for key in ("rgb_front", "rgb_left", "rgb_right"):
-            img_data = obs.get(key)
-            if img_data is not None:
-                frame = img_data[0].cpu().numpy()
-                if frame.shape[-1] == 4:
-                    frame = frame[:, :, :3]
-                np.save(os.path.join(_DEBUG_SENSOR_DIR, f"{key}.npy"), frame)
-
-        status = "OK" if n_valid > 0 else "DEAD"
-        print(f"[INFO] LiDAR sanity dump → {_DEBUG_SENSOR_DIR}/  "
-              f"({n_valid}/{n_total} valid returns — {status})", flush=True)
 
     # ------------------------------------------------------------------
     # Wall helpers
@@ -912,21 +825,82 @@ class ForkliftEnv(DirectRLEnv):
     # Episode reset
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Public helpers used by scripted_collect.py / external policies
+    # ------------------------------------------------------------------
+
+    def set_randomizers(self, spawn, cargo) -> None:
+        """Stash spawn + cargo randomizers; consumed by _reset_idx when
+        cfg.randomize_on_reset is True."""
+        self._spawn_rng = spawn
+        self._cargo_rng = cargo
+
+    def set_distractor_randomizer(self, distractor) -> None:
+        """Stash distractor randomizer; consumed every reset if set."""
+        self._distractor_rng = distractor
+
+    def get_world_pose(self, env_id: int = 0):
+        """Return ((x, y, z), (qw, qx, qy, qz)) for the forklift root."""
+        p = self.forklift.data.root_pos_w[env_id].cpu().numpy()
+        q = self.forklift.data.root_quat_w[env_id].cpu().numpy()
+        return tuple(map(float, p)), tuple(map(float, q))
+
+    def get_world_twist(self, env_id: int = 0):
+        """Return ((vx, vy, vz), (wx, wy, wz)) in world frame."""
+        v = self.forklift.data.root_lin_vel_w[env_id].cpu().numpy()
+        w = self.forklift.data.root_ang_vel_w[env_id].cpu().numpy()
+        return tuple(map(float, v)), tuple(map(float, w))
+
+    def get_joint_state_dict(self, env_id: int = 0) -> dict:
+        """Return {joint_name: (pos, vel)} for the forklift articulation."""
+        names = self.forklift.joint_names
+        pos = self.forklift.data.joint_pos[env_id].cpu().numpy()
+        vel = self.forklift.data.joint_vel[env_id].cpu().numpy()
+        return {n: (float(pos[i]), float(vel[i])) for i, n in enumerate(names)}
+
     def _reset_idx(self, env_ids):
         super()._reset_idx(env_ids)
         origins = self.scene.env_origins[env_ids]
 
-        # Reset forklift — spawn 1.5 m behind the pallet at (10, 0) so its
-        # tines sit in the pocket, ready to lift. Pallet length is 1.219 m
-        # (centered on root); forklift root + 1.5 m forward puts tine tips
-        # well inside the pocket.
+        # ── Optional: sample fresh spawn/cargo poses via injected RNGs ──
+        if self.cfg.randomize_on_reset and self._spawn_rng is not None \
+                and self._cargo_rng is not None:
+            sx, sy, syaw = self._spawn_rng.sample()
+            cargo_xy_yaw = self._cargo_rng.sample(_N_INTERACTABLE, (sx, sy))
+            self.cfg.spawn_override = (sx, sy, syaw)
+            self.cfg.cargo_override = tuple(cargo_xy_yaw)
+            self.last_spawn = {
+                "xy": (sx, sy),
+                "yaw_rad": syaw,
+                "seed": int(getattr(self._spawn_rng, "seed", -1)),
+            }
+            self.last_target = {
+                "pallet_idx": 0,
+                "cargo_xyz": [cargo_xy_yaw[0][0], cargo_xy_yaw[0][1], 0.0],
+                "cargo_yaw_rad": cargo_xy_yaw[0][2],
+            }
+
+        # Reset forklift — default: spawn 1.5 m behind the pallet at (10, 0).
+        # Override: cfg.spawn_override = (x, y, yaw_rad) in env-local coords.
         _FORKLIFT_SPAWN_X = 8.5
         _FORK_LIFT_J = -0.15        # tine_z = j + wheel_radius ≈ 0.175 m,
                                     # squarely inside pocket (0.06–0.26 m)
 
         default_root = self.forklift.data.default_root_state[env_ids].clone()
         default_root[:, :3] += origins
-        default_root[:, 0] += _FORKLIFT_SPAWN_X
+        spawn_ovr = self.cfg.spawn_override
+        if spawn_ovr:
+            sx, sy, syaw = spawn_ovr
+            default_root[:, 0] += sx
+            default_root[:, 1] += sy
+            qw = math.cos(syaw / 2.0)
+            qz = math.sin(syaw / 2.0)
+            default_root[:, 3] = qw
+            default_root[:, 4] = 0.0
+            default_root[:, 5] = 0.0
+            default_root[:, 6] = qz
+        else:
+            default_root[:, 0] += _FORKLIFT_SPAWN_X
         self.forklift.write_root_pose_to_sim(default_root[:, :7], env_ids=env_ids)
         self.forklift.write_root_velocity_to_sim(default_root[:, 7:], env_ids=env_ids)
         dj_pos = self.forklift.data.default_joint_pos[env_ids].clone()
@@ -949,10 +923,12 @@ class ForkliftEnv(DirectRLEnv):
                 self._grab_box_offsets[env_id][pi] = list(_BOX_LOCAL_OFFSETS)
                 self._pallet_base_z[env_id][pi] = 0.0
 
-        # Per-env layout: single interactable pallet in front of the forklift
+        # Per-env layout: single interactable pallet in front of the forklift.
+        # Override: cfg.cargo_override = ((x, y, yaw_rad), ...) per pallet.
         _POSITIONS = [
             (10.0, 0.0, 0.0),           # pallet 0: ground level, 10m ahead
         ]
+        cargo_ovr = self.cfg.cargo_override
 
         for i, env_id in enumerate(env_ids.tolist()):
             origin = origins[i].cpu().numpy()
@@ -960,20 +936,93 @@ class ForkliftEnv(DirectRLEnv):
             env_t = torch.tensor([env_id], device=self.device)
 
             for pi in range(_N_INTERACTABLE):
-                dx, dy, base_z = _POSITIONS[pi]
+                if cargo_ovr:
+                    dx, dy, yaw = cargo_ovr[pi]
+                    base_z = 0.0
+                else:
+                    dx, dy, base_z = _POSITIONS[pi]
+                    yaw = 0.0
                 tx = ox + dx
                 ty = oy + dy
                 self._pallet_base_z[env_id][pi] = base_z
 
                 self._place_pallet_and_cargo(
-                    env_id, env_t, pi, tx, ty, base_z, yaw=0.0)
+                    env_id, env_t, pi, tx, ty, base_z, yaw=yaw)
 
+            placed = cargo_ovr[0] if cargo_ovr else (_POSITIONS[0][0], _POSITIONS[0][1])
             print(f"[INFO] Env {env_id}: {_N_INTERACTABLE} pallet placed "
-                  f"at (+{_POSITIONS[0][0]:.1f}, {_POSITIONS[0][1]:+.1f}) m", flush=True)
+                  f"at (+{placed[0]:.2f}, {placed[1]:+.2f}) m", flush=True)
+
+            # ── Distractor cargos ─────────────────────────────────────
+            # Visible count is sampled per reset in [n_min, n_max].
+            # All units never used this episode get parked underground.
+            self._place_distractors(env_id, env_t, ox, oy)
 
         # Snap driver camera immediately
         if self.cam_front is not None:
             self._update_driver_cam()
+
+    def _place_distractors(self, env_id: int, env_t: torch.Tensor,
+                            ox: float, oy: float) -> None:
+        n_max = int(self.cfg.n_distractors_max)
+        if n_max <= 0:
+            self.last_distractors = []
+            return
+
+        # Sample count + poses (or empty list if no randomizer set).
+        if self._distractor_rng is not None:
+            n_min = max(0, int(self.cfg.n_distractors_min))
+            n_eff = int(self._distractor_rng._rng.integers(
+                n_min, n_max + 1))
+            fl_xy = (self.cfg.spawn_override[0] if self.cfg.spawn_override else 0.0,
+                     self.cfg.spawn_override[1] if self.cfg.spawn_override else 0.0)
+            blocked = [fl_xy]
+            for cx, cy, _ in (self.cfg.cargo_override or []):
+                blocked.append((cx, cy))
+            poses = self._distractor_rng.sample(n_eff, blocked)
+        else:
+            poses = []
+
+        # Park ALL units underground first; then place the n active ones.
+        park_pose = torch.zeros(1, 7, device=self.device)
+        park_pose[0, 2] = _PARK_Z
+        park_pose[0, 3] = 1.0
+        zero_v = torch.zeros(1, 6, device=self.device)
+        for di in range(n_max):
+            self.distractor_pallets[di].write_root_pose_to_sim(park_pose, env_ids=env_t)
+            self.distractor_pallets[di].write_root_velocity_to_sim(zero_v, env_ids=env_t)
+            for box in self.distractor_boxes[di]:
+                box.write_root_pose_to_sim(park_pose, env_ids=env_t)
+                box.write_root_velocity_to_sim(zero_v, env_ids=env_t)
+
+        active: list[dict] = []
+        for di, (dx, dy, dz, dyaw) in enumerate(poses):
+            tx, ty = ox + dx, oy + dy
+            cos_y, sin_y = math.cos(dyaw), math.sin(dyaw)
+            qw, qz = math.cos(dyaw / 2.0), math.sin(dyaw / 2.0)
+
+            pal_pose = torch.zeros(1, 7, device=self.device)
+            pal_pose[0, 0], pal_pose[0, 1], pal_pose[0, 2] = tx, ty, dz
+            pal_pose[0, 3], pal_pose[0, 6] = qw, qz
+            self.distractor_pallets[di].write_root_pose_to_sim(pal_pose, env_ids=env_t)
+            self.distractor_pallets[di].write_root_velocity_to_sim(zero_v, env_ids=env_t)
+
+            for bi, (lx, ly, lz) in enumerate(_BOX_LOCAL_OFFSETS):
+                bx = tx + lx * cos_y - ly * sin_y
+                by = ty + lx * sin_y + ly * cos_y
+                bz = dz + lz
+                bp = torch.zeros(1, 7, device=self.device)
+                bp[0, 0], bp[0, 1], bp[0, 2] = bx, by, bz
+                bp[0, 3], bp[0, 6] = qw, qz
+                self.distractor_boxes[di][bi].write_root_pose_to_sim(bp, env_ids=env_t)
+                self.distractor_boxes[di][bi].write_root_velocity_to_sim(zero_v, env_ids=env_t)
+
+            active.append({"xy": [tx, ty], "yaw_rad": float(dyaw)})
+
+        self.last_distractors = active
+        if active:
+            print(f"[INFO] Env {env_id}: placed {len(active)} distractors "
+                  f"(of {n_max} pre-instantiated)", flush=True)
 
     # ------------------------------------------------------------------
     # Actions
@@ -1365,14 +1414,6 @@ class ForkliftEnv(DirectRLEnv):
             obs["rgb_front"] = self.cam_front.data.output["rgb"]
             obs["rgb_left"]  = self.cam_top_left.data.output["rgb"]
             obs["rgb_right"] = self.cam_top_right.data.output["rgb"]
-        if self.lidar is not None:
-            obs["lidar"] = self.lidar.data.ray_hits_w
-
-        # LiDAR sanity dump after first 10 steps
-        if not self._debug_sensors_saved and self._step_count >= 10:
-            if self.lidar is not None:
-                self._save_lidar_sanity_dump(obs)
-            self._debug_sensors_saved = True
 
         # Per-step status line
         self._print_step_status(obs)

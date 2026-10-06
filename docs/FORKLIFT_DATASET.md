@@ -8,6 +8,18 @@ Dataset for fine-tuning pi0 (OpenPI) on a simulated forklift pick-and-place stac
 - Heading (yaw) = 0 means facing +X; positive yaw = counter-clockwise
 - All positions in metres, angles in radians, velocities in m/s or rad/s
 
+## Recording rate and sensors
+
+- **One frame per control step: 30 fps** (120 Hz physics ÷ decimation 4) in
+  both recorders. Cameras refresh at 15 Hz, so consecutive frames can repeat
+  an image.
+- **Cameras are the only sensors.** There is no LiDAR (Light Detection and
+  Ranging) in the environment or the dataset.
+- `observation.state[0:3]` (x, y, yaw) is the per-frame pose. Together with the
+  timestamps it is what an OmniVLA-style converter needs to derive
+  future-waypoint labels; the episode's goal (cargo pose) is in
+  `extras_episodes.jsonl`.
+
 ---
 
 ## Observation Fields
@@ -43,29 +55,13 @@ Dataset for fine-tuning pi0 (OpenPI) on a simulated forklift pick-and-place stac
 | Mount | Mirror of top_left on right side |
 | Update rate | 15 Hz |
 
-### `observation.lidar`
-
-| Property | Value |
-|----------|-------|
-| Shape | `(64, 1024)` |
-| Dtype | `float32` |
-| Units | Range in metres per pixel |
-| Sensor | Ouster OS1-64 parameters |
-| Beams | 64 vertical channels |
-| Vertical FOV | -16.6 deg to +16.6 deg (33.2 deg total) |
-| Horizontal FOV | 360 deg (1024 samples) |
-| Max range | 120 m |
-| Update rate | 10 Hz |
-| Mount | Front of forklift, 1.0m forward, 2.5m up |
-| Storage | Range image (fixed shape), rays that miss return `max_range` |
-
 ### `observation.state`
 
 | Index | Name | Units | Range |
 |-------|------|-------|-------|
 | 0 | x | metres | warehouse bounds |
 | 1 | y | metres | warehouse bounds |
-| 2 | yaw (heading) | radians | [-pi, pi] |
+| 2 | yaw (heading) | radians | unwrapped (accumulates past ±pi; wrap before use) |
 | 3 | vx (world frame) | m/s | [-5, 5] |
 | 4 | vy (world frame) | m/s | [-5, 5] |
 | 5 | omega_z | rad/s | continuous |
@@ -110,18 +106,6 @@ clipping_range:      0.1 - 80.0 m
 | front_cabin | (0.3, 0.0, 1.8) | -34 | 0 |
 | top_left | (0.2, 0.6, 2.3) | -20 | +23 |
 | top_right | (0.2, -0.6, 2.3) | -20 | -23 |
-
-### LiDAR (Ouster OS1-64 simulation via RayCaster)
-
-```
-channels:         64
-vertical_fov:     -16.6 to +16.6 deg
-horizontal_fov:   -180.0 to +180.0 deg (360 deg)
-horizontal_res:   0.3516 deg (~1024 samples)
-max_distance:     120.0 m
-ray_alignment:    "base" (full 6-DOF tracking)
-mount_position:   (1.0, 0.0, 2.5) relative to forklift root
-```
 
 ---
 
@@ -224,19 +208,17 @@ pytest tests/forklift/test_unit.py -v
 
 ## Known Limitations
 
-1. **LiDAR only sees ground plane** — The RayCaster is configured with
-   `mesh_prim_paths=["/World/Ground"]`. Walls, pallets, and boxes are not
-   in the ray-cast mesh. Use `MultiMeshRayCaster` for full obstacle detection.
-
-2. **No fork tilt** — The ForkliftC USD has a prismatic lift joint but no
+1. **No fork tilt** — The ForkliftC USD has a prismatic lift joint but no
    tilt joint. `fork_tilt_vel` (action index 3) is always 0.
 
-3. **Kinematic carry** — Cargo is carried kinematically (pose follows forklift).
+2. **Kinematic carry** — Cargo is carried kinematically (pose follows forklift).
    There is no physics-based friction handoff during carry. On release, cargo
    is placed at the computed position.
 
-4. **LeRobot v3.0 vs v2.1** — Recording uses v3.0 format. OpenPI expects v2.1.
-   Manual conversion or a version-pinned lerobot install is needed.
+3. **LeRobot v3.0 vs v2.1** — Recording uses v3.0 format. OpenPI expects v2.1.
+   Manual conversion or a version-pinned lerobot install is needed. v3.0
+   datasets are only loadable after `dataset.finalize()`; both recorders call
+   it on every exit path (normal end, crash, Ctrl+C).
 
-5. **Single-layer stacking** — Stacking detection only checks the immediate
+4. **Single-layer stacking** — Stacking detection only checks the immediate
    pallet below. Deep stacks (3+ layers) are not tested.

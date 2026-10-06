@@ -14,7 +14,7 @@
 7. [Build the Forklift Environment](#7-build-the-forklift-environment)
 8. [Control the Forklift with PS4 Controller](#8-control-the-forklift-with-ps4-controller)
 9. [Add Boxes at Random Locations](#9-add-boxes-at-random-locations)
-10. [Add RGB Camera and LiDAR](#10-add-rgb-camera-and-lidar)
+10. [Add RGB Cameras](#10-add-rgb-cameras)
 11. [Record Teleoperation Demonstrations](#11-record-teleoperation-demonstrations)
 12. [Convert Data to LeRobot Format for openpi](#12-convert-data-to-lerobot-format-for-openpi)
 13. [Train with openpi](#13-train-with-openpi)
@@ -379,21 +379,15 @@ The pallet stays as a single target. The task becomes: pick up any box and place
 
 ---
 
-## 10. Add RGB Camera and LiDAR
+## 10. Add RGB Cameras
 
-Both sensors are already included in the environment built in Step 7. This section explains what each one provides and how to adjust them.
+The cameras are already included in the environment built in Step 7, and they are its only sensors (there is no LiDAR). This section explains what they provide and how to adjust them.
 
 ### RGB Camera
 
 The front camera is mounted 1.5m ahead of the forklift at 1.2m height, facing forward. It captures 224×224 RGB and depth images at 30 FPS. Each step, you can read the current frame from `camera.data.output["rgb"]` (shape: H×W×3) and depth from `camera.data.output["depth"]` (shape: H×W×1).
 
 To add a **rear camera**, duplicate the `CameraCfg` entry in `_setup_scene()` with a different prim path (e.g. `/World/Forklift/RearCamera`) and set the position behind the forklift with the rotation flipped 180°.
-
-### LiDAR (Ray Caster)
-
-The LiDAR is a simulated 16-beam sensor running at 10 Hz with a 360° horizontal sweep. It works by casting rays from the forklift and returning the 3D world coordinates of each hit point. Each step, `lidar.data.ray_hits_w` gives you the hit positions and `lidar.data.distances` gives the distances in meters.
-
-To increase resolution or beam count, adjust `channels` (number of vertical beams) and `horizontal_res` (degrees between horizontal rays) in the `LidarPatternCfg` inside `forklift_env.py`.
 
 ---
 
@@ -425,7 +419,6 @@ datasets/forklift_demos.hdf5
 │   │   ├── obs/
 │   │   │   ├── rgb          (T, 224, 224, 3)   ← camera frames
 │   │   │   ├── depth        (T, 224, 224, 1)
-│   │   │   ├── lidar        (T, N_rays, 3)
 │   │   │   └── state        (T, N_joints)      ← forklift joint angles
 │   │   └── actions          (T, 3)             ← [v_x, omega_z, fork]
 │   ├── demo_1/
@@ -604,7 +597,7 @@ After following this tutorial, your file structure will look like:
 | **Zero-shot** | A policy that works on tasks or environments it has never seen during training. |
 | **Prompt** | The language instruction given to the VLA. E.g. "move box to left pallet". |
 | **Action space** | The set of possible actions the robot can take (e.g. joint velocities, end-effector pose). |
-| **Observation space** | What the robot perceives (camera images, joint angles, LiDAR). |
+| **Observation space** | What the robot perceives (camera images, joint angles). |
 | **Episode** | One complete trial from reset to success or failure. |
 | **Teleoperation** | A human controlling the robot to collect demonstration data. |
 | **Norm stats** | Normalization statistics (mean, std) computed from training data. Helps training stability. |
@@ -629,7 +622,6 @@ After following this tutorial, your file structure will look like:
 | **Articulation** | A robot model with joints and links. In Isaac Lab, `ArticulationCfg` defines a robot. |
 | **RigidObject** | A non-articulated physics object (e.g. a box). Defined with `RigidObjectCfg`. |
 | **CameraCfg** | Isaac Lab configuration for adding an RGB/depth camera to the scene. |
-| **RayCasterCfg** | Isaac Lab's LiDAR simulation — casts rays and returns hit distances. |
 | **Se2Gamepad** | Isaac Lab's PS4/Xbox gamepad interface for 2D velocity commands. |
 | **Se3Gamepad** | Isaac Lab's PS4/Xbox gamepad interface for 3D end-effector control. |
 | **AppLauncher** | Isaac Lab's launcher class that must be initialized before any Isaac imports. |
