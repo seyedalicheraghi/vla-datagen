@@ -1,10 +1,13 @@
-"""Autonomous forklift episodes → ROS 2 mcap bags.
+"""Autonomous forklift episodes → LeRobot dataset (+ ROS 2 mcap bags).
 
 For N episodes:
-  1. Reset env with a fresh per-episode seed → fresh forklift + cargo poses.
-  2. A scripted FSM policy drives forklift → cargo, lifts to max, lowers.
-  3. Per-step state, actions, cameras and TF written to a standalone
-     mcap bag at <out_dir>/episode_NNN/.
+  1. Reset env with a fresh per-episode seed → fresh cargo pose, forklift
+     start 6–8 m away (randomizers.sample_scene) and distractor layout.
+  2. The scripted expert (policies.ScriptedExpert) drives to the pallet,
+     slides the forks in, lifts to max height, holds, lowers.
+  3. Every control step is written to the LeRobot dataset (3 camera images +
+     state + action + prompt) and, optionally, to a standalone mcap bag at
+     <out_dir>/episode_NNN/ and a demo MP4 (--video).
   4. After all episodes, write summary.jsonl + README.md in <out_dir>.
 
 Replay one bag with:
@@ -21,16 +24,32 @@ This script does NOT use rclpy. It writes bags via the pure-Python
 
 import argparse
 from pathlib import Path
+# Load h5py's HDF5 before Isaac Sim starts: the windowed app loads its own
+# hdf5.dll (isaacsim.sensors.rtx), and on Windows Isaac Lab's later
+# `import h5py` then fails with "DLL load failed". Harmless elsewhere.
+import h5py  # noqa: F401
 from isaaclab.app import AppLauncher
 
-parser = argparse.ArgumentParser(description="Scripted lift+lower → mcap bags.")
+_BOOL = lambda s: s.lower() not in ("false", "0", "no", "off")
+
+parser = argparse.ArgumentParser(description="Scripted drive+lift+lower → LeRobot (+ mcap bags).")
 parser.add_argument("--num_episodes", type=int, default=5)
 parser.add_argument("--out_dir", type=str,
                     default="~/datasets/forklift_lift_lower")
 parser.add_argument("--base_seed", type=int, default=42)
-parser.add_argument("--cargo_region", type=str, default="5,-3,11,3",
-                    help="xmin,ymin,xmax,ymax (env-local). Forklift is "
-                         "auto-parked 1.5 m behind the sampled cargo.")
+parser.add_argument("--cargo_region", type=str, default="-3,-4,3,4",
+                    help="xmin,ymin,xmax,ymax (env-local) for the target cargo. "
+                         "Centred so a 6–8 m run-in fits inside the walls "
+                         "from either side.")
+parser.add_argument("--drive", type=_BOOL, default=True,
+                    help="Start 6–8 m from the pallet and drive in (default). "
+                         "false = start parked with the forks already in the "
+                         "pocket (lift-and-lower only).")
+parser.add_argument("--video", type=str, default="",
+                    help="Also write demo video: a third-person chase view plus "
+                         "the three dataset cameras (that camera is never stored "
+                         "in the dataset). A path ending in .mp4 = one video for "
+                         "the run; a folder = one short clip per episode.")
 parser.add_argument("--max_steps_per_ep", type=int, default=1500)
 parser.add_argument("--image_rate_hz", type=float, default=10.0,
                     help="Throttle bag image rate (env runs at 30 Hz). "
@@ -42,12 +61,12 @@ parser.add_argument("--camera_w", type=int, default=448)
 parser.add_argument("--camera_h", type=int, default=448)
 parser.add_argument("--n-distractors-min", type=int, default=3)
 parser.add_argument("--n-distractors-max", type=int, default=12)
-parser.add_argument("--distractor-region", type=str, default="0,-8,15,8",
-                    help="xmin,ymin,xmax,ymax for distractor cargo placement.")
+parser.add_argument("--distractor-region", type=str, default="-13,-13,13,13",
+                    help="xmin,ymin,xmax,ymax for distractor cargo placement. "
+                         "The forklift's driving corridor is always kept clear.")
 
 # Output toggles (both default true — pass --ros false / --lerobot false
 # to skip either writer).
-_BOOL = lambda s: s.lower() not in ("false", "0", "no", "off")
 parser.add_argument("--ros", type=_BOOL, default=True,
                     help="Write a ROS 2 (Robot Operating System v2) mcap bag "
                          "to --out_dir. Default true.")
@@ -81,11 +100,12 @@ import numpy as np
 import torch
 
 sys.path.insert(0, os.path.dirname(__file__))
-from forklift_env import ForkliftEnv, ForkliftEnvCfg, _N_INTERACTABLE
-from randomizers import CargoRandomizer, DistractorRandomizer, parse_region
+from forklift_env import ForkliftEnv, ForkliftEnvCfg
+from randomizers import DistractorRandomizer, parse_region, sample_scene
+from policies import ScriptedExpert
+from media import DemoVideo, dataset_image, to_rgb_uint8, video_path
 import prompt_builder
 
-from PIL import Image as PILImage
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
 from rosbags.rosbag2 import Writer, StoragePlugin
@@ -95,10 +115,11 @@ from rosbags.typesys import Stores, get_typestore
 _STATE_DIM = 8
 _ACTION_DIM = 5
 
-# LeRobot v3 datasets are only loadable after finalize() (it writes the
-# parquet footers). Datasets registered here are finalized on every exit
-# path, including crashes and Ctrl+C (see _finalize_lerobot / __main__).
-_LEROBOT_DATASETS: list = []
+# Outputs that must be closed on every exit path, including crashes and
+# Ctrl+C (see _close_outputs / __main__): LeRobot v3 datasets are only
+# loadable after finalize() (it writes the parquet footers), and an MP4 is
+# unplayable until its writer is closed.
+_OPEN_OUTPUTS: list = []
 
 TYPESTORE = get_typestore(Stores.ROS2_JAZZY)
 
@@ -305,23 +326,10 @@ def write(writer, conns, topic: str, t_ns: int, msg) -> None:
 # LeRobot helpers (mirrored from record_lerobot.py — same conventions)
 # ---------------------------------------------------------------------------
 
-def _to_pil_resized(tensor_rgba, size: int):
-    """Tensor RGBA → PIL RGB, center-cropped to a square, resized to (size × size).
-
-    Cropping first keeps the aspect ratio — resizing a 4:3 frame straight to
-    a square would squash the scene.
-    """
-    arr = tensor_rgba[0].cpu().numpy()
-    if arr.shape[-1] == 4:
-        arr = arr[:, :, :3]
-    h, w = arr.shape[:2]
-    side = min(h, w)
-    top, left = (h - side) // 2, (w - side) // 2
-    arr = arr[top:top + side, left:left + side]
-    img = PILImage.fromarray(arr.astype(np.uint8))
-    if img.size != (size, size):
-        img = img.resize((size, size), PILImage.BILINEAR)
-    return img
+# Dataset camera name → env observation key.
+_DATASET_CAMS = (("front_cabin", "rgb_front"),
+                 ("top_left",    "rgb_left"),
+                 ("top_right",   "rgb_right"))
 
 
 def _make_lerobot_extras_writer(ds_root: str):
@@ -361,13 +369,15 @@ def _resolve_task_index(dataset, prompt: str) -> int:
     return -1
 
 
-def _finalize_lerobot() -> None:
-    """Finalize every registered dataset once (LeRobot v3 needs this to
-    write valid files; v2.1 has no finalize() and needs nothing)."""
-    while _LEROBOT_DATASETS:
-        ds = _LEROBOT_DATASETS.pop()
-        if hasattr(ds, "finalize"):
-            ds.finalize()
+def _close_outputs() -> None:
+    """Finalize every registered LeRobot dataset (v3 needs this to write
+    valid files; v2.1 has no finalize()) and close every demo video, once."""
+    while _OPEN_OUTPUTS:
+        out = _OPEN_OUTPUTS.pop()
+        if isinstance(out, DemoVideo):
+            out.close()
+        elif hasattr(out, "finalize"):
+            out.finalize()
 
 
 def _make_lerobot_dataset(root: str, image_size: int, fps: int) -> LeRobotDataset:
@@ -410,113 +420,16 @@ def _make_lerobot_dataset(root: str, image_size: int, fps: int) -> LeRobotDatase
 
 
 # ---------------------------------------------------------------------------
-# Scripted FSM policy
-# ---------------------------------------------------------------------------
-
-class LiftAndLowerPolicy:
-    """ALIGN → APPROACH → INSERT → LIFT_UP → HOLD → LIFT_DOWN → DONE."""
-
-    HOLD_STEPS = 30   # ~1 s at 30 Hz
-
-    def __init__(self):
-        self.state = "ALIGN"
-        self.hold_count = 0
-        self.fork_max_seen = -1.0
-        self.fork_min_seen = 2.0
-        self.n_grabs = 0
-        self.n_drops = 0
-        self._prev_grabbed = -1
-
-    def _bookkeep(self, gidx: int, fork_h: float):
-        if gidx >= 0 and self._prev_grabbed < 0:
-            self.n_grabs += 1
-        elif gidx < 0 and self._prev_grabbed >= 0:
-            self.n_drops += 1
-        self._prev_grabbed = int(gidx)
-        self.fork_max_seen = max(self.fork_max_seen, fork_h)
-        self.fork_min_seen = min(self.fork_min_seen, fork_h)
-
-    def transition_event(self, gidx: int) -> str | None:
-        """Return 'grab'/'drop' on the step the transition occurred."""
-        if gidx >= 0 and self._prev_grabbed < 0:
-            return "grab"
-        if gidx < 0 and self._prev_grabbed >= 0:
-            return "drop"
-        return None
-
-    def act(self, env, target: dict) -> tuple[float, float, float]:
-        proprio = env._get_proprioception()[0].cpu().numpy()
-        x, y, yaw, _vx, _vy, _omg, fork_h, gidx = (float(v) for v in proprio)
-        # Track grab/drop events BEFORE updating state machine
-        event = self.transition_event(int(gidx))
-        self._bookkeep(int(gidx), fork_h)
-
-        cx, cy, _ = target["cargo_xyz"]
-        dx, dy = cx - x, cy - y
-        dist = math.hypot(dx, dy)
-        bearing = math.atan2(dy, dx)
-        heading_err = (bearing - yaw + math.pi) % (2 * math.pi) - math.pi
-
-        action = (0.0, 0.0, 0.0)
-
-        if self.state == "ALIGN":
-            if abs(heading_err) < math.radians(5):
-                self.state = "APPROACH"
-            else:
-                action = (0.0, max(-1.0, min(1.0, 1.5 * heading_err)), 0.0)
-
-        elif self.state == "APPROACH":
-            if dist < 1.6 and abs(heading_err) < math.radians(8):
-                self.state = "INSERT"
-            else:
-                v = max(0.0, min(1.5, 0.6 * dist))
-                w = max(-0.6, min(0.6, 1.0 * heading_err))
-                action = (v, w, -0.5)
-
-        elif self.state == "INSERT":
-            if gidx >= 0:
-                self.state = "LIFT_UP"
-            else:
-                # fork_cmd > 0.01 is required by env to trigger the grab
-                # (forklift_env.py:1216). Park-under-cargo spawn already
-                # placed the tines in the pocket, so no forward motion needed.
-                action = (0.0, 0.0, 0.05)
-
-        elif self.state == "LIFT_UP":
-            if fork_h >= 1.49:
-                self.state = "HOLD"
-                self.hold_count = 0
-            else:
-                action = (0.0, 0.0, 1.0)
-
-        elif self.state == "HOLD":
-            self.hold_count += 1
-            if self.hold_count >= self.HOLD_STEPS:
-                self.state = "LIFT_DOWN"
-
-        elif self.state == "LIFT_DOWN":
-            if fork_h <= -0.29:
-                self.state = "DONE"
-            else:
-                action = (0.0, 0.0, -1.0)
-
-        # Cache event for caller
-        self._last_event = event
-        return action
-
-
-# ---------------------------------------------------------------------------
 # Episode driver
 # ---------------------------------------------------------------------------
 
-def render_prompt(spawn: dict, target: dict) -> str:
+def render_prompt(spawn: dict, target: dict, drive: bool) -> str:
     cx, cy, cz = target["cargo_xyz"]
     cyaw = target["cargo_yaw_rad"]
     fx, fy = spawn["xy"]
     fyaw = spawn["yaw_rad"]
-    template = ("lift the cargo at coordinate ({cx:.2f}, {cy:.2f}, {cz:.2f}) "
-                "from forklift at ({fx:.2f}, {fy:.2f}, yaw {fyaw_deg:.0f} deg) "
-                "to maximum fork height, then lower it")
+    template = (prompt_builder.DRIVE_LIFT_TEMPLATE if drive
+                else prompt_builder.LIFT_LOWER_TEMPLATE)
     rendered, _ = prompt_builder.render(
         template=template,
         cargo_xyz=(cx, cy, cz),
@@ -536,19 +449,13 @@ def write_static_tf(writer, conns, t_ns: int) -> None:
     write(writer, conns, "/tf_static", t_ns, _tf_static_bundle(t_ns, transforms))
 
 
-def _rgba_to_rgb_uint8(t):
-    arr = t[0].cpu().numpy()
-    if arr.shape[-1] == 4:
-        arr = arr[:, :, :3]
-    return arr.astype(np.uint8)
-
-
 def run_episode(env, writer, conns, max_steps: int, image_period_steps: int,
-                ep_idx: int, lerobot_dataset=None,
-                lerobot_image_size: int = 224) -> dict:
+                ep_idx: int, n_episodes: int, drive: bool,
+                lerobot_dataset=None, lerobot_image_size: int = 224,
+                video: DemoVideo | None = None) -> dict:
     spawn = dict(env.last_spawn)
     target = dict(env.last_target)
-    prompt = render_prompt(spawn, target)
+    prompt = render_prompt(spawn, target, drive)
 
     # Latched messages at episode start (t = 0)
     t_ns = 0
@@ -565,26 +472,26 @@ def run_episode(env, writer, conns, max_steps: int, image_period_steps: int,
           _string_msg(json.dumps({"distractors": list(env.last_distractors)})))
 
     step_dt = float(env.cfg.sim.dt * env.cfg.decimation)   # 1/30 s
-    policy = LiftAndLowerPolicy()
+    policy = ScriptedExpert(step_dt)
+    policy.reset({"target": target})
     obs = env._get_observations()  # initial frame after reset
 
     n_steps = 0
     sim_t = 0.0
-    success = False
 
     for step in range(max_steps):
         t_ns = int(sim_t * 1e9)
 
-        # 1. Compute action
-        v_x, omega_z, fork_cmd = policy.act(env, target)
+        # 1. State at t → the expert's action for it
+        proprio = env._get_proprioception()[0].cpu().numpy().astype(np.float32)
+        gidx = int(proprio[7])
+        v_x, omega_z, fork_cmd = policy.act({"state": proprio})
         action_t = torch.tensor([[v_x, omega_z, fork_cmd]], device=env.device)
 
         # 2. Per-step bag writes (BEFORE step → snapshots state at t)
         pos, quat = env.get_world_pose()
         lin, ang = env.get_world_twist()
         joints = env.get_joint_state_dict()
-        proprio = env._get_proprioception()[0].cpu().numpy().astype(np.float32)
-        gidx = int(proprio[7])
 
         write(writer, conns, "/tf",                t_ns, _tf_msg(t_ns, WORLD_FRAME, BASE_FRAME, pos, quat))
         write(writer, conns, "/forklift/odom",     t_ns, _odometry_msg(t_ns, pos, quat, lin, ang))
@@ -596,8 +503,8 @@ def run_episode(env, writer, conns, max_steps: int, image_period_steps: int,
         write(writer, conns, "/action/fork",       t_ns, _float32_msg(fork_cmd))
         write(writer, conns, "/action/state",      t_ns, _string_msg(policy.state))
         write(writer, conns, "/grab/state",        t_ns, _int32_msg(gidx))
-        if policy._last_event is not None:
-            write(writer, conns, "/grab/event", t_ns, _string_msg(policy._last_event))
+        if policy.last_event is not None:
+            write(writer, conns, "/grab/event", t_ns, _string_msg(policy.last_event))
 
         # Images at throttled rate (sensor traffic is the bag bulk)
         if step % image_period_steps == 0 and "rgb_front" in obs:
@@ -606,39 +513,48 @@ def run_episode(env, writer, conns, max_steps: int, image_period_steps: int,
                 ("/camera/top_left/image_raw",  "rgb_left",  "cam_top_left"),
                 ("/camera/top_right/image_raw", "rgb_right", "cam_top_right"),
             ):
-                rgb = _rgba_to_rgb_uint8(obs[key])
-                write(writer, conns, topic, t_ns, _image_msg(t_ns, frame, rgb))
+                write(writer, conns, topic, t_ns,
+                      _image_msg(t_ns, frame, to_rgb_uint8(obs[key])))
 
-        # 2b. LeRobot frame (every step, image throttling N/A — Pi-Zero-Five
-        # finetuning expects per-control-step samples). Skip if disabled or
-        # if the env has no cameras yet (first warmup tick).
-        if lerobot_dataset is not None and "rgb_front" in obs:
+        # 2b. LeRobot frame (every step — Pi-Zero-Five / OmniVLA training use
+        # per-control-step samples). The images are exactly what a policy
+        # will be given in eval_closed_loop.py (same media.dataset_image).
+        images = None
+        if "rgb_front" in obs:
+            images = {name: dataset_image(to_rgb_uint8(obs[key]), lerobot_image_size)
+                      for name, key in _DATASET_CAMS}
+        if lerobot_dataset is not None and images is not None:
             action_5 = np.array(
                 [v_x, omega_z, fork_cmd, 0.0, 0.0], dtype=np.float32)
             lerobot_dataset.add_frame({
-                "observation.images.front_cabin":
-                    _to_pil_resized(obs["rgb_front"], lerobot_image_size),
-                "observation.images.top_left":
-                    _to_pil_resized(obs["rgb_left"],  lerobot_image_size),
-                "observation.images.top_right":
-                    _to_pil_resized(obs["rgb_right"], lerobot_image_size),
+                **{f"observation.images.{name}": img for name, img in images.items()},
                 "observation.state":  proprio,
                 "action":             action_5,
                 "task":               prompt,
             })
+        if video is not None and images is not None and "rgb_chase" in obs:
+            video.add(to_rgb_uint8(obs["rgb_chase"]), images,
+                      lines=["Data collection · scripted expert",
+                             f"episode {ep_idx + 1}/{n_episodes} · "
+                             f"t = {sim_t:4.1f} s · {policy.state}"],
+                      prompt=prompt, badge="● REC  LeRobot")
 
         # 3. Step env
         obs, _, _, _, _ = env.step(action_t)
         n_steps += 1
         sim_t += step_dt
 
-        if policy.state == "DONE":
-            success = True
+        if policy.done:
             break
+
+    if video is not None:
+        video.hold(20)          # ~0.7 s pause between episodes
 
     return {
         "n_steps": n_steps,
-        "success": success,
+        "success": policy.state == "DONE",
+        "approach_steps": int(policy.approach_steps),
+        "insert_error": policy.insert_error,
         "fork_max_reached_m": float(policy.fork_max_seen),
         "fork_min_reached_m": float(policy.fork_min_seen),
         "n_grabs": int(policy.n_grabs),
@@ -660,34 +576,33 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = ForkliftEnvCfg()
-    # We bypass the env's own randomize_on_reset path because we want the
-    # forklift parked under the cargo (tines in pocket) rather than
-    # independently random. Compute spawn from cargo each episode and
-    # write through the override fields directly.
+    # We bypass the env's own randomize_on_reset path: the forklift start is
+    # derived from the cargo pose (randomizers.sample_scene) and written
+    # through the override fields directly each episode.
     cfg.randomize_on_reset = False
     cfg.camera_resolution = (args_cli.camera_w, args_cli.camera_h)
     cfg.n_distractors_min = int(args_cli.n_distractors_min)
     cfg.n_distractors_max = int(args_cli.n_distractors_max)
     cfg.distractor_region = parse_region(args_cli.distractor_region)
+    cfg.enable_chase_cam = bool(args_cli.video)
     env = ForkliftEnv(cfg)
+    control_fps = round(1.0 / (env.cfg.sim.dt * env.cfg.decimation))   # 30
 
-    # Switch the viewport from default Perspective to the in-cabin camera.
+    # Show the chase camera (demo) or the in-cabin camera in the viewport.
     # No-op in headless mode.
     if not args_cli.headless:
+        cam_path = ("/World/envs/env_0/CamChase" if cfg.enable_chase_cam
+                    else "/World/envs/env_0/CamFrontCabin")
         try:
             from omni.kit.viewport.utility import get_active_viewport
             vp = get_active_viewport()
             if vp is not None:
-                vp.set_active_camera("/World/envs/env_0/CamFrontCabin")
-                print("[viewport] active camera → /World/envs/env_0/CamFrontCabin")
+                vp.set_active_camera(cam_path)
+                print(f"[viewport] active camera → {cam_path}")
         except Exception as e:
             print(f"[viewport] could not switch active camera: {e}")
 
     cargo_region = parse_region(args_cli.cargo_region)
-
-    # Distance from forklift root to pallet root when tines are in the pocket.
-    # Matches the env's hardcoded default (forklift at 8.5, pallet at 10).
-    PARK_DIST = 1.5
 
     image_period_steps = max(1, int(round(30.0 / args_cli.image_rate_hz)))
 
@@ -715,11 +630,19 @@ def main():
             # One LeRobot frame per env.step → fps = control rate (30 Hz).
             # Timestamps must be right: OmniVLA-style waypoint labels are
             # sampled by time from the pose history.
-            lerobot_fps = round(1.0 / (env.cfg.sim.dt * env.cfg.decimation))
             lerobot_dataset = _make_lerobot_dataset(
-                str(lerobot_root), args_cli.lerobot_image_size, lerobot_fps)
-            _LEROBOT_DATASETS.append(lerobot_dataset)
+                str(lerobot_root), args_cli.lerobot_image_size, control_fps)
+            _OPEN_OUTPUTS.append(lerobot_dataset)
             lerobot_extras_write = _make_lerobot_extras_writer(str(lerobot_root))
+
+    video = None                       # one video for the whole run (.mp4 path)
+    if args_cli.video:
+        path, per_episode = video_path(args_cli.video, 0, "collect")
+        if not per_episode:
+            video = DemoVideo(path, fps=control_fps)
+            _OPEN_OUTPUTS.append(video)
+        print(f"[video] writing {'one clip per episode to ' + os.path.dirname(path) if per_episode else 'demo video to ' + path}",
+              flush=True)
 
     # QoS override file for `ros2 bag play` (latched topics need
     # transient_local durability so RViz late-subscribers receive them).
@@ -741,25 +664,16 @@ def main():
     for ep in range(args_cli.num_episodes):
         seed = args_cli.base_seed + ep
 
-        # Sample cargo first, then derive a parked forklift pose 1.5 m
-        # behind it along its yaw axis with tines aligned to the pocket.
-        cargo_rng = CargoRandomizer(
-            region_xyxy=cargo_region, seed=seed,
-            keepout_from_forklift=2.0, keepout_between_cargo=1.0,
-        )
-        cargo_xy_yaw = cargo_rng.sample(_N_INTERACTABLE, (-1e6, -1e6))
-        cx, cy, cyaw = cargo_xy_yaw[0]
-        # 2-way GMA pallet: only the long-side lanes (between stringers)
-        # accept fork tines. Snap the sampled yaw to the nearest of {0, π}
-        # so the forklift's approach axis always matches a valid lane.
-        cyaw = 0.0 if math.cos(cyaw) >= 0.0 else math.pi
-        cargo_xy_yaw = [(cx, cy, cyaw)]
-        sx = cx - PARK_DIST * math.cos(cyaw)
-        sy = cy - PARK_DIST * math.sin(cyaw)
-        syaw = cyaw
+        # Cargo (yaw snapped to the two-way pallet's fork axis), forklift
+        # start 6–8 m back (or parked with --drive false), and the driving
+        # corridor distractors must stay out of.
+        scene = sample_scene(seed, cargo_region, drive=args_cli.drive)
+        cx, cy, cyaw = scene["cargo"]
+        sx, sy, syaw = scene["spawn"]
 
         env.cfg.spawn_override = (sx, sy, syaw)
-        env.cfg.cargo_override = tuple(cargo_xy_yaw)
+        env.cfg.cargo_override = ((cx, cy, cyaw),)
+        env.cfg.distractor_keepout_xys = tuple(scene["keepout"])
         env.last_spawn = {"xy": (sx, sy), "yaw_rad": syaw, "seed": seed}
         env.last_target = {"pallet_idx": 0,
                            "cargo_xyz": [cx, cy, 0.0],
@@ -768,7 +682,9 @@ def main():
         env.set_distractor_randomizer(DistractorRandomizer(
             region_xyxy=cfg.distractor_region,
             seed=seed + 10_000,    # disjoint from cargo seed
-            keepout=1.5,
+            # ≥ 2 × pallet half-diagonal (0.97 m): distractors never overlap
+            # each other, the target cargo, or the driving corridor.
+            keepout=2.2,
         ))
         obs, _ = env.reset()
 
@@ -780,12 +696,20 @@ def main():
         print(f"\n[EP {ep}] seed={seed}  spawn={env.last_spawn}  "
               f"cargo={env.last_target}", flush=True)
 
+        ep_video = video
+        if args_cli.video and video is None:          # one short clip per episode
+            ep_video = DemoVideo(video_path(args_cli.video, ep, "collect")[0],
+                                 fps=control_fps)
+            _OPEN_OUTPUTS.append(ep_video)
         run_kwargs = dict(
             max_steps=args_cli.max_steps_per_ep,
             image_period_steps=image_period_steps,
             ep_idx=ep,
+            n_episodes=args_cli.num_episodes,
+            drive=args_cli.drive,
             lerobot_dataset=lerobot_dataset,
             lerobot_image_size=args_cli.lerobot_image_size,
+            video=ep_video,
         )
         if args_cli.ros:
             with Writer(bag_path, version=9,
@@ -794,6 +718,9 @@ def main():
                 ep_summary = run_episode(env, writer, conns, **run_kwargs)
         else:
             ep_summary = run_episode(env, None, None, **run_kwargs)
+        if ep_video is not None and ep_video is not video:
+            _OPEN_OUTPUTS.remove(ep_video)
+            ep_video.close()
 
         # Persist the LeRobot episode (LeRobot deduplicates the task string
         # into tasks.jsonl automatically; we add structured per-episode
@@ -836,8 +763,11 @@ def main():
             size_str = f"  size={ep_bytes/1e6:.1f} MB"
         else:
             size_str = ""
+        err = ep_summary["insert_error"] or {}
         print(f"[EP {ep}] DONE state={ep_summary['final_state']}  "
-              f"steps={ep_summary['n_steps']}  success={ep_summary['success']}"
+              f"steps={ep_summary['n_steps']}  success={ep_summary['success']}  "
+              f"forks-in offset={err.get('lateral_m', float('nan')):+.3f} m "
+              f"heading={err.get('heading_deg', float('nan')):+.2f}°"
               f"{size_str}", flush=True)
 
     # README
@@ -881,8 +811,9 @@ def main():
 
     # Isaac Sim's simulation_app.close() reliably hangs in some configs
     # (background USD/material threads). The bag Writer context manager
-    # already flushed the bags; finalize the LeRobot dataset, then force-exit.
-    _finalize_lerobot()
+    # already flushed the bags; finalize the LeRobot dataset and close the
+    # video, then force-exit.
+    _close_outputs()
     print("[exit] forcing process exit", flush=True)
     os._exit(0)
 
@@ -897,7 +828,7 @@ if __name__ == "__main__":
         traceback.print_exc()
         # Keep the episodes saved so far loadable (crash or Ctrl+C).
         try:
-            _finalize_lerobot()
+            _close_outputs()
         except BaseException:
             traceback.print_exc()
         os._exit(1)

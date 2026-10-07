@@ -165,3 +165,54 @@ def test_cargo_xy_diverges_across_seeds_by_0_1m():
                               xys[a][1] - xys[b][1])
                    for a, b in pairs) / len(pairs)
     assert avg_dist > 0.1, f"avg pairwise cargo distance too small: {avg_dist:.3f} m"
+
+
+# ── LeRobot round trip (the same calls the recorders make) ────────────────
+
+def test_lerobot_roundtrip_discard_and_finalize(tmp_path):
+    """create → add+save → add+clear (a discarded attempt) → add+save →
+    finalize → reload. The discarded frames must not leak into the next
+    episode, and the dataset must load (LeRobot v3 needs finalize())."""
+    lerobot_dataset = pytest.importorskip("lerobot.datasets.lerobot_dataset")
+    import numpy as np
+    from PIL import Image
+
+    cams = ("front_cabin", "top_left", "top_right")
+    features = {
+        f"observation.images.{c}": {"dtype": "image", "shape": (224, 224, 3),
+                                    "names": ["height", "width", "channel"]}
+        for c in cams
+    }
+    features["observation.state"] = {"dtype": "float32", "shape": (8,), "names": ["state"]}
+    features["action"] = {"dtype": "float32", "shape": (5,), "names": ["action"]}
+    root = tmp_path / "forklift_ds"
+    ds = lerobot_dataset.LeRobotDataset.create(
+        repo_id="test/forklift", fps=30, root=str(root), robot_type="forklift",
+        features=features, use_videos=True, image_writer_threads=1)
+
+    def add(n: int, task: str, marker: int) -> None:
+        for _ in range(n):
+            frame = {f"observation.images.{c}":
+                     Image.fromarray(np.full((224, 224, 3), marker, np.uint8)) for c in cams}
+            frame["observation.state"] = np.full(8, marker, np.float32)
+            frame["action"] = np.zeros(5, np.float32)
+            frame["task"] = task
+            ds.add_frame(frame)
+
+    add(12, "task A", 10)
+    ds.save_episode()
+    add(7, "discarded attempt", 99)
+    ds.clear_episode_buffer()
+    add(15, "task B", 20)
+    ds.save_episode()
+    ds.finalize()
+
+    loaded = lerobot_dataset.LeRobotDataset("test/forklift", root=str(root))
+    assert loaded.meta.total_episodes == 2
+    assert len(loaded) == 27
+    assert loaded.fps == 30
+    assert not any("lidar" in k for k in loaded.meta.features)
+    assert loaded.meta.get_task_index("task B") is not None
+    assert loaded.meta.get_task_index("discarded attempt") is None
+    markers = {int(loaded[i]["observation.state"][0]) for i in range(len(loaded))}
+    assert markers == {10, 20}, f"discarded frames leaked: {markers}"

@@ -20,6 +20,10 @@ Usage:
 # ---------------------------------------------------------------------------
 
 import argparse
+# Load h5py's HDF5 before Isaac Sim starts: the windowed app loads its own
+# hdf5.dll (isaacsim.sensors.rtx), and on Windows Isaac Lab's later
+# `import h5py` then fails with "DLL load failed". Harmless elsewhere.
+import h5py  # noqa: F401
 from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Forklift keyboard teleoperation.")
