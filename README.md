@@ -44,24 +44,9 @@ A policy is trained to copy the driver one frame at a time. Testing it the same 
 
 A closed-loop test lets the policy drive. Its action moves the truck, the simulator renders what the cameras now see, and the policy answers that new view, 30 times a second, until the run ends.
 
-```mermaid
-flowchart LR
-    scene["<b>Unseen scene</b><br/>seeds never used<br/>for training"]
-    judge["<b>Judge</b><br/>lifted 1 m or more,<br/>then set down"]
-    subgraph loop["one turn every 1/30 s"]
-        sim["<b>Simulator</b><br/>moves the warehouse<br/>forward 1/30 s"]
-        obs["<b>Observation</b><br/>3 camera images, 224 px<br/>+ state + instruction"]
-        policy["<b>Policy</b><br/>a trained model, or<br/>the scripted driver"]
-        action["<b>Action</b><br/>speed, turn rate,<br/>fork command"]
-        sim --> obs --> policy --> action --> sim
-    end
-    scene --> sim
-    sim -. "true pallet height" .-> judge
-    classDef hot fill:#FAECE7,stroke:#993C1D,color:#712B13
-    class policy hot
-```
+![Closed loop: the policy acts on what it sees, the simulator keeps score](docs/media/closed-loop.svg)
 
-*The loop runs 30 times a second. The judge sits outside it: it reads the simulator's true pallet height, which the policy never sees.*
+*The loop on the right runs 30 times a second. The judge, dashed, sits outside it: it reads the simulator's true pallet height, which the policy never sees.*
 
 Three rules keep the test honest:
 
@@ -129,22 +114,9 @@ Both are fixed: the renderer now refreshes after every reset, and the camera che
 
 Closing the gap is a sequence, not a switch. Each stage gives the policy a little more freedom, and it must pass before the next one begins.
 
-```mermaid
-flowchart TB
-    s1["<b>Simulation, clean</b><br/>unseen scenes,<br/>outside judge<br/>(done for the scripted<br/>driver: this post)"]
-    s2["<b>Simulation, stressed</b><br/>noisy pose, camera<br/>delay, new lighting,<br/>new truck response"]
-    s3["<b>Real truck, shadow mode</b><br/>a person drives;<br/>the policy only<br/>predicts; we compare"]
-    s4["<b>Real truck, supervised</b><br/>the 20 test layouts<br/>on a marked floor,<br/>slow, with an<br/>emergency stop"]
-    s5["<b>Real use, limited</b><br/>a fenced area;<br/>a safety system<br/>that does not trust<br/>the policy"]
-    s1 -- "passes on<br/>unseen scenes" --> s2
-    s2 -- "score holds<br/>under stress" --> s3
-    s3 -- "predictions match<br/>the driver" --> s4
-    s4 -- "real score close to<br/>simulated score" --> s5
-    classDef done fill:#EAF3DE,stroke:#3B6D11,color:#27500A
-    class s1 done
-```
+![Five stages from simulation to real use, with a gate between each pair](docs/media/stages.svg)
 
-*Each arrow is a gate: the condition on it must hold before the truck gets more freedom.*
+*Each arrow is a gate: the condition next to it must hold before the truck gets more freedom.*
 
 Only the first stage is done, and only for the scripted driver. Every later stage reuses the same 20 test layouts and the same success rule, so a drop between stages points straight at the gap that caused it.
 
