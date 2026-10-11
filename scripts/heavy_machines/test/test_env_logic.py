@@ -255,6 +255,31 @@ class TestEnvLogic(unittest.TestCase):
                 self.assertTrue(x0 <= env._xy[e, 0].item() <= x1)
                 self.assertTrue(y0 <= env._xy[e, 1].item() <= y1)
 
+    def test_task_controller_completes_instructions(self):
+        """collect_machine.py's scripted tasks must be achievable by every machine."""
+        from heavy_machines.tasks import TaskController, instruction, sample_goals
+
+        for name in self.names:
+            for seed in range(4):
+                with self.subTest(machine=name, seed=seed):
+                    env, spec = make_env(name, num_envs=1, cameras=False)
+                    goals = sample_goals(spec, random.Random(seed), 2, 4)
+                    prompt = instruction(spec, goals)
+                    ctrl = TaskController(spec, goals, env.cfg.sim.dt * env.cfg.decimation)
+                    steps = 0
+                    while not ctrl.done and steps < 30 * 120:
+                        state = env._get_observations()["state"][0].tolist()
+                        run(env, ctrl.act(state), 1)
+                        steps += 1
+                    self.assertTrue(ctrl.done, f"stuck on goal {ctrl.idx}: {prompt}")
+                    self.assertEqual(ctrl.timeouts, 0, f"a goal timed out: {prompt}")
+                    # every tool goal reached its target
+                    for g in goals:
+                        if g.kind == "tool":
+                            j = spec.joint(spec.tools[g.tool].joint)
+                            if j.type != "continuous":
+                                self.assertTrue(j.lower - 1e-6 <= g.value <= j.upper + 1e-6)
+
     def test_observation_layout(self):
         for name in self.names:
             with self.subTest(machine=name):
