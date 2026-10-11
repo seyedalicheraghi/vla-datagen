@@ -1,0 +1,230 @@
+{
+  "name": "hydraulic_excavator",
+  "abbrev": "HEX",
+  "display_name": "Hydraulic Excavator",
+  "category": "excavation",
+  "reference": "20 t crawler excavator (CAT 320 / Komatsu PC210 class)",
+  "description": "Tracked excavator with 360\u00b0 swing, two-piece boom/stick arm and a 1 m\u00b3 bucket.",
+  "urdf": "hydraulic_excavator.urdf",
+  "root_link": "undercarriage",
+  "root_height_m": 0.475,
+  "operating_mass_kg": 20500.0,
+  "model_mass_kg": 20500.0,
+  "envelope_m": [
+    9.53,
+    2.98,
+    2.96
+  ],
+  "model_bbox_m": [
+    9.887,
+    3.052,
+    2.96
+  ],
+  "action": {
+    "dim": 6,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "swing",
+        "joint": "swing_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 1.15,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 3,
+        "label": "boom",
+        "joint": "boom_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.55,
+        "lower": -0.9,
+        "upper": 1.0,
+        "init": -0.45,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "stick",
+        "joint": "stick_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.65,
+        "lower": -1.35,
+        "upper": 0.9,
+        "init": -1.35,
+        "positive": "out",
+        "negative": "in"
+      },
+      {
+        "action_index": 5,
+        "label": "bucket",
+        "joint": "bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": -1.2,
+        "upper": 1.75,
+        "init": -0.8,
+        "positive": "curl",
+        "negative": "dump"
+      }
+    ]
+  },
+  "state": {
+    "dim": 10,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "unused",
+      "swing_pos",
+      "boom_pos",
+      "stick_pos",
+      "bucket_pos"
+    ]
+  },
+  "drive": {
+    "type": "skid",
+    "max_speed_mps": 1.5,
+    "max_reverse_speed_mps": 1.5,
+    "max_yaw_rate_radps": 0.5,
+    "track_width_m": 2.38
+  },
+  "joints": [
+    {
+      "name": "swing_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "undercarriage",
+      "child": "upper_structure",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 1.15
+    },
+    {
+      "name": "boom_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "upper_structure",
+      "child": "boom",
+      "lower": -0.9,
+      "upper": 1.0,
+      "init": -0.45,
+      "velocity": 0.55
+    },
+    {
+      "name": "stick_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "boom",
+      "child": "stick",
+      "lower": -1.35,
+      "upper": 0.9,
+      "init": -1.35,
+      "velocity": 0.65
+    },
+    {
+      "name": "bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "stick",
+      "child": "bucket",
+      "lower": -1.2,
+      "upper": 1.75,
+      "init": -0.8,
+      "velocity": 1.0
+    },
+    {
+      "name": "left_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "undercarriage",
+      "child": "left_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    },
+    {
+      "name": "right_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "undercarriage",
+      "child": "right_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "upper_structure",
+      "xyz": [
+        1.15,
+        0.77,
+        1.45
+      ],
+      "rpy": [
+        0.0,
+        0.35,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "upper_structure",
+      "xyz": [
+        0.2,
+        1.25,
+        1.8
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        0.55
+      ]
+    },
+    {
+      "name": "right",
+      "link": "upper_structure",
+      "xyz": [
+        0.2,
+        -1.25,
+        1.3
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        -0.55
+      ]
+    }
+  ]
+}
