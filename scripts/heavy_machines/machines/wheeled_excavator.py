@@ -18,18 +18,19 @@ Envelope = CAT M318: L 8.45 m (shipping length), W 2.55 m, H 3.36 m.  The model
 is 9.13 m long (+8 %) in the roading pose: the boom nose alone gives 8.48 m, but
 the stick-cylinder eye on the stick's dog-leg tail sits 0.8 m ahead of the
 boom-tip pin.  That 0.71 m lever, bent forward, is what keeps the stick cylinder
-above the boom nose at both ends of the 120° stick stroke.
+above the boom nose at both ends of the 117° stick stroke.
 Model check (offline FK): reach at ground 9.1 m · dig depth 5.8 m ·
 loading (bucket-pin) height 7.7 m · max cutting height 9.0 m · tail swing
 2.35 m (counterweight facets inscribed in that arc; asserted in build()).
 
 Joint ranges: boom -57°..+60° (foot-pin to stick-pin line -49°..+69°),
-stick 120°, bucket 172°, blade -37°..+9°.  Rates at full command: swing
+stick 117° (-1.25..+0.80; the "in" stop keeps the curled bucket off the boom), bucket 172°,
+blade -37°..+9°.  Rates at full command: swing
 0.94 rad/s (9 rpm), boom 0.55 rad/s (full stroke ≈ 3.7 s), stick 0.65 rad/s,
 bucket 1.0 rad/s, blade 0.32 rad/s.
 
 Init pose = roading/transport pose: upper structure facing forward (boom over
-the steered front axle), boom lowered, stick 0.15 rad short of fully retracted
+the steered front axle), boom lowered, stick 0.10 rad short of fully retracted
 and bucket curled to 1.80 rad (of 1.90), so the bucket clears the boom-cylinder
 barrels and the boom and hangs 0.37 m above the road; rear blade raised.
 
@@ -41,6 +42,12 @@ it clears the boom (knee boss, top faces) over the whole stick range.
 Front steering: the kingpins are at the twin centres; the axle housing stops
 at y = ±0.48 and the knuckles carry the stub axles, so the inner tyre clears
 the housing at full lock.
+
+Cameras: 'front' = operator's forward view; 'right' = front-right tank corner, looking
+along the boom; 'left' = rear-left deck-rim camera looking back at the rear stabiliser blade
+(it hangs under the counterweight tail, so it is only visible from the flank, not from above
+or behind).  All three ride on the upper structure and turn with the swing; the blade is in
+the 'left' view in the roading pose (swing 0) only.
 
 Root frame: swing centre at wheel-axle height (axle centres at z = 0),
 +x towards the steered front axle.
@@ -66,6 +73,7 @@ BLADE_PIVOT = (-1.70, 0.0, -0.20)    # rear stabiliser blade arm pivot (0.32 m A
 
 # --- Upper structure -----------------------------------------------------------------
 TAIL_R = 2.35                        # tail-swing radius: the counterweight is inscribed in this arc
+REAR_CAM = (-1.95, 1.29, 0.06)       # rear-left deck-rim camera (upper frame), aft of the counterweight facet
 
 # --- Front attachment ----------------------------------------------------------------
 # Boom frame: origin = foot pin, x forward along the boom at q = 0 (x-z pairs below).
@@ -77,6 +85,9 @@ BOOM_DEPTH = (0.62, 0.50)            # foot->knee and knee->tip box depths
 KNEE_R = 0.31                        # knee boss radius
 STICK_LEN = 2.50
 STICK_PITCH = 1.45                   # stick hangs 83° below the boom x axis at q = 0
+STICK_IN = -1.25                     # "in" stop: with the bucket curled to its transport angle (1.80) the
+#                                      lip/bottom plates clear the lower boom beam by ~0.04 m at this stop
+#                                      (they would bite 0.04 m into it at the old -1.30)
 BUCKET_W, BUCKET_R = 1.05, 1.25      # width, pin-to-tooth radius
 # Hydraulic cylinder pins (x, z)
 BCYL_BASE = (1.10, 0.25)             # boom cylinders, on the upper structure
@@ -84,7 +95,7 @@ BCYL_EYE = (2.20, 0.62)              # boom cylinders, under the boom (boom fram
 BCYL_DY = 0.33                       # boom cylinders at BOOM_Y ± BCYL_DY
 SCYL_BASE = (2.30, 2.08)             # stick cylinder, on a 0.5 m bracket over the knee (boom frame)
 # Stick-cylinder eye on the stick's dog-leg tail (stick frame): 0.71 m from the boom-tip pin,
-# bent 10° towards the stick's top (bucket-cylinder) side.  The eye sweeps a 120° arc over
+# bent 10° towards the stick's top (bucket-cylinder) side.  The eye sweeps a 117° arc over
 # the stick range; this lever/offset keeps it (and the rod) above the boom nose at both ends.
 SCYL_EYE = (-0.70, 0.12)
 SCYL_R, SCYL_ROD_R = 0.105, 0.065    # stick-cylinder barrel / rod radii
@@ -294,6 +305,9 @@ def build() -> MachineSpec:
         box(1.00, 0.70, 0.03, at=(-1.10, 0.0, 1.06), mat="accent", collision=False),  # hood grille
         cyl(0.07, 0.45, at=(-0.80, -0.80, 1.27), mat="accent", collision=False),    # exhaust stack
         cyl(0.08, 0.10, at=(-1.60, 0.70, 1.10), mat="orange", collision=False),     # beacon
+        # rear-view / blade camera housing on the deck rim; the lens (REAR_CAM) sits just behind it
+        box(0.12, 0.04, 0.07, at=(REAR_CAM[0] + 0.09, REAR_CAM[1] - 0.02, REAR_CAM[2]),
+            mat="dark", collision=False),
         # handrails on the right-hand tank (visual)
         box(1.30, 0.04, 0.04, at=(0.45, -1.22, 1.35), mat="accent", collision=False),
         box(0.04, 0.04, 0.30, at=(-0.15, -1.22, 1.20), mat="accent", collision=False),
@@ -307,7 +321,7 @@ def build() -> MachineSpec:
                    velocity=0.55, role="tool")
     stick_j = Joint("stick_joint", "revolute", "boom", "stick",
                     xyz=(BOOM_TIP[0], 0.0, BOOM_TIP[1]), rpy=(0.0, STICK_PITCH, 0.0),
-                    axis=(0, -1, 0), lower=-1.30, upper=0.80, init=-1.15, velocity=0.65, role="tool")
+                    axis=(0, -1, 0), lower=STICK_IN, upper=0.80, init=-1.15, velocity=0.65, role="tool")
     fits = _cylinder_fits((boom_j.lower, boom_j.upper), (stick_j.lower, stick_j.upper))
 
     # ------------------------------------------------------------------- boom
@@ -481,8 +495,12 @@ def build() -> MachineSpec:
         cameras=[
             # operator eye height, just ahead of the windscreen, looking down the boom
             Camera("front", "upper_structure", (1.26, 0.78, 1.45), (0.0, 0.30, -0.12)),
-            # front-left corner of the cab roof / front-right corner of the tank
-            Camera("left", "upper_structure", (1.18, 1.20, 2.12), (0.0, 0.35, 0.65)),
+            # rear-left corner of the deck rim (on the bracket added to the upper structure): looks
+            # back, 14° inwards and 29° down, past the counterweight corner at the rear stabiliser
+            # blade, which is hidden under the counterweight tail from anywhere inboard of the
+            # flank.  Turns with the swing, so it sees the blade in the roading pose (swing 0).
+            Camera("left", "upper_structure", REAR_CAM, (0.0, 0.50, math.pi + 0.25)),
+            # front-right corner of the tank
             Camera("right", "upper_structure", (1.24, -1.24, 1.25), (0.0, 0.30, -0.60)),
         ],
         envelope=(8.45, 2.55, 3.36),        # CAT M318; model L is +8 % (see module docstring)

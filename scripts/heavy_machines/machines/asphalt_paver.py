@@ -457,12 +457,12 @@ def build() -> MachineSpec:
             # back and down over the auger at the whole screed: both extending units and
             # end gates, the screed top and the lift-cylinder rods (seen from above)
             Camera("left", "tractor", (X_PLAT_R - 0.13, 0.60, 3.45 - Z0), (0.0, 0.95, math.pi)),
-            # side camera on a bracket under the right rear corner of the platform (0.15 m
-            # outboard of its edge, just ahead of the lift-cylinder bracket), looking back
-            # along the tractor side: right lift cylinder from the side, tow-arm end, screed
-            # end and the right extending unit / end gate.  The screed lift is a vertical
-            # motion, which the roof camera sees nearly end-on.
-            Camera("right", "tractor", (X_REAR + 0.15, -(PLAT_Y + 0.15), Z_BODY - 0.17 - Z0),
+            # side camera at the right rear corner of the platform, flush with its edge and
+            # just ahead of the lift-cylinder bracket, looking back along the tractor side:
+            # right lift cylinder from the side, tow-arm end, screed end and the right
+            # extending unit / end gate.  The screed lift is a vertical motion, which the
+            # roof camera sees nearly end-on.
+            Camera("right", "tractor", (X_REAR + 0.15, -(PLAT_Y + 0.05), Z_BODY - 0.12 - Z0),
                    (0.0, 0.50, -3.05)),
         ],
         envelope=(6.45, 2.55, 3.75),

@@ -31,9 +31,11 @@ Joint ranges / rates (rad, m; per second at full command):
                 ≈ 0.3 m below grade .. 0.48 m above ground (model caps the cut at
                 ≈ 0.3 m: the circle ring stays 0.26 m above grade, the drop-arm
                 pads reach ≈ 0.16 m below it); 0.10 rad/s (full stroke 3.5 s)
-    blade_rotate -1.40..+1.40 rad circle turn (±80°; the real circle turns 360°,
+    blade_rotate -1.22..+1.22 rad circle turn (±70°; the real circle turns 360°,
                 but past ±90° the moldboard faces backwards and blade_shift
-                "left" would move it right), 0.25 rad/s (14°/s)
+                "left" would move it right, and beyond ≈ ±72° the heel end of
+                the 3.66 m moldboard runs into the tandem drive housing and the
+                cab platform of this model, see ROTATE_LIM), 0.25 rad/s (14°/s)
     blade_shift -0.68..+0.68 m along the moldboard, 0.22 m/s
     ripper      -0.52..+0.675 rad parallelogram arm → shank tips 0.47 m below
                 .. 0.43 m above ground; 0.35 rad/s (full stroke 3.4 s)
@@ -103,12 +105,19 @@ LIFT_EYE = (3.00, 0.80, 0.90)        # lift-cylinder eyes (ball joints) on the d
 LIFT_TOP = (3.03, 0.40, 2.65)        # lift-cylinder trunnions on the saddle (±y)
 LIFT_CAP, LIFT_BARREL, LIFT_ROD = 0.30, 1.12, 1.15   # barrel above / below trunnion, rod
 LIFT_LO, LIFT_HI, LIFT_INIT = -0.14, 0.213, 0.17
-ROTATE_LIM = 1.40                    # ±80°: blade_shift left/right stays true in the machine frame
+# ±70°: blade_shift left/right stays true in the machine frame, and the moldboard heel clears the
+# tandem drive housings / cab platform for every blade_lift and blade_shift (at ±80° it cut
+# 0.07-0.09 m into the housing; ±72° still touches the cab platform with the blade fully raised)
+ROTATE_LIM = math.radians(70.0)
 ROTATE_INIT = -1.00                  # 57° clockwise: left toe forward for roading
 SHIFT_INIT = 0.32
 
 # --- Ripper ---------------------------------------------------------------------------
 RIP_LO, RIP_HI = -0.52, 0.675
+
+# Rear-view camera (machine coordinates): lens 0.01 m behind a small housing on a post at the
+# top rear edge of the engine hood (hood top 2.15 m), looking back and down at the ripper.
+REAR_CAM = (-2.07, -0.30, 2.30)
 
 
 # ---------------------------------------------------------------------------------
@@ -254,6 +263,12 @@ def _rear_frame() -> Link:
           for s in (1.0, -1.0)],
         *[box(0.03, 0.14, 0.10, at=_loc(o, -2.025, s * 0.50, 2.02), mat="white", collision=False)
           for s in (1.0, -1.0)],
+        # rear-view camera on a short post at the top rear edge of the hood (its lens is the
+        # "right" camera, REAR_CAM); housing and post are visual only
+        box(0.05, 0.05, 0.11, at=_loc(o, REAR_CAM[0] + 0.075, REAR_CAM[1], 2.20), mat="accent",
+            collision=False),
+        box(0.12, 0.14, 0.09, at=_loc(o, REAR_CAM[0] + 0.07, REAR_CAM[1], REAR_CAM[2]),
+            mat="accent", collision=False),
         # exhaust stack (right), air pre-cleaner (left), hydraulic tank behind the cab
         cyl(0.075, 0.80, at=_loc(o, -0.55, -0.40, 2.58), mat="accent", collision=False),
         cyl(0.12, 0.10, at=_loc(o, -0.55, -0.40, 2.22), mat="dark", collision=False),
@@ -527,16 +542,21 @@ def build() -> MachineSpec:
             # operator eye height, just ahead of the windscreen (outside the solid cab
             # box), looking down past the frame at the blade
             Camera("front", "rear_frame", (1.50, 0.0, cab_h(2.75)), (0.0, 0.55, 0.0)),
-            # under the front corners of the roof overhang (outside the cab shell),
+            # under the front corner of the roof overhang (outside the cab shell),
             # looking outward-forward at the blade toe / heel, lift cylinder and front wheel
             Camera("left", "rear_frame", (1.53, 0.86, cab_h(3.05)), (0.0, 0.45, 0.60)),
-            Camera("right", "rear_frame", (1.53, -0.86, cab_h(3.05)), (0.0, 0.45, -0.60)),
+            # rear-view camera on the top rear edge of the engine hood, looking back and
+            # down (slightly inboard) at the rear ripper (the blade tools stay visible in
+            # the front and left cameras)
+            Camera("right", "rear_frame", (REAR_CAM[0], REAR_CAM[1], cab_h(REAR_CAM[2])),
+                   (0.0, 0.55, math.pi - 0.20)),
         ],
         envelope=(9.90, 2.49, 3.25),
         operating_mass=17500.0,
         notes=("blade_rotate turns the circle (+1 = counter-clockwise from above). The real "
-               "circle turns 360°; it is limited to ±80° so the moldboard never faces backwards "
-               "and blade_shift left/right stays true in the machine frame. The lift cylinders "
+               "circle turns 360°; it is limited to ±70° so the moldboard never faces backwards, "
+               "blade_shift left/right stays true in the machine frame and the moldboard heel "
+               "clears the tandem housings and cab platform. The lift cylinders "
                "(barrel, eye ball, rod) and the ripper parallelogram are cosmetic followers of "
                "blade_lift / ripper. Not modelled: frame "
                "articulation (fixed; front-steer Ackermann only), blade bank (independent "

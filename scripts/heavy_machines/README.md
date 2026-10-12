@@ -13,6 +13,26 @@ machines/<name>.py ──► assets/heavy_machines/<name>/<name>.urdf   (importe
 ```
 
 <!-- MACHINE_TABLE_START -->
+| Machine | Abbrev | Category | Modelled on | Drive | Tools (action[2:]) | Mass |
+|---|---|---|---|---|---|---|
+| Soil Compactor (`soil_compactor`) | SDC | compaction | 11-12 t single-drum vibratory soil compactor (CAT CS56B / Bomag BW 213 class) | articulated | leveling_blade | 12.0 t |
+| Bulldozer (`bulldozer`) | DOZ | dozing | 20 t medium crawler dozer (CAT D6 / Komatsu D65EX class) | skid | blade_lift, blade_tilt, ripper | 20.5 t |
+| Backhoe Loader (`backhoe_loader`) | BHL | excavation | 8 t backhoe loader (JCB 3CX / CAT 420 class) | ackermann | loader_arm, loader_bucket, backhoe_swing, backhoe_boom, backhoe_stick, backhoe_bucket, stabilizers | 8.1 t |
+| Hydraulic Excavator (`hydraulic_excavator`) | HEX | excavation | 20 t crawler excavator (CAT 320 / Komatsu PC210 class) | skid | swing, boom, stick, bucket | 20.5 t |
+| Mini Excavator (`mini_excavator`) | MEX | excavation | 3.5-4 t rubber-track mini excavator (CAT 303.5 / Kubota KX040-4 class) | skid | swing, boom_swing, boom, stick, bucket, blade | 3.8 t |
+| Wheeled Excavator (`wheeled_excavator`) | WEX | excavation | 18 t wheeled excavator (CAT M318 / Liebherr A918 class) | ackermann | swing, boom, stick, bucket, stabilizer_blade | 18.5 t |
+| Motor Grader (`motor_grader`) | MG | grading | 16-18 t motor grader (CAT 140 / John Deere 672G class) | ackermann | blade_lift, blade_rotate, blade_shift, ripper | 17.5 t |
+| Wheel Tractor-Scraper (`wheel_tractor_scraper`) | WTS | grading | 15 m³ single-engine wheel tractor-scraper (CAT 621K class) | articulated | bowl, apron, ejector | 33.2 t |
+| Articulated Dump Truck (`articulated_dump_truck`) | ADT | hauling | 28 t articulated dump truck (CAT 730 / Volvo A30G class) | articulated | dump_body | 23.5 t |
+| Concrete Mixer Truck (`concrete_mixer_truck`) | CMT | hauling | 9 m³ transit mixer on a 3-axle 6x4 cab-over chassis (Volvo FMX / Mercedes-Benz Arocs class with a Liebherr HTM 905 class drum) | ackermann | drum, chute_swing, chute_lift | 13.0 t |
+| Rigid Haul Truck (`rigid_haul_truck`) | RHT | hauling | 64 t rigid-frame off-highway truck (CAT 775G / Komatsu HD605 class) | ackermann | dump_body | 42.7 t |
+| Rough Terrain Crane (`rough_terrain_crane`) | RTC | lifting | 36 t rough-terrain crane (Grove RT540E / Tadano GR-300EX class) | ackermann | slew, boom_luff, boom_telescope, hoist | 29.7 t |
+| Telehandler (`telehandler`) | TH | lifting | 17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH417D class) | ackermann | boom_luff, boom_telescope, fork_tilt | 12.1 t |
+| Telescopic Boom Lift (`telescopic_boom_lift`) | TBL | lifting | 60 ft telescopic boom lift with jib (JLG 600SJ / Genie S-60 J class) | ackermann | slew, boom, telescope, jib, platform_rotate | 10.4 t |
+| Compact Track Loader (`compact_track_loader`) | CTL | loading | 4 t compact track loader (CAT 259D3 / Bobcat T66 class) | skid | lift_arm, bucket | 4.1 t |
+| Skid Steer Loader (`skid_steer_loader`) | SSL | loading | 3.5 t wheeled skid steer loader (Bobcat S650 / CAT 262D3 class) | skid | lift_arm, bucket | 3.6 t |
+| Wheel Loader (`wheel_loader`) | WL | loading | 18.7 t articulated wheel loader (CAT 950 GC / Volvo L120H class) | articulated | lift_arm, bucket | 18.7 t |
+| Asphalt Paver (`asphalt_paver`) | PAV | paving | 19 t tracked asphalt paver (Vögele Super 1800-3 / CAT AP655F class) | skid | hopper_wings, screed, screed_extensions | 19.1 t |
 <!-- MACHINE_TABLE_END -->
 
 ## Quick start

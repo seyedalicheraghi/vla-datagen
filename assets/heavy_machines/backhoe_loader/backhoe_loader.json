@@ -16,9 +16,9 @@
     3.61
   ],
   "model_bbox_m": [
-    6.45,
+    6.171,
     2.36,
-    3.639
+    3.739
   ],
   "action": {
     "dim": 9,
@@ -48,7 +48,7 @@
         "rate_at_full_command": 0.344,
         "lower": -0.04,
         "upper": 1.578,
-        "init": 0.124,
+        "init": 0.01,
         "positive": "raise",
         "negative": "lower"
       },
@@ -72,8 +72,8 @@
         "type": "revolute",
         "unit": "rad",
         "rate_at_full_command": 1.0,
-        "lower": -1.5,
-        "upper": 1.5,
+        "lower": -1.42,
+        "upper": 1.42,
         "init": 0.0,
         "positive": "left",
         "negative": "right"
@@ -169,7 +169,7 @@
       "child": "loader_arm",
       "lower": -0.04,
       "upper": 1.578,
-      "init": 0.124,
+      "init": 0.01,
       "velocity": 0.344
     },
     {
@@ -180,7 +180,7 @@
       "child": "shovel_level",
       "lower": -0.8290000000000001,
       "upper": 0.8290000000000001,
-      "init": 0.645,
+      "init": 0.759,
       "velocity": 0.44399999999999995
     },
     {
@@ -200,10 +200,10 @@
       "role": "follower",
       "parent": "chassis",
       "child": "lift_cylinders",
-      "lower": -0.030220545418531565,
-      "upper": 0.03022054541853157,
-      "init": -0.008148642515392907,
-      "velocity": 0.10434594267487622
+      "lower": -0.025067763970165025,
+      "upper": 0.025067763970165025,
+      "init": 0.004754552352725902,
+      "velocity": 0.10215489592798117
     },
     {
       "name": "lift_rod_joint",
@@ -211,10 +211,10 @@
       "role": "follower",
       "parent": "loader_arm",
       "child": "lift_rods",
-      "lower": -0.8187794545814686,
-      "upper": 0.8187794545814685,
-      "init": 0.6368513574846071,
-      "velocity": 0.43965405732512375
+      "lower": -0.834067763970165,
+      "upper": 0.8340677639701651,
+      "init": 0.7637545523527259,
+      "velocity": 0.4461548959279812
     },
     {
       "name": "swing_joint",
@@ -222,8 +222,8 @@
       "role": "tool",
       "parent": "chassis",
       "child": "swing_frame",
-      "lower": -1.5,
-      "upper": 1.5,
+      "lower": -1.42,
+      "upper": 1.42,
       "init": 0.0,
       "velocity": 1.0
     },

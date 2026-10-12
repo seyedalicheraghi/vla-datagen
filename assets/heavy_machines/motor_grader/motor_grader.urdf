@@ -53,6 +53,8 @@
     <visual><origin xyz="-2.14 -0.55 0.53" rpy="0 0 0"/><geometry><box size="0.03 0.16 0.1"/></geometry><material name="red"/></visual>
     <visual><origin xyz="-2.025 0.5 1.35" rpy="0 0 0"/><geometry><box size="0.03 0.14 0.1"/></geometry><material name="white"/></visual>
     <visual><origin xyz="-2.025 -0.5 1.35" rpy="0 0 0"/><geometry><box size="0.03 0.14 0.1"/></geometry><material name="white"/></visual>
+    <visual><origin xyz="-1.995 -0.3 1.53" rpy="0 0 0"/><geometry><box size="0.05 0.05 0.11"/></geometry><material name="accent"/></visual>
+    <visual><origin xyz="-2 -0.3 1.63" rpy="0 0 0"/><geometry><box size="0.12 0.14 0.09"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="-0.55 -0.4 1.91" rpy="0 0 0"/><geometry><cylinder radius="0.075" length="0.8"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="-0.55 -0.4 1.55" rpy="0 0 0"/><geometry><cylinder radius="0.12" length="0.1"/></geometry><material name="dark"/></visual>
     <visual><origin xyz="-0.55 0.4 1.67" rpy="0 0 0"/><geometry><cylinder radius="0.13" length="0.32"/></geometry><material name="dark"/></visual>
@@ -85,7 +87,7 @@
     <visual><origin xyz="0.2 -0.45 2.58" rpy="0 0 0"/><geometry><cylinder radius="0.07" length="0.1"/></geometry><material name="orange"/></visual>
     <visual><origin xyz="0.65 0.86 1.13" rpy="0 0 0"/><geometry><box size="1.1 0.04 0.04"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="0.65 -0.86 1.13" rpy="0 0 0"/><geometry><box size="1.1 0.04 0.04"/></geometry><material name="accent"/></visual>
-    <inertial><origin xyz="-0.072123 -0.000127 1.123232" rpy="0 0 0"/><mass value="8000"/><inertia ixx="5478.731932" ixy="-0.097883" ixz="-2142.996559" iyy="11888.997443" iyz="1.879403" izz="9622.217318"/></inertial>
+    <inertial><origin xyz="-0.072445 -0.000177 1.123314" rpy="0 0 0"/><mass value="8000"/><inertia ixx="5478.264598" ixy="-0.869407" ixz="-2141.374505" iyy="11892.297829" iyz="2.075819" izz="9625.692937"/></inertial>
   </link>
   <link name="front_frame">
     <visual><origin xyz="0.05 0 0" rpy="0 0 0"/><geometry><box size="0.4 0.6 0.5"/></geometry><material name="dark"/></visual>
@@ -367,7 +369,7 @@
     <parent link="drawbar"/><child link="circle"/>
     <origin xyz="-2.64 0 -0.2" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.4001" upper="1.4001" effort="10000000" velocity="0.25"/>
+    <limit lower="-1.22183048" upper="1.22183048" effort="10000000" velocity="0.25"/>
   </joint>
   <joint name="blade_shift_joint" type="prismatic">
     <parent link="circle"/><child link="moldboard"/>

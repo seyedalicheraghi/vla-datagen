@@ -16,8 +16,8 @@
     2.96
   ],
   "model_bbox_m": [
-    9.887,
-    3.052,
+    9.785,
+    3.04,
     2.96
   ],
   "action": {
@@ -181,6 +181,94 @@
       "upper": 0.0,
       "init": 0.0,
       "velocity": 20.0
+    },
+    {
+      "name": "boom_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "upper_structure",
+      "child": "boom_cyl_barrel",
+      "lower": -0.9281869083830744,
+      "upper": 0.9281869083830745,
+      "init": -0.4779931096753023,
+      "velocity": 0.5757924206428326
+    },
+    {
+      "name": "boom_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "boom_cyl_rod",
+      "lower": -0.061813091616925483,
+      "upper": 0.06181309161692593,
+      "init": 0.022006890324697714,
+      "velocity": 0.07420757935716749
+    },
+    {
+      "name": "arm_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "arm_cyl_barrel",
+      "lower": -0.04952860218329634,
+      "upper": 0.04952860218329623,
+      "init": 0.029528602183296226,
+      "velocity": 0.06706097015034895
+    },
+    {
+      "name": "arm_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "arm_cyl_rod",
+      "lower": -1.1745286021832966,
+      "upper": 1.1745286021832961,
+      "init": 1.1545286021832961,
+      "velocity": 0.717060970150349
+    },
+    {
+      "name": "bucket_idler_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "bucket_idler",
+      "lower": -0.791536340912038,
+      "upper": 0.7915363409120382,
+      "init": -0.7715363409120379,
+      "velocity": 0.5730754853640936
+    },
+    {
+      "name": "bucket_hlink_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "bucket",
+      "child": "bucket_hlink",
+      "lower": -1.218675380842512,
+      "upper": 1.2186753808425115,
+      "init": 1.1986753808425115,
+      "velocity": 0.8626612751474658
+    },
+    {
+      "name": "bucket_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "bucket_cyl_barrel",
+      "lower": -0.05612075052386804,
+      "upper": 0.05612075052386804,
+      "init": -0.03612075052386804,
+      "velocity": 0.07448864442296138
+    },
+    {
+      "name": "bucket_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "bucket_idler",
+      "child": "bucket_cyl_rod",
+      "lower": -0.7554155903881701,
+      "upper": 0.7554155903881703,
+      "init": 0.7354155903881703,
+      "velocity": 0.5485868409411323
     }
   ],
   "cameras": [
@@ -188,7 +276,7 @@
       "name": "front",
       "link": "upper_structure",
       "xyz": [
-        1.34,
+        1.12,
         0.77,
         1.45
       ],
@@ -202,28 +290,28 @@
       "name": "left",
       "link": "upper_structure",
       "xyz": [
-        0.2,
-        1.25,
-        1.8
+        1.1400000000000001,
+        1.3,
+        1.58
       ],
       "rpy": [
         0.0,
-        0.4,
-        0.55
+        0.3,
+        -0.28
       ]
     },
     {
       "name": "right",
       "link": "upper_structure",
       "xyz": [
-        0.2,
-        -1.25,
-        1.3
+        0.95,
+        -1.22,
+        1.68
       ],
       "rpy": [
         0.0,
-        0.4,
-        -0.55
+        0.3,
+        0.28
       ]
     }
   ]

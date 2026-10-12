@@ -2,7 +2,9 @@
 
 Datasheet numbers (JCB 3CX Sitemaster, standard dipper, rounded):
     operating mass 8,070 kg (class 7.5-8.8 t; CAT 420F2 from 7.7 t) ·
-    travel (roading) length 5.62 m · overall width 2.36 m (loader shovel) ·
+    travel (roading) length 5.62 m (dealer / spec-site sheets: 5,620 mm, the 3CX
+    Super Sitemaster is 5.91 m; other makes in the class are longer, e.g. CAT
+    420F2 7.17 m) · overall width 2.36 m (loader shovel) ·
     travel height 3.61 m (top of the folded backhoe; CAT 420 3.58 m) · height
     to top of cab 2.87 m · wheelbase 2.17 m (CAT 420 2.2 m) · ground clearance
     0.37 m · rear tyres 16.9-28 (Ø 1.44 m, 0.43 m section) · front tyres
@@ -14,22 +16,28 @@ Assumed / typical for the class:
     loader hinge-pin height at full lift 3.40 m · shovel rollback 43° / dump
     54°, self-levelling "parallel lift" (the shovel keeps its angle to the
     ground while the arms lift) · loader raise 4.7 s, carry-to-dump 1.4 s ·
-    backhoe boom 2.35 m pin to pin, dipper 2.05 m, 0.6 m (24") bucket, 0.80 m
-    pin to tip · boom 151°, dipper 120°, bucket 203° rotation · boom raise
-    2.6 s, dipper 2.1 s, bucket 2.4 s, slew 172° in 3 s · vertical (slide)
+    backhoe boom 2.45 m pin to pin with its foot pin 0.10 m behind the slew
+    axis, dipper 2.05 m, 0.6 m (24") bucket, 0.80 m pin to tip · boom 151°,
+    dipper 120°, bucket 203° rotation · boom raise 2.6 s, dipper 2.1 s, bucket
+    2.4 s, slew 163° (stops at ±1.42 rad) in 2.8 s · vertical (slide)
     stabiliser legs, 0.45 m stroke from the travel position to the pads on the
     ground · front-wheel steer, inner wheel 44° at the 0.6 rad virtual lock ·
     loader towers in front of the cab (arm pivots 1.70 m up, 0.19 m ahead of
     the windscreen).
 
 Model check (offline FK):
-    travel L × W × H 6.45 × 2.36 × 3.64 m (L +15 %: the dipper's "in" stop is
-    the tightest fold at which the 0.8 m bucket still rotates through its whole
-    range clear of the boom and king post, so the roading pose carries the
-    dipper ~20° behind the boom; the real 3CX tucks it closer, and the shovel
-    is carried rolled back with its lowest point 0.32 m above the ground) ·
-    dig depth 4.14 m · reach at ground level from the slew centre 5.23 m · max
-    bucket-pin height 4.82 m · loader hinge pin 3.40 m, dump clearance at 45°
+    travel L × W × H 6.13 × 2.36 × 3.74 m (L +9 %, H +4 %).  Length: the
+    shovel is carried rolled back with the arms down, its cutting edge only 1.60
+    m ahead of the front axle (lowest point 0.07 m above the ground); the
+    backhoe's stick end is 2.36 m behind the rear axle.  The dipper's "in" stop is the
+    tightest fold at which the 0.8 m bucket still rotates through its whole
+    range clear of the boom and king post (a tighter fold needs the bucket to
+    pass through the boom), so the roading pose carries the dipper ~20° behind
+    the boom; to shorten the stack the boom foot pin sits only 0.10 m behind the
+    slew axis (0.24 m before) and the boom is 0.10 m longer so the dig envelope
+    is kept (the 6.45 m of the first version was 15 % over the datasheet) ·
+    dig depth 4.24 m · reach at ground level from the slew centre 5.20 m · max
+    bucket-pin height 4.92 m · loader hinge pin 3.40 m, dump clearance at 45°
     2.58 m, digs 0.07 m below grade · turning radius over the outer front tyre
     4.8 m at full lock · mass 8,070 kg (chassis/cab/engine/axles 4.47 t,
     wheels + knuckles 0.95 t, loader 1.19 t, backhoe 1.28 t, stabiliser legs
@@ -39,8 +47,12 @@ Joint ranges / rates at full command:
     loader_arm      -0.04 … +1.58 rad (hinge pin 3.40 m), 0.344 rad/s (4.7 s)
     loader_bucket   -0.95 (dump) … +0.75 rad (rollback), 1.15 rad/s; the angle
                     of the shovel floor to the ground (self-levelling follower)
-    backhoe_swing   ±1.5 rad about the king post, 1.0 rad/s; +1 = "left" = CCW
-                    seen from above (to the left of an operator facing the hoe)
+    backhoe_swing   ±1.42 rad about the king post, 1.0 rad/s; +1 = "left" = CCW
+                    seen from above (to the left of an operator facing the hoe).
+                    With the hoe folded for roading the curled bucket (0.30 m
+                    either side of the dipper, lowest point 1.25 m above the
+                    ground) reaches the stabiliser casings (tops at 1.50 m)
+                    from ±1.44 rad on, so that is where the stops are
     backhoe_boom    -1.15 … +1.48 rad (pin line to horizontal), 1.0 rad/s
     backhoe_stick   -1.15 (retract) … +0.95 rad (extend), 1.0 rad/s
     backhoe_bucket  -1.10 (dump) … +2.45 rad (curl), 1.5 rad/s
@@ -55,7 +67,7 @@ Drive.max_lat_accel.
 
 Hydraulics (visual only): lift, boom and dipper rams are barrel/rod follower
 pairs whose axis is a linear fit of the true pin-to-pin line (≤ 1 cm off in
-the roading pose; worst 8 / 10 / 10 cm at the range ends).  Every ram's pin
+the roading pose; worst 10 / 10 / 10 cm at the range ends).  Every ram's pin
 distance changes monotonically over its joint range (cylinder_fit raises
 otherwise): lift 1.26 → 1.83 m (base on the front frame above the axle, eye on
 the arm just ahead of the tower), boom 1.05 → 1.45 m (base below the foot pin,
@@ -63,10 +75,10 @@ eye under the boom), dipper 1.79 → 1.25 m.  The shovel rams ride on top of the
 arms (the parallel-lift tipping linkage is not modelled) and the bucket ram /
 dogbone links are fixed on the dipper.
 
-Init pose = roading pose: loader shovel rolled back (hinge pin 0.50 m, lowest
-point 0.32 m above the ground); backhoe boom fully raised, dipper fully in,
-bucket fully curled (lowest point 1.07 m above the ground), slew centred,
-stabilisers up.
+Init pose = roading pose: loader arms down, shovel rolled back (hinge pin 0.25
+m, lowest point 0.07 m above the ground); backhoe boom fully raised, dipper
+fully in, bucket fully curled (lowest point 1.25 m above the ground), slew
+centred, stabilisers up.
 
 Cameras: "front" at the top of the windscreen, looking down over the bonnet at
 the shovel; "left" / "right" on the rear cab corners, each looking back ACROSS
@@ -110,7 +122,7 @@ HOOD_W = 0.82                                     # bonnet width
 B_PIN = (1.69, -1.42)                             # shovel hinge (arm fr.): x 2.93, 0.28 m AGL
 ARM_KNEE = (1.31, -0.60)                          # arm passes over the tyre, drops ahead of it
 B_MAX_H = 3.40                                    # hinge-pin height at full lift (AGL)
-LIFT_LO, LIFT_INIT = -0.04, 0.124                 # roading: hinge pin 0.50 m AGL
+LIFT_LO, LIFT_INIT = -0.04, 0.01                  # roading: shovel carried 0.12 m AGL, L within 10% of datasheet
 LIFT_TIME = 4.7                                   # s, full raise at |cmd| = 1
 BKT_LO, BKT_HI, BKT_INIT = -0.95, 0.75, 0.70
 LEVEL = 1.0                                       # parallel lift: shovel keeps its ground angle
@@ -127,8 +139,9 @@ LINK_Y = ARM_Y + 0.10                             # tipping links, outboard of t
 
 # --- backhoe ---------------------------------------------------------------------------
 SWING_X, SWING_H = -1.20, 0.85                    # king-post axis, swing frame origin height
-FOOT = (0.24, 0.05)                               # boom foot pin (swing frame, +x = rearward)
-BOOM_L, BOOM_KNEE = 2.35, (0.95, 0.33)
+SWING_LIM = 1.42                                  # slew stop each side (rad): folded hoe clears the casings
+FOOT = (0.10, 0.05)                               # boom foot pin (swing frame, +x = rearward)
+BOOM_L, BOOM_KNEE = 2.45, (0.95, 0.33)
 STICK_L, STICK_TAIL, STICK_PITCH = 2.05, 0.34, 1.55
 HOE_W, HOE_R = 0.60, 0.80
 # Roading = boom fully up, dipper fully in, bucket fully curled.  The dipper's "in"
@@ -137,15 +150,17 @@ HOE_W, HOE_R = 0.60, 0.80
 BOOM_LO, BOOM_HI, BOOM_INIT = -1.15, 1.48, 1.48
 STICK_LO, STICK_HI, STICK_INIT = -1.15, 0.95, -1.15
 HOE_LO, HOE_HI, HOE_INIT = -1.10, 2.45, 2.45
-BC_BASE = (0.28, -0.15)                           # boom-ram base below the foot pin (swing fr.)
+BC_BASE = (0.14, -0.15)                           # boom-ram base below the foot pin (swing fr.)
 BC_EYE = (1.25, 0.0)                              # boom-ram eye on a lug under the boom
-DC_BASE = (0.95, 0.55)                            # dipper-ram base on top of the boom (boom frame)
+DC_BASE = (1.05, 0.55)                            # dipper-ram base on top of the boom (boom frame)
 DC_EYE = (-0.30, 0.10)                            # dipper-ram eye on the dipper tail (stick frame)
 RAM_W_INIT = 10.0                                 # ram fits: weight of the roading pose
 
 # --- stabilisers -------------------------------------------------------------------------
 STAB_X, STAB_Y = -0.92, 0.98
 STAB_TOP = 0.70                                   # casing bottom (AGL) = leg joint origin
+BEAM_Z, BEAM_H = 0.86, 0.36                       # stabiliser cross beam: centre (AGL), depth; low, so the
+                                                  # folded hoe (lowest point 1.25 m) slews over it
 PAD_H = 0.45                                      # pad underside in the travel position (AGL)
 
 # --- masses (kg) ---------------------------------------------------------------------------
@@ -406,7 +421,7 @@ def build() -> MachineSpec:
                    role="tool")
     swing = Joint("swing_joint", "revolute", "chassis", "swing_frame",
                   xyz=(SWING_X, 0.0, agl(SWING_H)), rpy=(0.0, 0.0, math.pi), axis=(0, 0, 1),
-                  lower=-1.5, upper=1.5, init=0.0, velocity=1.0, role="tool")
+                  lower=-SWING_LIM, upper=SWING_LIM, init=0.0, velocity=1.0, role="tool")
     boom_j = Joint("boom_joint", "revolute", "swing_frame", "boom",
                    xyz=(FOOT[0], 0.0, FOOT[1]), axis=(0, -1, 0), lower=BOOM_LO, upper=BOOM_HI,
                    init=BOOM_INIT, velocity=1.0, role="tool")
@@ -487,11 +502,10 @@ def build() -> MachineSpec:
         *[box(0.40, 0.08, 0.84, at=(a_x, s * 0.49, agl(1.42))) for s in sides],
         cyl(0.06, 2 * ARM_Y + 0.20, at=(a_x, 0.0, a_z), axis="y", mat="steel", collision=False),
         # rear frame: stabiliser cross beam, king-post brackets, stabiliser casings
-        box(0.20, 2.10, 0.36, at=(STAB_X, 0.0, agl(1.18))),
-        # king-post brackets: top and bottom plates reaching back to the slew axis (the
-        # top one stops short of the raised boom's foot so the boom can slew past it)
-        box(STAB_X - SWING_X - 0.18, 0.50, 0.10,
-            at=((STAB_X + SWING_X + 0.18) / 2, 0.0, agl(SWING_H + 0.60))),
+        box(0.20, 2.10, BEAM_H, at=(STAB_X, 0.0, agl(BEAM_Z))),
+        # king-post bracket: bottom plate reaching back to the slew axis (there is no top
+        # plate: the boom's foot sits only 0.10 m behind the axis, so the raised boom would
+        # sweep through it)
         box(STAB_X - SWING_X, 0.50, 0.10, at=((STAB_X + SWING_X) / 2, 0.0, agl(SWING_H - 0.42)),
             mat="dark"),
         box(0.10, 0.50, 0.30, at=(STAB_X - 0.05, 0.0, agl(SWING_H - 0.27)), mat="dark"),
@@ -682,7 +696,8 @@ def build() -> MachineSpec:
                "backhoe_swing +1 = CCW seen from above. The shovel self-levels through a "
                "follower (-1.0 x lift relative to the arms); ram barrels/rods are visual-only "
                "followers; the right stabiliser follows the left. Stabiliser pads stop at "
-               "grade (the kinematic base cannot be jacked up). Slewing beyond ±1.35 rad "
-               "with the hoe still folded for roading sets the curled bucket on the "
-               "stabiliser beam / casings (sweep warning); unfold the dipper first."),
+               "grade (the kinematic base cannot be jacked up). The slew stops at ±1.42 rad: "
+               "from ±1.44 rad on, the hoe still folded for roading would set the curled "
+               "bucket on the stabiliser casings (sweep warning); the cross beam is "
+               "mounted low (top at 1.04 m) so that the folded bucket passes over it."),
     )

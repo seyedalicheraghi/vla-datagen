@@ -59,8 +59,8 @@
         "type": "revolute",
         "unit": "rad",
         "rate_at_full_command": 0.25,
-        "lower": -1.4,
-        "upper": 1.4,
+        "lower": -1.2217304763960306,
+        "upper": 1.2217304763960306,
         "init": -1.0,
         "positive": "left",
         "negative": "right"
@@ -136,8 +136,8 @@
       "role": "tool",
       "parent": "drawbar",
       "child": "circle",
-      "lower": -1.4,
-      "upper": 1.4,
+      "lower": -1.2217304763960306,
+      "upper": 1.2217304763960306,
       "init": -1.0,
       "velocity": 0.25
     },
@@ -373,14 +373,14 @@
       "name": "right",
       "link": "rear_frame",
       "xyz": [
-        1.53,
-        -0.86,
-        2.38
+        -2.07,
+        -0.3,
+        1.63
       ],
       "rpy": [
         0.0,
-        0.45,
-        -0.6
+        0.55,
+        2.941592653589793
       ]
     }
   ]

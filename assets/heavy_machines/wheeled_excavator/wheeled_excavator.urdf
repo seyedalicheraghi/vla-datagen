@@ -78,10 +78,11 @@
     <visual><origin xyz="-1.1 0 1.06" rpy="0 0 0"/><geometry><box size="1 0.7 0.03"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="-0.8 -0.8 1.27" rpy="0 0 0"/><geometry><cylinder radius="0.07" length="0.45"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="-1.6 0.7 1.1" rpy="0 0 0"/><geometry><cylinder radius="0.08" length="0.1"/></geometry><material name="orange"/></visual>
+    <visual><origin xyz="-1.86 1.27 0.06" rpy="0 0 0"/><geometry><box size="0.12 0.04 0.07"/></geometry><material name="dark"/></visual>
     <visual><origin xyz="0.45 -1.22 1.35" rpy="0 0 0"/><geometry><box size="1.3 0.04 0.04"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="-0.15 -1.22 1.2" rpy="0 0 0"/><geometry><box size="0.04 0.04 0.3"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="1.05 -1.22 1.2" rpy="0 0 0"/><geometry><box size="0.04 0.04 0.3"/></geometry><material name="accent"/></visual>
-    <inertial><origin xyz="-0.464398 0.14216 0.680017" rpy="0 0 0"/><mass value="7650"/><inertia ixx="5968.1133" ixy="-881.471769" ixz="-942.81836" iyy="9604.386428" iyz="-829.425496" izz="11982.673627"/></inertial>
+    <inertial><origin xyz="-0.464443 0.142197 0.679997" rpy="0 0 0"/><mass value="7650"/><inertia ixx="5968.330514" ixy="-881.05334" ixz="-943.002167" iyy="9604.65353" iyz="-829.225426" izz="11983.083511"/></inertial>
   </link>
   <link name="boom">
     <visual><origin xyz="1.225 0 0.65" rpy="0 -0.487836 0"/><geometry><box size="2.773536 0.52 0.62"/></geometry><material name="body"/></visual>
@@ -98,10 +99,10 @@
     <visual><origin xyz="2.2 0 0.74" rpy="0 0 0"/><geometry><box size="0.3 0.4 0.3"/></geometry><material name="body"/></visual>
     <visual><origin xyz="2.3 0 1.84" rpy="0 0 0"/><geometry><box size="0.4 0.3 0.56"/></geometry><material name="body"/></visual>
     <visual><origin xyz="2.3 0 2.08" rpy="1.570796 0 0"/><geometry><cylinder radius="0.09" length="0.36"/></geometry><material name="steel"/></visual>
-    <visual><origin xyz="3.313979 0 1.788672" rpy="0 1.850572 0"/><geometry><cylinder radius="0.105" length="2.11"/></geometry><material name="dark"/></visual>
-    <visual><origin xyz="4.327958 0 1.497344" rpy="0 1.850572 0"/><geometry><cylinder radius="0.12" length="0.08"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="3.309173 0 1.790051" rpy="0 1.850574 0"/><geometry><cylinder radius="0.105" length="2.1"/></geometry><material name="dark"/></visual>
+    <visual><origin xyz="4.318345 0 1.500102" rpy="0 1.850574 0"/><geometry><cylinder radius="0.12" length="0.08"/></geometry><material name="steel"/></visual>
     <visual><origin xyz="1.6 0.27 0.95" rpy="0 0 0"/><geometry><box size="0.12 0.05 0.12"/></geometry><material name="white"/></visual>
-    <inertial><origin xyz="2.272885 0.000096 0.877163" rpy="0 0 0"/><mass value="1100"/><inertia ixx="287.130258" ixy="0.071398" ixz="-402.922457" iyy="2459.489547" iyz="-0.007729" izz="2219.583495"/></inertial>
+    <inertial><origin xyz="2.272515 0.000096 0.877061" rpy="0 0 0"/><mass value="1100"/><inertia ixx="287.112192" ixy="0.071371" ixz="-402.749834" iyy="2458.972472" iyz="-0.007741" izz="2219.091541"/></inertial>
   </link>
   <link name="stick">
     <visual><origin xyz="1.25 0 0" rpy="0 0 0"/><geometry><box size="2.5 0.4 0.46"/></geometry><material name="body"/></visual>
@@ -174,9 +175,9 @@
     <inertial><origin xyz="0.740291 0 0" rpy="0 0 0"/><mass value="180"/><inertia ixx="19.147911" ixy="0" ixz="0" iyy="45.127731" iyz="0" izz="63.468504"/></inertial>
   </link>
   <link name="stick_cylinder_rod">
-    <visual><origin xyz="0.865 0 0" rpy="0 1.570796 0"/><geometry><cylinder radius="0.065" length="1.73"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="0.86 0 0" rpy="0 1.570796 0"/><geometry><cylinder radius="0.065" length="1.72"/></geometry><material name="steel"/></visual>
     <visual><origin xyz="0 0 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.09" length="0.2"/></geometry><material name="steel"/></visual>
-    <inertial><origin xyz="0.708066 0 0" rpy="0 0 0"/><mass value="50"/><inertia ixx="0.140069" ixy="0" ixz="0" iyy="15.848898" iyz="0" izz="15.860767"/></inertial>
+    <inertial><origin xyz="0.703232 0 0" rpy="0 0 0"/><mass value="50"/><inertia ixx="0.140209" ixy="0" ixz="0" iyy="15.676975" iyz="0" izz="15.6889"/></inertial>
   </link>
   <link name="front_left_knuckle">
     <visual><origin xyz="0 -0.245 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.12" length="0.49"/></geometry><material name="dark"/></visual>
@@ -262,7 +263,7 @@
     <parent link="boom"/><child link="stick"/>
     <origin xyz="5.05 0 0.75" rpy="0 1.45 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.3001" upper="0.8001" effort="10000000" velocity="0.65"/>
+    <limit lower="-1.2501" upper="0.8001" effort="10000000" velocity="0.65"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="stick"/><child link="bucket"/>
@@ -286,7 +287,7 @@
     <parent link="stick"/><child link="stick_cylinder_rod"/>
     <origin xyz="-0.7 0 0.12" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-2.8704416" upper="-0.574682617" effort="10000000" velocity="0.748625"/>
+    <limit lower="-2.87272413" upper="-0.61716529" effort="10000000" velocity="0.751699"/>
   </joint>
   <joint name="front_left_steer_joint" type="revolute">
     <parent link="undercarriage"/><child link="front_left_knuckle"/>
