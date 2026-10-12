@@ -1,0 +1,368 @@
+{
+  "name": "wheeled_excavator",
+  "abbrev": "WEX",
+  "display_name": "Wheeled Excavator",
+  "category": "excavation",
+  "reference": "18 t wheeled excavator (CAT M318 / Liebherr A918 class)",
+  "description": "Two-axle wheeled excavator with twin tyres, Ackermann front steering, a rear stabiliser blade, a 360\u00b0 upper structure with the cab on the left and a mono boom / stick / 0.8 m\u00b3 bucket.",
+  "urdf": "wheeled_excavator.urdf",
+  "root_link": "undercarriage",
+  "root_height_m": 0.52,
+  "operating_mass_kg": 18500.0,
+  "model_mass_kg": 18470.0,
+  "envelope_m": [
+    8.45,
+    2.55,
+    3.36
+  ],
+  "model_bbox_m": [
+    9.133,
+    2.581,
+    3.31
+  ],
+  "action": {
+    "dim": 7,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "swing",
+        "joint": "swing_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 0.94,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 3,
+        "label": "boom",
+        "joint": "boom_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.55,
+        "lower": -1.0,
+        "upper": 1.05,
+        "init": -0.35,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "stick",
+        "joint": "stick_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.65,
+        "lower": -1.3,
+        "upper": 0.8,
+        "init": -1.15,
+        "positive": "out",
+        "negative": "in"
+      },
+      {
+        "action_index": 5,
+        "label": "bucket",
+        "joint": "bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": -1.1,
+        "upper": 1.9,
+        "init": 1.8,
+        "positive": "curl",
+        "negative": "dump"
+      },
+      {
+        "action_index": 6,
+        "label": "stabilizer_blade",
+        "joint": "blade_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.32,
+        "lower": -0.65,
+        "upper": 0.15,
+        "init": -0.65,
+        "positive": "lower",
+        "negative": "raise"
+      }
+    ]
+  },
+  "state": {
+    "dim": 11,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "swing_pos",
+      "boom_pos",
+      "stick_pos",
+      "bucket_pos",
+      "stabilizer_blade_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 9.7,
+    "max_reverse_speed_mps": 9.7,
+    "wheelbase_m": 2.7,
+    "max_steer_rad": 0.55,
+    "steer_rate_radps": 0.22,
+    "fixed_axle_x_m": -1.35,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "swing_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "undercarriage",
+      "child": "upper_structure",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 0.94
+    },
+    {
+      "name": "boom_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "upper_structure",
+      "child": "boom",
+      "lower": -1.0,
+      "upper": 1.05,
+      "init": -0.35,
+      "velocity": 0.55
+    },
+    {
+      "name": "stick_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "boom",
+      "child": "stick",
+      "lower": -1.3,
+      "upper": 0.8,
+      "init": -1.15,
+      "velocity": 0.65
+    },
+    {
+      "name": "bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "stick",
+      "child": "bucket",
+      "lower": -1.1,
+      "upper": 1.9,
+      "init": 1.8,
+      "velocity": 1.0
+    },
+    {
+      "name": "blade_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "undercarriage",
+      "child": "stabilizer_blade",
+      "lower": -0.65,
+      "upper": 0.15,
+      "init": -0.65,
+      "velocity": 0.32
+    },
+    {
+      "name": "boom_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "upper_structure",
+      "child": "boom_cylinders",
+      "lower": -0.6582779446769758,
+      "upper": 1.5779867861047299,
+      "init": 0.08736696996112597,
+      "velocity": 0.6463149277707014
+    },
+    {
+      "name": "stick_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "stick_cylinder_rod",
+      "lower": -2.8703415958081098,
+      "upper": -0.5747826165688689,
+      "init": -0.8244654008002432,
+      "velocity": 0.7486253983359554
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "undercarriage",
+      "child": "front_left_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "undercarriage",
+      "child": "front_right_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_left_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_left_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "undercarriage",
+      "child": "rear_left_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "undercarriage",
+      "child": "rear_left_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "undercarriage",
+      "child": "rear_right_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "undercarriage",
+      "child": "rear_right_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "upper_structure",
+      "xyz": [
+        1.26,
+        0.78,
+        1.45
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.12
+      ]
+    },
+    {
+      "name": "left",
+      "link": "upper_structure",
+      "xyz": [
+        1.18,
+        1.2,
+        2.12
+      ],
+      "rpy": [
+        0.0,
+        0.35,
+        0.65
+      ]
+    },
+    {
+      "name": "right",
+      "link": "upper_structure",
+      "xyz": [
+        1.24,
+        -1.24,
+        1.25
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.6
+      ]
+    }
+  ]
+}

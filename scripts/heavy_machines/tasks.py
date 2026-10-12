@@ -27,6 +27,32 @@ class Goal:
     text: str = ""
 
 
+# Scripted motion stays at realistic speeds even for road-going machines.
+DRIVE_SPEED_CAP = 4.0      # m/s
+TURN_SPEED_CAP = 2.5       # m/s while turning (wheeled machines)
+
+
+def tool_phrase(label: str, word: str) -> str:
+    """'raise the boom', 'extend the boom telescope', 'swing the chute left', 'curl the bucket'."""
+    name = label.replace("_", " ")
+    w = (word or "").lower()
+    if w in ("raise", "up", "lift"):
+        return f"raise the {name}"
+    if w in ("lower", "down"):
+        return f"lower the {name}"
+    if w in ("extend", "out"):
+        return f"extend the {name}"
+    if w in ("retract", "in"):
+        return f"retract the {name}"
+    if w in ("left", "ccw"):
+        return f"swing the {name} left" if w == "left" else f"turn the {name} counter-clockwise"
+    if w in ("right", "cw"):
+        return f"swing the {name} right" if w == "right" else f"turn the {name} clockwise"
+    if not w:
+        return f"move the {name}"
+    return f"{w.replace('_', ' ')} the {name}"
+
+
 def _pct(spec: MachineSpec, i: int, q: float) -> int:
     j = spec.joint(spec.tools[i].joint)
     return round(100 * (q - j.lower) / (j.upper - j.lower))
@@ -52,10 +78,9 @@ def sample_goals(spec: MachineSpec, rng: random.Random, n_min: int = 2, n_max: i
             t, j = spec.tools[i], spec.joint(spec.tools[i].joint)
             if j.type == "continuous":
                 deg = rng.choice([-1, 1]) * rng.choice([45, 90, 135, 180])
+                word = t.positive if deg > 0 else t.negative
                 goals.append(Goal("tool", tool_q[i] + math.radians(deg), i,
-                                  f"{t.label.replace('_', ' ')} "
-                                  f"{(t.positive if deg > 0 else t.negative) or ('+' if deg > 0 else '-')} "
-                                  f"{abs(deg)} degrees"))
+                                  f"{tool_phrase(t.label, word)} {abs(deg)} degrees"))
                 tool_q[i] += math.radians(deg)
             else:
                 cur = _pct(spec, i, tool_q[i])
@@ -63,8 +88,7 @@ def sample_goals(spec: MachineSpec, rng: random.Random, n_min: int = 2, n_max: i
                 pct = rng.choice(choices or [0, 100])
                 q = j.lower + pct / 100 * (j.upper - j.lower)
                 word = t.positive if q > tool_q[i] else t.negative
-                verb = f"{word} the {t.label.replace('_', ' ')}" if word else f"move the {t.label}"
-                goals.append(Goal("tool", q, i, f"{verb} to {pct}%"))
+                goals.append(Goal("tool", q, i, f"{tool_phrase(t.label, word)} to {pct}%"))
                 tool_q[i] = q
     return goals
 
@@ -78,6 +102,8 @@ class TaskController:
 
     ``act(state)`` takes the env state row ``[x, y, yaw, speed, yaw_rate,
     steer, tool_1..tool_k]`` and returns an action list in [-1, 1].
+    Wheeled machines re-centre their steering (standing still) after every
+    turn, so a following "drive forward" really goes straight.
     """
 
     def __init__(self, spec: MachineSpec, goals: list[Goal], control_dt: float):
@@ -86,6 +112,9 @@ class TaskController:
         self._start: list[float] | None = None
         self._unwrapped: dict[int, float] = {}
         self._prev_tool: dict[int, float] = {}
+        self._prev_yaw: float | None = None
+        self._turned = 0.0
+        self._settling = False
         self.steps_in_goal = 0
         self.timeouts = 0                 # goals abandoned by the safety timeout
 
@@ -100,7 +129,17 @@ class TaskController:
     def _advance(self):
         self.idx += 1
         self._start = None
+        self._turned = 0.0
+        self._settling = False
         self.steps_in_goal = 0
+
+    def _timeout_steps(self, g: Goal) -> int:
+        secs = 40.0
+        if g.kind == "tool":
+            j = self.spec.joint(self.spec.tools[g.tool].joint)
+            span = 2 * math.pi if j.type == "continuous" else (j.upper - j.lower)
+            secs = 20.0 + 2.0 * span / j.velocity
+        return int(secs / self.dt)
 
     def _tool_pos(self, i: int, raw: float) -> float:
         """Unwrap continuous tools so targets beyond ±pi are reachable."""
@@ -114,16 +153,24 @@ class TaskController:
         self._prev_tool[i], self._unwrapped[i] = raw, un
         return un
 
+    def _speed_cmd(self, v: float) -> float:
+        d = self.spec.drive
+        return max(0.0, min(1.0, v / d.max_speed))
+
     def act(self, state: list[float]) -> list[float]:
         spec, d = self.spec, self.spec.drive
         a = [0.0] * spec.action_dim
         tools = [self._tool_pos(i, state[6 + i]) for i in range(len(spec.tools))]
+        if self._prev_yaw is not None:
+            self._turned += math.atan2(math.sin(state[2] - self._prev_yaw), math.cos(state[2] - self._prev_yaw))
+        self._prev_yaw = state[2]
         while not self.done:
             g = self.goals[self.idx]
             if self._start is None:
                 self._start = list(state[:3]) + tools
+                self._turned = 0.0
             self.steps_in_goal += 1
-            if self.steps_in_goal > 30 * 40:              # 40 s safety timeout per goal
+            if self.steps_in_goal > self._timeout_steps(g):
                 self.timeouts += 1
                 self._advance()
                 continue
@@ -133,22 +180,39 @@ class TaskController:
                 if remaining <= 0.05:
                     self._advance()
                     continue
-                a[0] = math.copysign(min(1.0, 0.25 + remaining / 3.0), g.value)
+                v = min(DRIVE_SPEED_CAP, d.max_speed if g.value > 0 else d.reverse_speed,
+                        0.4 + 1.2 * remaining)
+                a[0] = math.copysign(max(0.05, self._speed_cmd(v)), g.value)
                 return a
             if g.kind == "turn":
-                turned = math.atan2(math.sin(state[2] - self._start[2]), math.cos(state[2] - self._start[2]))
-                remaining = abs(g.value) - abs(turned) if turned * g.value >= 0 else abs(g.value)
-                if remaining <= math.radians(2):
-                    self._advance()
-                    continue
+                if self._settling:                       # re-centre steering standing still
+                    if abs(state[5]) <= 0.02:
+                        self._advance()
+                        continue
+                    return a
+                remaining = abs(g.value) - math.copysign(1.0, g.value) * self._turned
+                if d.type == "articulated":
+                    # Straightening the hinge at standstill swings the front frame back
+                    # by about rear_length/(front_length+rear_length) of the hinge angle.
+                    remaining -= d.rear_length * abs(state[5]) / (d.front_length + d.rear_length)
+                if remaining <= math.radians(1.5):
+                    if d.type == "skid":
+                        self._advance()
+                        continue
+                    self._settling = True
+                    return a
                 a[1] = math.copysign(1.0, g.value)
                 if d.type != "skid":                     # wheeled machines must roll to turn
-                    a[0] = 0.5
+                    a[0] = self._speed_cmd(min(TURN_SPEED_CAP, d.max_speed))
                 return a
             # tool goal
             err = g.value - tools[g.tool]
             j = spec.joint(spec.tools[g.tool].joint)
-            tol = 0.01 if j.type == "prismatic" else math.radians(1.0)
+            if j.type == "continuous":
+                tol = math.radians(1.0)
+            else:
+                span = j.upper - j.lower
+                tol = min(0.01 if j.type == "prismatic" else math.radians(1.0), 0.02 * span)
             if abs(err) <= tol:
                 self._advance()
                 continue

@@ -1,0 +1,249 @@
+{
+  "name": "asphalt_paver",
+  "abbrev": "PAV",
+  "display_name": "Asphalt Paver",
+  "category": "paving",
+  "reference": "19 t tracked asphalt paver (V\u00f6gele Super 1800-3 / CAT AP655F class)",
+  "description": "Rubber-tracked asphalt paver with a front hopper with folding wings, operator platform under a roof, and a floating 2.55\u20135.0 m extending screed towed on two tow arms.",
+  "urdf": "asphalt_paver.urdf",
+  "root_link": "tractor",
+  "root_height_m": 0.3,
+  "operating_mass_kg": 19100.0,
+  "model_mass_kg": 19100.0,
+  "envelope_m": [
+    6.45,
+    2.55,
+    3.75
+  ],
+  "model_bbox_m": [
+    6.447,
+    2.55,
+    3.75
+  ],
+  "action": {
+    "dim": 5,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "hopper_wings",
+        "joint": "left_wing_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.25,
+        "lower": 0.0,
+        "upper": 1.15,
+        "init": 1.15,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "screed",
+        "joint": "screed_lift_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.07985193502704067,
+        "lower": 0.0,
+        "upper": 0.27948177259464235,
+        "init": 0.27948177259464235,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "screed_extensions",
+        "joint": "left_extension_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.15,
+        "lower": 0.0,
+        "upper": 1.225,
+        "init": 0.0,
+        "positive": "extend",
+        "negative": "retract"
+      }
+    ]
+  },
+  "state": {
+    "dim": 9,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "unused",
+      "hopper_wings_pos",
+      "screed_pos",
+      "screed_extensions_pos"
+    ]
+  },
+  "drive": {
+    "type": "skid",
+    "max_speed_mps": 1.25,
+    "max_reverse_speed_mps": 1.25,
+    "max_yaw_rate_radps": 0.3,
+    "track_width_m": 1.9
+  },
+  "joints": [
+    {
+      "name": "left_wing_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "tractor",
+      "child": "left_wing",
+      "lower": 0.0,
+      "upper": 1.15,
+      "init": 1.15,
+      "velocity": 0.25
+    },
+    {
+      "name": "right_wing_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "right_wing",
+      "lower": 0.0,
+      "upper": 1.15,
+      "init": 1.15,
+      "velocity": 0.25
+    },
+    {
+      "name": "screed_lift_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "lift_cylinders",
+      "child": "lift_rods",
+      "lower": 0.0,
+      "upper": 0.27948177259464235,
+      "init": 0.27948177259464235,
+      "velocity": 0.07985193502704067
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "lift_cylinders",
+      "lower": -1.76571946467328,
+      "upper": -1.6231768455365843,
+      "init": -1.7157194646732798,
+      "velocity": 1.0
+    },
+    {
+      "name": "tow_arm_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "screed",
+      "lower": 0.0,
+      "upper": 0.09,
+      "init": 0.09,
+      "velocity": 0.025714285714285714
+    },
+    {
+      "name": "left_extension_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "screed",
+      "child": "left_extension",
+      "lower": 0.0,
+      "upper": 1.225,
+      "init": 0.0,
+      "velocity": 0.15
+    },
+    {
+      "name": "right_extension_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "screed",
+      "child": "right_extension",
+      "lower": 0.0,
+      "upper": 1.225,
+      "init": 0.0,
+      "velocity": 0.15
+    },
+    {
+      "name": "left_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "tractor",
+      "child": "left_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    },
+    {
+      "name": "right_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "tractor",
+      "child": "right_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "tractor",
+      "xyz": [
+        0.0,
+        0.0,
+        2.6500000000000004
+      ],
+      "rpy": [
+        0.0,
+        0.65,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "tractor",
+      "xyz": [
+        -2.2,
+        1.25,
+        3.1500000000000004
+      ],
+      "rpy": [
+        0.0,
+        1.0,
+        2.7
+      ]
+    },
+    {
+      "name": "right",
+      "link": "tractor",
+      "xyz": [
+        -2.2,
+        -1.25,
+        3.1500000000000004
+      ],
+      "rpy": [
+        0.0,
+        1.0,
+        -2.7
+      ]
+    }
+  ]
+}

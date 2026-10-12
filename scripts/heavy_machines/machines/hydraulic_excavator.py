@@ -27,6 +27,7 @@ BOOM_KNEE = (2.75, 1.55)
 BOOM_TIP = (5.60, 1.05)          # stick pin; 5.70 m from the foot pin
 STICK_LEN = 2.90
 STICK_PITCH = 1.37               # stick hangs 78.5° below the boom frame x at q = 0
+BUCKET_INIT = 1.75               # fully curled for transport
 
 
 def build() -> MachineSpec:
@@ -64,15 +65,18 @@ def build() -> MachineSpec:
         cyl(0.14, 0.50, at=(STICK_LEN, 0.0, 0.0), axis="y", mat="steel", collision=False),
     ])
 
-    # Bucket frame: origin at the bucket pin, +x toward the cutting edge,
-    # +z out of the opening (forward when the stick hangs straight down).
+    # Bucket frame: origin at the bucket pin, +x toward the cutting edge.  With the
+    # stick hanging down, +z points away from the machine: the bucket's curved
+    # back bulges that way and its mouth faces the machine (backhoe layout), so
+    # curling pulls the teeth toward the cab and turns the mouth up.
     bucket = Link("bucket", 750.0, [
-        box(1.20, 1.20, 0.06, at=(0.60, 0.0, -0.25), mat="dark"),                    # back wall
-        box(0.06, 1.20, 0.70, at=(1.20, 0.0, 0.10), mat="dark"),                     # floor / lip
-        box(0.06, 1.20, 0.30, at=(0.05, 0.0, -0.10), mat="dark"),                    # top plate
-        box(1.26, 0.05, 0.72, at=(0.62, 0.60, 0.08), mat="dark"),                    # left side
-        box(1.26, 0.05, 0.72, at=(0.62, -0.60, 0.08), mat="dark"),                   # right side
-        *[box(0.06, 0.10, 0.16, at=(1.22, y, 0.52), mat="steel", collision=False)   # teeth
+        beam((-0.02, 0.06), (0.32, 0.44), 1.20, 0.06, mat="dark"),                  # back plate
+        beam((0.32, 0.44), (0.86, 0.48), 1.20, 0.06, mat="dark"),
+        beam((0.86, 0.48), (1.20, 0.22), 1.20, 0.06, mat="dark"),                    # heel
+        beam((1.20, 0.22), (1.30, -0.10), 1.20, 0.06, mat="dark"),                   # lip
+        *[box(1.22, 0.05, 0.50, at=(0.64, y, 0.22), mat="dark") for y in (0.60, -0.60)],  # sides
+        box(0.30, 0.50, 0.16, at=(0.05, 0.0, 0.10), mat="steel", collision=False),  # pin lugs
+        *[box(0.08, 0.10, 0.16, at=(1.32, y, -0.18), mat="steel", collision=False)  # teeth
           for y in (-0.45, -0.15, 0.15, 0.45)],
     ])
 
@@ -91,7 +95,7 @@ def build() -> MachineSpec:
               xyz=(BOOM_TIP[0], 0.0, BOOM_TIP[1]), rpy=(0.0, STICK_PITCH, 0.0),
               axis=(0, -1, 0), lower=-1.35, upper=0.90, init=-1.35, velocity=0.65, role="tool"),
         Joint("bucket_joint", "revolute", "stick", "bucket",
-              xyz=(STICK_LEN, 0.0, 0.0), axis=(0, -1, 0), lower=-1.20, upper=1.75, init=-0.80,
+              xyz=(STICK_LEN, 0.0, 0.0), axis=(0, 1, 0), lower=-1.20, upper=1.75, init=BUCKET_INIT,
               velocity=1.0, role="tool"),
         Joint("left_sprocket_joint", "continuous", "undercarriage", "left_sprocket",
               xyz=(sprocket_x, y_t, 0.0), axis=(0, 1, 0), velocity=20.0, role="roll_left",
@@ -119,7 +123,7 @@ def build() -> MachineSpec:
             Tool("bucket_joint", "bucket", positive="curl", negative="dump"),
         ],
         cameras=[
-            Camera("front", "upper_structure", (1.15, 0.77, 1.45), (0.0, 0.35, 0.0)),
+            Camera("front", "upper_structure", (1.34, 0.77, 1.45), (0.0, 0.35, 0.0)),   # just ahead of the windscreen
             Camera("left", "upper_structure", (0.2, 1.25, 1.80), (0.0, 0.40, 0.55)),
             Camera("right", "upper_structure", (0.2, -1.25, 1.30), (0.0, 0.40, -0.55)),
         ],
@@ -129,5 +133,6 @@ def build() -> MachineSpec:
         # The stick folds tight under the boom in the shipping pose and the
         # bucket tucks in front of the tracks; real machines do the same.
         allowed_overlaps=[("boom", "bucket")],
-        notes="Bucket curl is not auto-verified (no up/out/left semantics); see render.",
+        notes=("Bucket curl is not auto-verified (no up/out/left semantics): +1 pulls the "
+               "teeth toward the machine and turns the mouth up (checked in the sweep render)."),
     )

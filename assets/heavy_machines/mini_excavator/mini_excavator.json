@@ -1,0 +1,390 @@
+{
+  "name": "mini_excavator",
+  "abbrev": "MEX",
+  "display_name": "Mini Excavator",
+  "category": "excavation",
+  "reference": "3.5-4 t rubber-track mini excavator (CAT 303.5 / Kubota KX040-4 class)",
+  "description": "Compact tracked excavator with cab, 360 deg swing, boom-swing bracket for offset digging, 2.4 m boom / 1.35 m stick, 600 mm bucket and a front dozer blade.",
+  "urdf": "mini_excavator.urdf",
+  "root_link": "undercarriage",
+  "root_height_m": 0.23,
+  "operating_mass_kg": 3800.0,
+  "model_mass_kg": 3823.0,
+  "envelope_m": [
+    4.85,
+    1.78,
+    2.5
+  ],
+  "model_bbox_m": [
+    4.827,
+    1.816,
+    2.5
+  ],
+  "action": {
+    "dim": 8,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "swing",
+        "joint": "swing_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 3,
+        "label": "boom_swing",
+        "joint": "boom_swing_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.45,
+        "lower": -1.05,
+        "upper": 1.31,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 4,
+        "label": "boom",
+        "joint": "boom_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.75,
+        "lower": -1.16,
+        "upper": 1.12,
+        "init": 0.05,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 5,
+        "label": "stick",
+        "joint": "stick_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.85,
+        "lower": -1.05,
+        "upper": 0.85,
+        "init": -1.05,
+        "positive": "out",
+        "negative": "in"
+      },
+      {
+        "action_index": 6,
+        "label": "bucket",
+        "joint": "bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.3,
+        "lower": -1.05,
+        "upper": 2.15,
+        "init": 2.15,
+        "positive": "curl",
+        "negative": "dump"
+      },
+      {
+        "action_index": 7,
+        "label": "blade",
+        "joint": "blade_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.35,
+        "lower": -0.3906132149236577,
+        "upper": 0.3479052481982687,
+        "init": 0.3479052481982687,
+        "positive": "raise",
+        "negative": "lower"
+      }
+    ]
+  },
+  "state": {
+    "dim": 12,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "unused",
+      "swing_pos",
+      "boom_swing_pos",
+      "boom_pos",
+      "stick_pos",
+      "bucket_pos",
+      "blade_pos"
+    ]
+  },
+  "drive": {
+    "type": "skid",
+    "max_speed_mps": 1.28,
+    "max_reverse_speed_mps": 1.28,
+    "max_yaw_rate_radps": 0.6,
+    "track_width_m": 1.48
+  },
+  "joints": [
+    {
+      "name": "blade_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "undercarriage",
+      "child": "blade",
+      "lower": -0.3906132149236577,
+      "upper": 0.3479052481982687,
+      "init": 0.3479052481982687,
+      "velocity": 0.35
+    },
+    {
+      "name": "swing_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "undercarriage",
+      "child": "upper_structure",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "boom_swing_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "upper_structure",
+      "child": "swing_bracket",
+      "lower": -1.05,
+      "upper": 1.31,
+      "init": 0.0,
+      "velocity": 0.45
+    },
+    {
+      "name": "boom_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "swing_bracket",
+      "child": "boom",
+      "lower": -1.16,
+      "upper": 1.12,
+      "init": 0.05,
+      "velocity": 0.75
+    },
+    {
+      "name": "stick_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "boom",
+      "child": "stick",
+      "lower": -1.05,
+      "upper": 0.85,
+      "init": -1.05,
+      "velocity": 0.85
+    },
+    {
+      "name": "bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "stick",
+      "child": "bucket",
+      "lower": -1.05,
+      "upper": 2.15,
+      "init": 2.15,
+      "velocity": 1.3
+    },
+    {
+      "name": "left_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "undercarriage",
+      "child": "left_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    },
+    {
+      "name": "right_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "undercarriage",
+      "child": "right_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    },
+    {
+      "name": "boom_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "swing_bracket",
+      "child": "boom_cyl_barrel",
+      "lower": -1.0530150485954353,
+      "upper": 1.0530150485954355,
+      "init": 0.06343074859796521,
+      "velocity": 0.7296151635496286
+    },
+    {
+      "name": "boom_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "boom_cyl_rod",
+      "lower": -0.12698495140456464,
+      "upper": 0.12698495140456464,
+      "init": -0.0065692514020345705,
+      "velocity": 0.12038483645037147
+    },
+    {
+      "name": "arm_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "arm_cyl_barrel",
+      "lower": -0.07758888364761524,
+      "upper": 0.07758888364761522,
+      "init": -0.05758888364761523,
+      "velocity": 0.10152689589523467
+    },
+    {
+      "name": "arm_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "arm_cyl_rod",
+      "lower": -0.9124111163523847,
+      "upper": 0.9124111163523847,
+      "init": 0.8924111163523847,
+      "velocity": 0.8484731041047654
+    },
+    {
+      "name": "blade_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "undercarriage",
+      "child": "blade_cyl_barrel",
+      "lower": -0.5515072694382988,
+      "upper": 0.5515072694382986,
+      "init": 0.5315072694382986,
+      "velocity": 0.5537857645887783
+    },
+    {
+      "name": "blade_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "blade",
+      "child": "blade_cyl_rod",
+      "lower": -0.18224803787733543,
+      "upper": 0.18224803787733543,
+      "init": 0.16224803787733544,
+      "velocity": 0.20378576458877817
+    },
+    {
+      "name": "bucket_dogbone_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "bucket_dogbone",
+      "lower": -0.9505256403642965,
+      "upper": 0.9505256403642963,
+      "init": -0.9305256403642965,
+      "velocity": 0.8060520827959909
+    },
+    {
+      "name": "bucket_hlink_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "bucket",
+      "child": "bucket_hlink",
+      "lower": -1.068864077089958,
+      "upper": 1.0688640770899576,
+      "init": 1.0488640770899575,
+      "velocity": 0.9022020626355909
+    },
+    {
+      "name": "bucket_cyl_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "bucket_cyl_barrel",
+      "lower": -0.15064316031258976,
+      "upper": 0.15064316031258976,
+      "init": -0.13064316031258977,
+      "velocity": 0.1561475677539792
+    },
+    {
+      "name": "bucket_cyl_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "bucket_dogbone",
+      "child": "bucket_cyl_rod",
+      "lower": -0.8198824800517066,
+      "upper": 0.819882480051707,
+      "init": 0.799882480051707,
+      "velocity": 0.6999045150420119
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "upper_structure",
+      "xyz": [
+        0.71,
+        0.42,
+        1.32
+      ],
+      "rpy": [
+        0.0,
+        0.45,
+        -0.1
+      ]
+    },
+    {
+      "name": "left",
+      "link": "upper_structure",
+      "xyz": [
+        0.62,
+        0.9,
+        1.84
+      ],
+      "rpy": [
+        0.0,
+        0.45,
+        0.55
+      ]
+    },
+    {
+      "name": "right",
+      "link": "upper_structure",
+      "xyz": [
+        0.6,
+        -0.86,
+        0.95
+      ],
+      "rpy": [
+        0.0,
+        0.35,
+        -0.55
+      ]
+    }
+  ]
+}

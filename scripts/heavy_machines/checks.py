@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from . import kinematics as K
 from .spec import (Box, CATEGORIES, Cylinder, MachineSpec, ROLLING_ROLES, Shape, Sphere,
-                   valid_name)
+                   valid_name)  # noqa: F401
 from .urdf_builder import build_urdf, link_inertia
 
 # Teleop key pairs assigned to tools in order (see teleop_machine.py).
@@ -377,7 +377,23 @@ def validate(spec: MachineSpec) -> Report:
                 msg = f"links {na} and {nb} interpenetrate by {pen:.2f} m in the init pose"
                 (E if both_boxes else W)(msg + ("" if both_boxes else " (round shape bound; may be ok)"))
 
+    # --- follower consistency ------------------------------------------------------
+    for j in spec.joints_with_role("follower"):
+        if not j.follows or j.follows[0] not in joint_names:
+            continue
+        src_name, k, c = j.follows
+        src = spec.joint(src_name)
+        want = k * src.init + c
+        if abs(want - j.init) > 1e-3:
+            E(f"follower {j.name}: init {j.init:.4f} but k*init({src_name})+c = {want:.4f}")
+        if j.type != "continuous" and src.type != "continuous":
+            ends = sorted((k * src.lower + c, k * src.upper + c))
+            if ends[0] < j.lower - 1e-3 or ends[1] > j.upper + 1e-3:
+                E(f"follower {j.name}: limits [{j.lower:.3f}, {j.upper:.3f}] do not cover "
+                  f"k*range({src_name})+c = [{ends[0]:.3f}, {ends[1]:.3f}] (the env would clamp it)")
+
     # --- tool direction semantics ------------------------------------------------
+    jframes = K.joint_frames(spec)
     for t in spec.tools:
         if t.joint not in joint_names:
             continue
@@ -386,31 +402,41 @@ def validate(spec: MachineSpec) -> Report:
         if not (words & _KNOWN):
             W(f"tool {t.label}: directions {t.positive!r}/{t.negative!r} not auto-verifiable")
             continue
-        # Compare the two ends of the range (robust for folded init poses);
-        # continuous joints have no ends, so use ±0.1 rad around init.
-        if j.type == "continuous":
-            q0, q1 = j.init - 0.1, j.init + 0.1
+        # Walk the whole range in small steps (continuous joints: ±0.1 rad around
+        # init). raise/out compare the ends; left accumulates the rotation of the
+        # subtree centroid about the joint (CCW seen from above = left), or for a
+        # prismatic joint its sideways (+y) travel.
+        q0, q1 = (j.init - 0.1, j.init + 0.1) if j.type == "continuous" else (j.lower, j.upper)
+        n = 16
+        cs = [K.subtree_centroid(spec, j.child, {j.name: q0 + (q1 - q0) * i / n}) for i in range(n + 1)]
+        o = jframes[j.name].t
+        if j.type == "prismatic":
+            left = cs[-1][1] - cs[0][1]
         else:
-            q0, q1 = j.lower, j.upper
-        c0 = K.subtree_centroid(spec, j.child, {j.name: q0})
-        c1 = K.subtree_centroid(spec, j.child, {j.name: q1})
-        o = K.joint_frames(spec)[j.name].t
-        delta = {
-            "raise": c1[2] - c0[2],
-            "out": K.vnorm(c1) - K.vnorm(c0),
-            "left": _cross(K.vsub(c0, o), K.vsub(c1, o))[2],
-        }
+            left = 0.0
+            for a_, b_ in zip(cs, cs[1:]):
+                va, vb = K.vsub(a_, o), K.vsub(b_, o)
+                left += math.atan2(va[0] * vb[1] - va[1] * vb[0], va[0] * vb[0] + va[1] * vb[1])
+        delta = {"raise": cs[-1][2] - cs[0][2], "out": K.vnorm(cs[-1]) - K.vnorm(cs[0]), "left": left}
         for word, sign in ((t.positive.lower(), 1.0), (t.negative.lower(), -1.0)):
-            for group, key, s in ((_RAISE, "raise", 1), (_LOWER, "raise", -1),
-                                  (_OUT, "out", 1), (_IN, "out", -1),
-                                  (_LEFT, "left", 1), (_RIGHT, "left", -1)):
+            for group, key, s_ in ((_RAISE, "raise", 1), (_LOWER, "raise", -1),
+                                   (_OUT, "out", 1), (_IN, "out", -1),
+                                   (_LEFT, "left", 1), (_RIGHT, "left", -1)):
                 if word in group:
-                    got = delta[key] * sign * s
+                    got = delta[key] * sign * s_
                     if abs(delta[key]) < 1e-4:
-                        W(f"tool {t.label}: '{word}' produces no measurable motion near init")
+                        W(f"tool {t.label}: '{word}' produces no measurable motion")
                     elif got < 0:
                         E(f"tool {t.label}: command {'+1' if sign > 0 else '-1'} is labelled "
                           f"'{word}' but moves the opposite way (flip the joint axis)")
+
+    # --- self-overlap while tools move / at full steering lock (warnings) -----------
+    for msg in _sweep_overlaps(spec, adjacent, allowed):
+        W(msg)
+
+    # --- cameras: placement and whether they see the tools --------------------------
+    for msg_kind, msg in _camera_checks(spec):
+        (E if msg_kind == "error" else W)(msg)
 
     # --- URDF round trip -------------------------------------------------------------
     try:
@@ -422,3 +448,141 @@ def validate(spec: MachineSpec) -> Report:
 
     r.info["action"] = spec.action_labels
     return r
+
+
+# ---------------------------------------------------------------------------
+# Pose sweeps, cameras
+# ---------------------------------------------------------------------------
+
+def _radius(obb) -> float:
+    return K.vnorm(obb[2])
+
+
+def _sweep_poses(spec: MachineSpec):
+    """(description, moving joint, q dict) for every tool range sample and full steer lock."""
+    for t in spec.tools:
+        j = spec.joint(t.joint)
+        if j.type == "continuous":
+            qs = [-math.pi + 2 * math.pi * i / 24 for i in range(24)]
+        else:
+            qs = [j.lower + (j.upper - j.lower) * i / 8 for i in range(9)]
+        for q in qs:
+            yield f"tool {t.label} at {q:+.2f}", j, {j.name: q}
+    d = spec.drive
+    if d.type == "ackermann":
+        steers = spec.joints_with_role("steer")
+        jf = K.joint_frames(spec)
+        for delta in (d.max_steer, -d.max_steer):
+            angles = K.ackermann_wheel_angles(delta, d.wheelbase, [jf[j.name].t[1] for j in steers],
+                                              d.steer_axle)
+            for j, a in zip(steers, angles):
+                yield f"full steer lock ({j.name} {a:+.2f})", j, {jj.name: aa for jj, aa in zip(steers, angles)}
+    elif d.type == "articulated" and d.articulation_joint:
+        aj = spec.joint(d.articulation_joint)
+        for g in (aj.lower, aj.upper):
+            yield f"full articulation {g:+.2f}", aj, {aj.name: g}
+
+
+def _sweep_overlaps(spec: MachineSpec, adjacent, allowed) -> list[str]:
+    out, seen = [], set()
+    for desc, j, q in _sweep_poses(spec):
+        moving = set(K.subtree_links(spec, j.child))
+        tfs = K.link_transforms(spec, q)
+        cols = [(lk.name, s, _obb(tfs[lk.name], s)) for lk in spec.links for s in lk.shapes
+                if s.collision and isinstance(s.geom, Box)]
+        for i in range(len(cols)):
+            na, _, oa = cols[i]
+            for k in range(i + 1, len(cols)):
+                nb, _, ob = cols[k]
+                if na == nb or (na in moving) == (nb in moving):
+                    continue
+                pair = frozenset((na, nb))
+                if pair in adjacent or pair in allowed or (pair, j.name) in seen:
+                    continue
+                if K.vnorm(K.vsub(oa[0], ob[0])) > _radius(oa) + _radius(ob):
+                    continue
+                pen = obb_penetration(oa, ob)
+                if pen > OVERLAP_TOL:
+                    seen.add((pair, j.name))
+                    out.append(f"{na} and {nb} interpenetrate by {pen:.2f} m at {desc}")
+    return out
+
+
+def _inside(shape: Shape, tf: K.Tf, p: K.Vec3, margin: float = 0.0) -> bool:
+    st = K.shape_tf(tf, shape)
+    local = K.mat_vec(K.transpose(st.R), K.vsub(p, st.t))
+    g = shape.geom
+    if isinstance(g, Box):
+        return all(abs(local[i]) < g.size[i] / 2 - margin for i in range(3))
+    if isinstance(g, Cylinder):
+        return math.hypot(local[0], local[1]) < g.radius - margin and abs(local[2]) < g.length / 2 - margin
+    return K.vnorm(local) < g.radius - margin
+
+
+# Pinhole used by machine_env cameras (focal 10 mm, horizontal aperture 20.955 mm).
+_CAM_W = _CAM_H = 224
+_CAM_F = _CAM_W * 10.0 / 20.955
+
+
+def _project(cam_tf: K.Tf, p: K.Vec3):
+    """Pixel (u, v) of a root-frame point for a camera looking along +x (None if behind)."""
+    c = K.mat_vec(K.transpose(cam_tf.R), K.vsub(p, cam_tf.t))
+    if c[0] < 0.1:
+        return None
+    return (_CAM_W / 2 - _CAM_F * c[1] / c[0], _CAM_H / 2 - _CAM_F * c[2] / c[0])
+
+
+def _in_frame(px) -> bool:
+    return px is not None and 0 <= px[0] < _CAM_W and 0 <= px[1] < _CAM_H
+
+
+def _camera_checks(spec: MachineSpec) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    names = {lk.name for lk in spec.links}
+    cams = [c for c in spec.cameras if c.link in names]
+    tfs = K.link_transforms(spec)
+    cam_tfs = {c.name: tfs[c.link] @ K.Tf.from_xyz_rpy(c.xyz, c.rpy) for c in cams}
+
+    for c in cams:
+        ct = cam_tfs[c.name]
+        for lk in spec.links:
+            for s in lk.shapes:
+                if not s.visual:
+                    continue
+                if _inside(s, tfs[lk.name], ct.t):
+                    out.append(("error", f"camera {c.name} is inside a visual shape of {lk.name} "
+                                         f"(glass is opaque in Isaac — mount it outside the cab)"))
+                    break
+                for dist in (0.12, 0.2, 0.3):        # just past the 0.1 m near clip
+                    p = ct.apply((dist, 0.0, 0.0))
+                    if _inside(s, tfs[lk.name], p):
+                        out.append(("warning", f"camera {c.name}: view blocked by {lk.name} "
+                                               f"{dist:.2f} m in front of the lens"))
+                        break
+
+    # Tool visibility: some camera must see the tool's parts move by >= 5 px.
+    cam_links = {c.link for c in cams}
+    for t in spec.tools:
+        j = spec.joint(t.joint)
+        sub = K.subtree_links(spec, j.child)
+        if cam_links & set(sub):
+            continue                                  # cameras ride on this tool (e.g. swing)
+        qs = ([j.init - 0.5, j.init, j.init + 0.5] if j.type == "continuous"
+              else [j.lower, j.init, j.upper])
+        pts_by_q = []
+        for q in qs:
+            ltf = K.link_transforms(spec, {j.name: q})
+            pts_by_q.append([K.shape_tf(ltf[n], s).t for n in sub for s in spec.link(n).shapes if s.visual])
+        best = 0.0
+        for c in cams:
+            ct = cam_tfs[c.name]
+            for a_pts, b_pts in ((pts_by_q[0], pts_by_q[1]), (pts_by_q[1], pts_by_q[2]),
+                                 (pts_by_q[0], pts_by_q[2])):
+                for pa, pb in zip(a_pts, b_pts):
+                    ua, ub = _project(ct, pa), _project(ct, pb)
+                    if _in_frame(ua) and _in_frame(ub):
+                        best = max(best, math.hypot(ua[0] - ub[0], ua[1] - ub[1]))
+        if best < 5.0:
+            out.append(("warning", f"tool {t.label}: no camera sees it move (max {best:.1f} px at 224 px) — "
+                                   f"the VLA gets no visual signal for this action"))
+    return out

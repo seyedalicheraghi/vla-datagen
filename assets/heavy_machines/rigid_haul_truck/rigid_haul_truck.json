@@ -1,0 +1,257 @@
+{
+  "name": "rigid_haul_truck",
+  "abbrev": "RHT",
+  "display_name": "Rigid Haul Truck",
+  "category": "hauling",
+  "reference": "64 t rigid-frame off-highway truck (CAT 775G / Komatsu HD605 class)",
+  "description": "Two-axle rigid-frame mining/quarry haul truck: 24.00R35 tyres, single front and dual rear, Ackermann front steering, cab on the left of the upper deck, dual-slope dump body with a canopy over the cab, tipped 55\u00b0 about a rear hinge by twin two-stage hoist cylinders.",
+  "urdf": "rigid_haul_truck.urdf",
+  "root_link": "chassis",
+  "root_height_m": 1.17,
+  "operating_mass_kg": 42700.0,
+  "model_mass_kg": 42700.0,
+  "envelope_m": [
+    10.2,
+    5.6,
+    4.45
+  ],
+  "model_bbox_m": [
+    10.18,
+    5.68,
+    4.49
+  ],
+  "action": {
+    "dim": 3,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "dump_body",
+        "joint": "dump_body_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.096,
+        "lower": 0.0,
+        "upper": 0.96,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      }
+    ]
+  },
+  "state": {
+    "dim": 7,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "dump_body_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 15.0,
+    "max_reverse_speed_mps": 3.0,
+    "wheelbase_m": 4.2,
+    "max_steer_rad": 0.52,
+    "steer_rate_radps": 0.25,
+    "fixed_axle_x_m": 0.0,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "dump_body_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "dump_body",
+      "lower": 0.0,
+      "upper": 0.96,
+      "init": 0.0,
+      "velocity": 0.096
+    },
+    {
+      "name": "hoist_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "chassis",
+      "child": "hoist_barrels",
+      "lower": 0.7935049100836513,
+      "upper": 1.74520668019104,
+      "init": 0.8135049100836513,
+      "velocity": 0.14117017701073886
+    },
+    {
+      "name": "hoist_stage_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hoist_barrels",
+      "child": "hoist_stages",
+      "lower": -0.011722625386224175,
+      "upper": 1.3089115334566712,
+      "init": 0.008277374613775826,
+      "velocity": 0.17806341588428953
+    },
+    {
+      "name": "hoist_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hoist_stages",
+      "child": "hoist_rods",
+      "lower": -0.011722625386224175,
+      "upper": 1.3089115334566712,
+      "init": 0.008277374613775826,
+      "velocity": 0.17806341588428953
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_left_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_right_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "chassis",
+      "xyz": [
+        5.220000000000001,
+        1.55,
+        2.72
+      ],
+      "rpy": [
+        0.0,
+        0.28,
+        -0.04
+      ]
+    },
+    {
+      "name": "left",
+      "link": "chassis",
+      "xyz": [
+        6.43,
+        2.58,
+        3.05
+      ],
+      "rpy": [
+        0.0,
+        0.35,
+        0.7
+      ]
+    },
+    {
+      "name": "right",
+      "link": "chassis",
+      "xyz": [
+        6.43,
+        -2.88,
+        3.0
+      ],
+      "rpy": [
+        0.0,
+        0.25,
+        -2.9
+      ]
+    }
+  ]
+}

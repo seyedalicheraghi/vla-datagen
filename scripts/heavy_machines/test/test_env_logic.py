@@ -142,11 +142,26 @@ def make_env(name, num_envs=2, cameras=True, seed=0):
 
 
 def run(env, action, steps):
+    """Step the control code; returns the accumulated (unwrapped) yaw change per env."""
     a = torch.tensor([action] * env.num_envs, dtype=torch.float32)
+    turned = torch.zeros(env.num_envs)
     for _ in range(steps):
         env._pre_physics_step(a)
         for _ in range(env.cfg.decimation):
+            before = env._yaw.clone()
             env._apply_action()
+            turned += torch.atan2(torch.sin(env._yaw - before), torch.cos(env._yaw - before))
+    return turned
+
+
+def steps_to_sweep(spec) -> int:
+    """Control steps for the slowest tool to cross its whole range, plus margin."""
+    worst = 2.0
+    for t in spec.tools:
+        j = spec.joint(t.joint)
+        span = math.pi if j.type == "continuous" else j.upper - j.lower
+        worst = max(worst, span / j.velocity)
+    return int(30 * (worst * 1.2 + 1.0))
 
 
 @unittest.skipIf(torch is None, "torch not installed")
@@ -162,7 +177,7 @@ class TestEnvLogic(unittest.TestCase):
             with self.subTest(machine=name):
                 env, spec = make_env(name)
                 for sign in (1.0, -1.0):
-                    run(env, [0.0, 0.0] + [sign] * len(spec.tools), 30 * 15)
+                    run(env, [0.0, 0.0] + [sign] * len(spec.tools), steps_to_sweep(spec))
                     for t in spec.tools:
                         j = spec.joint(t.joint)
                         q = env._q[:, env._jidx[j.name]]
@@ -189,11 +204,23 @@ class TestEnvLogic(unittest.TestCase):
         for name in self.names:
             with self.subTest(machine=name):
                 env, spec = make_env(name)
-                run(env, [0.7, 1.0] + [0.0] * len(spec.tools), 90)
-                self.assertGreater(env._yaw[0].item(), 0.05, "turn=+1 must turn left")
+                turned = run(env, [0.7, 1.0] + [0.0] * len(spec.tools), 90)
+                self.assertGreater(turned[0].item(), 0.05, "turn=+1 must turn left")
                 env2, _ = make_env(name)
-                run(env2, [0.7, -1.0] + [0.0] * len(spec.tools), 90)
-                self.assertLess(env2._yaw[0].item(), -0.05, "turn=-1 must turn right")
+                turned = run(env2, [0.7, -1.0] + [0.0] * len(spec.tools), 90)
+                self.assertLess(turned[0].item(), -0.05, "turn=-1 must turn right")
+
+    def test_lateral_acceleration_limited(self):
+        """Wheeled machines at full speed and full lock stay under max_lat_accel (after settling)."""
+        for name in self.names:
+            spec = make_env(name)[1]
+            if spec.drive.type == "skid":
+                continue
+            with self.subTest(machine=name):
+                env, _ = make_env(name)
+                run(env, [1.0, 1.0] + [0.0] * len(spec.tools), 300)
+                lat = (env._speed * env._yaw_rate).abs().max().item()
+                self.assertLessEqual(lat, spec.drive.max_lat_accel * 1.05 + 1e-6)
 
     def test_steering_and_articulation_joints(self):
         for name in self.names:
@@ -240,10 +267,13 @@ class TestEnvLogic(unittest.TestCase):
                 pose = env.robot.root_pose
                 self.assertAlmostEqual(pose[1, 0].item(), 103.0, places=4)   # env origin offset
                 self.assertAlmostEqual(pose[0, 2].item(), env._root_height, places=5)
+                from heavy_machines import kinematics as K
+                lo, hi = K.bounding_box(spec)
+                reach = max(abs(v) for v in lo + hi) + 2.0
                 for cam in env.cams.values():
                     self.assertTrue(torch.allclose(cam.orientations.norm(dim=1), torch.ones(2), atol=1e-5))
                     d = (cam.positions[:, :2] - pose[:, :2]).norm(dim=1)
-                    self.assertTrue(bool((d < 15.0).all()), f"camera far from machine: {d.tolist()}")
+                    self.assertTrue(bool((d < reach).all()), f"camera far from machine: {d.tolist()}")
 
     def test_random_spawn_in_region(self):
         env, spec = make_env(self.names[0])

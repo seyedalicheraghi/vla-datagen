@@ -64,21 +64,24 @@
     <inertial><origin xyz="1.197115 0 0" rpy="0 0 0"/><mass value="900"/><inertia ixx="37.354185" ixy="0" ixz="0" iyy="953.690269" iyz="0" izz="948.904256"/></inertial>
   </link>
   <link name="bucket">
-    <visual><origin xyz="0.6 0 -0.25" rpy="0 0 0"/><geometry><box size="1.2 1.2 0.06"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="0.6 0 -0.25" rpy="0 0 0"/><geometry><box size="1.2 1.2 0.06"/></geometry></collision>
-    <visual><origin xyz="1.2 0 0.1" rpy="0 0 0"/><geometry><box size="0.06 1.2 0.7"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="1.2 0 0.1" rpy="0 0 0"/><geometry><box size="0.06 1.2 0.7"/></geometry></collision>
-    <visual><origin xyz="0.05 0 -0.1" rpy="0 0 0"/><geometry><box size="0.06 1.2 0.3"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="0.05 0 -0.1" rpy="0 0 0"/><geometry><box size="0.06 1.2 0.3"/></geometry></collision>
-    <visual><origin xyz="0.62 0.6 0.08" rpy="0 0 0"/><geometry><box size="1.26 0.05 0.72"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="0.62 0.6 0.08" rpy="0 0 0"/><geometry><box size="1.26 0.05 0.72"/></geometry></collision>
-    <visual><origin xyz="0.62 -0.6 0.08" rpy="0 0 0"/><geometry><box size="1.26 0.05 0.72"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="0.62 -0.6 0.08" rpy="0 0 0"/><geometry><box size="1.26 0.05 0.72"/></geometry></collision>
-    <visual><origin xyz="1.22 -0.45 0.52" rpy="0 0 0"/><geometry><box size="0.06 0.1 0.16"/></geometry><material name="steel"/></visual>
-    <visual><origin xyz="1.22 -0.15 0.52" rpy="0 0 0"/><geometry><box size="0.06 0.1 0.16"/></geometry><material name="steel"/></visual>
-    <visual><origin xyz="1.22 0.15 0.52" rpy="0 0 0"/><geometry><box size="0.06 0.1 0.16"/></geometry><material name="steel"/></visual>
-    <visual><origin xyz="1.22 0.45 0.52" rpy="0 0 0"/><geometry><box size="0.06 0.1 0.16"/></geometry><material name="steel"/></visual>
-    <inertial><origin xyz="0.689165 0 -0.037419" rpy="0 0 0"/><mass value="750"/><inertia ixx="194.807161" ixy="0" ixz="-19.091464" iyy="178.354824" iyz="0" izz="292.691092"/></inertial>
+    <visual><origin xyz="0.15 0 0.25" rpy="0 -0.840897 0"/><geometry><box size="0.509902 1.2 0.06"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="0.15 0 0.25" rpy="0 -0.840897 0"/><geometry><box size="0.509902 1.2 0.06"/></geometry></collision>
+    <visual><origin xyz="0.59 0 0.46" rpy="0 -0.073939 0"/><geometry><box size="0.541479 1.2 0.06"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="0.59 0 0.46" rpy="0 -0.073939 0"/><geometry><box size="0.541479 1.2 0.06"/></geometry></collision>
+    <visual><origin xyz="1.03 0 0.35" rpy="0 0.652847 0"/><geometry><box size="0.428019 1.2 0.06"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="1.03 0 0.35" rpy="0 0.652847 0"/><geometry><box size="0.428019 1.2 0.06"/></geometry></collision>
+    <visual><origin xyz="1.25 0 0.06" rpy="0 1.267911 0"/><geometry><box size="0.335261 1.2 0.06"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="1.25 0 0.06" rpy="0 1.267911 0"/><geometry><box size="0.335261 1.2 0.06"/></geometry></collision>
+    <visual><origin xyz="0.64 0.6 0.22" rpy="0 0 0"/><geometry><box size="1.22 0.05 0.5"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="0.64 0.6 0.22" rpy="0 0 0"/><geometry><box size="1.22 0.05 0.5"/></geometry></collision>
+    <visual><origin xyz="0.64 -0.6 0.22" rpy="0 0 0"/><geometry><box size="1.22 0.05 0.5"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="0.64 -0.6 0.22" rpy="0 0 0"/><geometry><box size="1.22 0.05 0.5"/></geometry></collision>
+    <visual><origin xyz="0.05 0 0.1" rpy="0 0 0"/><geometry><box size="0.3 0.5 0.16"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="1.32 -0.45 -0.18" rpy="0 0 0"/><geometry><box size="0.08 0.1 0.16"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="1.32 -0.15 -0.18" rpy="0 0 0"/><geometry><box size="0.08 0.1 0.16"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="1.32 0.15 -0.18" rpy="0 0 0"/><geometry><box size="0.08 0.1 0.16"/></geometry><material name="steel"/></visual>
+    <visual><origin xyz="1.32 0.45 -0.18" rpy="0 0 0"/><geometry><box size="0.08 0.1 0.16"/></geometry><material name="steel"/></visual>
+    <inertial><origin xyz="0.622454 0 0.245701" rpy="0 0 0"/><mass value="750"/><inertia ixx="154.136092" ixy="0" ixz="4.146722" iyy="167.340225" iyz="0" izz="276.430813"/></inertial>
   </link>
   <link name="left_sprocket">
     <visual><origin xyz="0 0 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.475" length="0.64"/></geometry><material name="dark"/></visual>
@@ -113,7 +116,7 @@
   <joint name="bucket_joint" type="revolute">
     <parent link="stick"/><child link="bucket"/>
     <origin xyz="2.9 0 0" rpy="0 0 0"/>
-    <axis xyz="0 -1 0"/>
+    <axis xyz="0 1 0"/>
     <limit lower="-1.2" upper="1.75" effort="10000000" velocity="1"/>
   </joint>
   <joint name="left_sprocket_joint" type="continuous">

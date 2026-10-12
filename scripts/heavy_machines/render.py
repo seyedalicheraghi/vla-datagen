@@ -70,8 +70,13 @@ def _draw_ortho(ax, spec: MachineSpec, tfs, view: str, h: float, alpha: float = 
                 edge: str = "k"):
     from matplotlib.patches import Polygon
 
-    # (u, v, depth) index and depth sign: draw far shapes first.
-    proj = {"side": (0, 2, 1, 1.0), "top": (0, 1, 2, -1.0), "front": (1, 2, 0, -1.0)}[view]
+    # (u, v, depth axis, sign of the direction TOWARD the viewer).
+    #   side : seen from -y (x right, z up)     → nearest = most negative y
+    #   top  : seen from +z (x right, y up)     → nearest = highest z
+    #   front: seen from +x (y right, z up)     → nearest = largest x
+    # Painter's algorithm: sort by distance toward the viewer, far first; ties
+    # (e.g. a tyre and its hub) are broken by the face nearest the viewer.
+    proj = {"side": (0, 2, 1, -1.0), "top": (0, 1, 2, 1.0), "front": (1, 2, 0, 1.0)}[view]
     u, v, w, sgn = proj
     items = []
     for lk in spec.links:
@@ -81,7 +86,8 @@ def _draw_ortho(ax, spec: MachineSpec, tfs, view: str, h: float, alpha: float = 
             pts = K.shape_points(tfs[lk.name], s, 20)
             pts = [(p[0], p[1], p[2] + h) for p in pts]
             hull = _hull([(p[u], p[v]) for p in pts])
-            depth = sgn * sum(p[w] for p in pts) / len(pts)
+            toward = [sgn * p[w] for p in pts]
+            depth = (round(sum(toward) / len(toward), 3), max(toward))
             rgba = spec.materials.get(s.material, (0.5, 0.5, 0.5, 1.0))
             items.append((depth, hull, rgba))
     for _, hull, rgba in sorted(items, key=lambda t: t[0]):

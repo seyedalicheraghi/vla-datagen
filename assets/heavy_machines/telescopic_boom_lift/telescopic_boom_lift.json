@@ -1,0 +1,346 @@
+{
+  "name": "telescopic_boom_lift",
+  "abbrev": "TBL",
+  "display_name": "Telescopic Boom Lift",
+  "category": "lifting",
+  "reference": "60 ft telescopic boom lift with jib (JLG 600SJ / Genie S-60 J class)",
+  "description": "4WD, 2WS aerial work platform with a 360\u00b0 turntable and counterweight, a three-section telescopic boom (18.4 m platform height), a 1.8 m parallelogram jib and a self-levelling 2.44 m platform basket on a 160\u00b0 rotator.",
+  "urdf": "telescopic_boom_lift.urdf",
+  "root_link": "chassis",
+  "root_height_m": 0.52,
+  "operating_mass_kg": 10400.0,
+  "model_mass_kg": 10420.0,
+  "envelope_m": [
+    9.45,
+    2.49,
+    2.57
+  ],
+  "model_bbox_m": [
+    9.933,
+    2.527,
+    2.59
+  ],
+  "action": {
+    "dim": 7,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "slew",
+        "joint": "slew_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 0.1,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 3,
+        "label": "boom",
+        "joint": "boom_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.11,
+        "lower": 0.0,
+        "upper": 1.3089969389957472,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "telescope",
+        "joint": "telescope_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.36,
+        "lower": 0.0,
+        "upper": 4.585,
+        "init": 0.0,
+        "positive": "extend",
+        "negative": "retract"
+      },
+      {
+        "action_index": 5,
+        "label": "jib",
+        "joint": "jib_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.2,
+        "lower": -1.1344640137963142,
+        "upper": 1.2217304763960306,
+        "init": -1.1344640137963142,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 6,
+        "label": "platform_rotate",
+        "joint": "platform_rotate_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.25,
+        "lower": -1.3962634015954636,
+        "upper": 1.3962634015954636,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      }
+    ]
+  },
+  "state": {
+    "dim": 11,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "slew_pos",
+      "boom_pos",
+      "telescope_pos",
+      "jib_pos",
+      "platform_rotate_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 1.7,
+    "max_reverse_speed_mps": 1.7,
+    "wheelbase_m": 2.46,
+    "max_steer_rad": 0.53,
+    "steer_rate_radps": 0.35,
+    "fixed_axle_x_m": 1.23,
+    "steer_axle": "rear"
+  },
+  "joints": [
+    {
+      "name": "slew_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "turntable",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 0.1
+    },
+    {
+      "name": "boom_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "turntable",
+      "child": "boom_base",
+      "lower": 0.0,
+      "upper": 1.3089969389957472,
+      "init": 0.0,
+      "velocity": 0.11
+    },
+    {
+      "name": "telescope_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "boom_base",
+      "child": "boom_mid",
+      "lower": 0.0,
+      "upper": 4.585,
+      "init": 0.0,
+      "velocity": 0.36
+    },
+    {
+      "name": "fly_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_mid",
+      "child": "boom_fly",
+      "lower": 0.0,
+      "upper": 4.585,
+      "init": 0.0,
+      "velocity": 0.36
+    },
+    {
+      "name": "jib_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom_fly",
+      "child": "jib_base",
+      "lower": -1.3589969389957473,
+      "upper": 0.05,
+      "init": -0.0,
+      "velocity": 0.11
+    },
+    {
+      "name": "jib_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "jib_base",
+      "child": "jib",
+      "lower": -1.1344640137963142,
+      "upper": 1.2217304763960306,
+      "init": -1.1344640137963142,
+      "velocity": 0.2
+    },
+    {
+      "name": "platform_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "jib",
+      "child": "rotator",
+      "lower": -1.2717304763960307,
+      "upper": 1.1844640137963143,
+      "init": 1.1344640137963142,
+      "velocity": 0.2
+    },
+    {
+      "name": "platform_rotate_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "rotator",
+      "child": "platform",
+      "lower": -1.3962634015954636,
+      "upper": 1.3962634015954636,
+      "init": 0.0,
+      "velocity": 0.25
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "turntable",
+      "child": "lift_cylinder",
+      "lower": 0.04431697951055319,
+      "upper": 1.4699203560643903,
+      "init": 0.1443169795105532,
+      "velocity": 0.15299212122249284
+    },
+    {
+      "name": "rear_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "rear_left_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.6
+    },
+    {
+      "name": "rear_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "rear_right_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.6
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_left_knuckle",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_right_knuckle",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "platform",
+      "xyz": [
+        0.5,
+        0.0,
+        1.2799999999999998
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "turntable",
+      "xyz": [
+        1.05,
+        1.05,
+        0.9
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.7
+      ]
+    },
+    {
+      "name": "right",
+      "link": "turntable",
+      "xyz": [
+        1.05,
+        -1.05,
+        0.9
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.7
+      ]
+    }
+  ]
+}

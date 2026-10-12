@@ -135,6 +135,9 @@ class Drive:
     front_length: float = 0.0             # m, hinge → front axle
     rear_length: float = 0.0              # m, hinge → rear axle (tandem centre)
     articulation_rate: float = 0.5        # rad/s
+    # wheeled machines: steering / articulation is limited at speed so the
+    # lateral acceleration never exceeds this (real machines roll over first)
+    max_lat_accel: float = 3.0            # m/s²
 
     @property
     def reverse_speed(self) -> float:

@@ -1,0 +1,340 @@
+{
+  "name": "concrete_mixer_truck",
+  "abbrev": "CMT",
+  "display_name": "Concrete Mixer Truck",
+  "category": "hauling",
+  "reference": "9 m\u00b3 transit mixer on a 3-axle 6x4 cab-over chassis (Volvo FMX / Mercedes-Benz Arocs class with a Liebherr HTM 905 class drum)",
+  "description": "Three-axle 6x4 transit concrete mixer: cab-over chassis with Ackermann front steering and dual-tyred rear tandem, 9 m\u00b3 drum inclined 12\u00b0 that rotates continuously to charge/mix or discharge, charging hopper, and a rear discharge chute that swivels \u00b189\u00b0 and lifts/lowers hydraulically.",
+  "urdf": "concrete_mixer_truck.urdf",
+  "root_link": "chassis",
+  "root_height_m": 0.538,
+  "operating_mass_kg": 13000.0,
+  "model_mass_kg": 12997.0,
+  "envelope_m": [
+    9.5,
+    2.5,
+    3.9
+  ],
+  "model_bbox_m": [
+    9.626,
+    2.58,
+    3.95
+  ],
+  "action": {
+    "dim": 5,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "drum",
+        "joint": "drum_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 1.45,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "charge",
+        "negative": "discharge"
+      },
+      {
+        "action_index": 3,
+        "label": "chute_swing",
+        "joint": "chute_swing_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.3,
+        "lower": -1.55,
+        "upper": 1.55,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 4,
+        "label": "chute_lift",
+        "joint": "chute_lift_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.25,
+        "lower": -0.55,
+        "upper": 0.35,
+        "init": 0.35,
+        "positive": "raise",
+        "negative": "lower"
+      }
+    ]
+  },
+  "state": {
+    "dim": 9,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "drum_pos",
+      "chute_swing_pos",
+      "chute_lift_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 11.1,
+    "max_reverse_speed_mps": 4.0,
+    "wheelbase_m": 4.6,
+    "max_steer_rad": 0.6,
+    "steer_rate_radps": 0.3,
+    "fixed_axle_x_m": 0.0,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "drum_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "drum",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 1.45
+    },
+    {
+      "name": "chute_swing_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "chute_swivel",
+      "lower": -1.55,
+      "upper": 1.55,
+      "init": 0.0,
+      "velocity": 0.3
+    },
+    {
+      "name": "chute_lift_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chute_swivel",
+      "child": "chute",
+      "lower": -0.55,
+      "upper": 0.35,
+      "init": 0.35,
+      "velocity": 0.25
+    },
+    {
+      "name": "chute_lift_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "chute_swivel",
+      "child": "chute_lift_barrel",
+      "lower": 0.05525056358498438,
+      "upper": 0.5953179435252448,
+      "init": 0.5753179435252448,
+      "velocity": 0.18890760553896124
+    },
+    {
+      "name": "chute_lift_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "chute_lift_barrel",
+      "child": "chute_lift_rod",
+      "lower": -0.302181083383528,
+      "upper": 0.031962060202221323,
+      "init": 0.01196206020222132,
+      "velocity": 0.13170642877381927
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_left_knuckle",
+      "lower": -0.8,
+      "upper": 0.8,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_right_knuckle",
+      "lower": -0.8,
+      "upper": 0.8,
+      "init": 0.0,
+      "velocity": 0.8
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_left_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "mid_left_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_left_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "mid_left_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_right_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "mid_right_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_right_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "mid_right_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_inner_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_inner_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_outer_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_outer_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "chassis",
+      "xyz": [
+        5.989999999999999,
+        0.55,
+        2.0119999999999996
+      ],
+      "rpy": [
+        0.0,
+        0.25,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "chassis",
+      "xyz": [
+        3.86,
+        1.24,
+        2.4619999999999997
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        2.941592653589793
+      ]
+    },
+    {
+      "name": "right",
+      "link": "chassis",
+      "xyz": [
+        3.86,
+        -1.24,
+        2.4619999999999997
+      ],
+      "rpy": [
+        -0.0,
+        0.3,
+        -2.941592653589793
+      ]
+    }
+  ]
+}

@@ -342,7 +342,9 @@ class HeavyMachineEnv(DirectRLEnv):
             w = turn * d.max_yaw_rate
         elif d.type == "ackermann":
             s = 1.0 if d.steer_axle == "front" else -1.0
-            target = s * turn * d.max_steer
+            # speed-dependent lock: |v·w| = v²·tan(δ)/L ≤ max_lat_accel
+            lock = torch.atan(d.max_lat_accel * d.wheelbase / (v * v).clamp(min=1e-6)).clamp(max=d.max_steer)
+            target = s * turn * lock
             step = (target - self._steer).clamp(-d.steer_rate * dt, d.steer_rate * dt)
             self._steer = self._steer + step
             w = s * v * torch.tan(self._steer) / d.wheelbase
@@ -356,7 +358,10 @@ class HeavyMachineEnv(DirectRLEnv):
             qd[:, self._steer_ids] = step.unsqueeze(1) / dt
         else:  # articulated
             g_max = min(abs(self._artic_lo), abs(self._artic_hi))
-            target = (-turn * g_max).clamp(self._artic_lo, self._artic_hi)     # turn left → gamma < 0
+            # speed-dependent lock: |v·w| ≈ v²·sin(γ)/(Lf+Lr) ≤ max_lat_accel
+            sin_lim = (d.max_lat_accel * (d.front_length + d.rear_length) / (v * v).clamp(min=1e-6)).clamp(max=1.0)
+            lock = torch.asin(sin_lim).clamp(max=g_max)
+            target = (-turn * lock).clamp(self._artic_lo, self._artic_hi)      # turn left → gamma < 0
             step = (target - self._steer).clamp(-d.articulation_rate * dt, d.articulation_rate * dt)
             self._steer = self._steer + step
             g_dot = step / dt
