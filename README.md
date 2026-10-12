@@ -56,6 +56,22 @@ Quick start:
 pytest tests/forklift/test_unit.py -v
 ```
 
+## Heavy Construction Machines
+
+A fleet of 18 construction machines (excavators, loaders, dump trucks, crane,
+telehandler, boom lift, grader, scraper, dozer, compactor, paver, mixer truck)
+with one Isaac Lab environment, keyboard teleop, a fleet showcase, and a
+language-conditioned collector that writes ROS 2 bags (viewable as a moving
+robot model in RViz 2) and LeRobot datasets. See
+[scripts/heavy_machines/README.md](scripts/heavy_machines/README.md).
+
+```bash
+python scripts/heavy_machines/check_machine.py --list                         # no Isaac Sim needed
+./isaaclab.sh -p scripts/heavy_machines/teleop_machine.py --machine HEX
+./isaaclab.sh -p scripts/heavy_machines/showcase.py
+./isaaclab.sh -p scripts/heavy_machines/collect_machine.py --machine wheel_loader --num_episodes 5 --headless
+```
+
 ## Getting Started
 
 ### Documentation
