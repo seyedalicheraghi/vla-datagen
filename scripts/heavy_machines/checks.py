@@ -201,6 +201,8 @@ def validate(spec: MachineSpec) -> Report:
         if j.role in ROLLING_ROLES:
             if j.type != "continuous":
                 E(f"joint {j.name}: rolling joints must be continuous")
+            if K.vnorm(j.axis) > 0 and abs(K.vunit(j.axis)[1]) < 0.99:
+                E(f"joint {j.name}: rolling joints must spin about the local ±y axis")
             if j.wheel_radius <= 0:
                 E(f"joint {j.name}: wheel_radius must be > 0")
             cyls = [s.geom.radius for s in spec.link(j.child).shapes if isinstance(s.geom, Cylinder)]
@@ -443,6 +445,15 @@ def validate(spec: MachineSpec) -> Report:
         root = ET.fromstring(build_urdf(spec))
         if len(root.findall("link")) != len(spec.links) or len(root.findall("joint")) != len(spec.joints):
             E("URDF link/joint count mismatch")
+        # Isaac Lab refuses default positions outside the (float32) PhysX limits.
+        for el in root.findall("joint"):
+            lim = el.find("limit")
+            if lim is None or lim.get("lower") is None:
+                continue
+            j = spec.joint(el.get("name"))
+            lo, hi = float(lim.get("lower")), float(lim.get("upper"))
+            if not (lo + 1e-5 < j.init < hi - 1e-5):
+                E(f"joint {j.name}: init {j.init} not strictly inside the URDF limits [{lo}, {hi}]")
     except ET.ParseError as exc:
         E(f"generated URDF does not parse: {exc}")
 

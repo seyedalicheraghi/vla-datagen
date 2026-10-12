@@ -256,49 +256,49 @@
     <parent link="upper_structure"/><child link="boom"/>
     <origin xyz="0.9 -0.12 0.7" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1" upper="1.05" effort="10000000" velocity="0.55"/>
+    <limit lower="-1.0001" upper="1.0501" effort="10000000" velocity="0.55"/>
   </joint>
   <joint name="stick_joint" type="revolute">
     <parent link="boom"/><child link="stick"/>
     <origin xyz="5.05 0 0.75" rpy="0 1.45 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.3" upper="0.8" effort="10000000" velocity="0.65"/>
+    <limit lower="-1.3001" upper="0.8001" effort="10000000" velocity="0.65"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="stick"/><child link="bucket"/>
     <origin xyz="2.5 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-1.1" upper="1.9" effort="10000000" velocity="1"/>
+    <limit lower="-1.1001" upper="1.9001" effort="10000000" velocity="1"/>
   </joint>
   <joint name="blade_joint" type="revolute">
     <parent link="undercarriage"/><child link="stabilizer_blade"/>
     <origin xyz="-1.7 0 -0.2" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.65" upper="0.15" effort="10000000" velocity="0.32"/>
+    <limit lower="-0.6501" upper="0.1501" effort="10000000" velocity="0.32"/>
   </joint>
   <joint name="boom_cylinder_joint" type="revolute">
     <parent link="upper_structure"/><child link="boom_cylinders"/>
     <origin xyz="1.1 -0.12 0.25" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.658278" upper="1.577987" effort="10000000" velocity="0.646315"/>
+    <limit lower="-0.658377945" upper="1.57808679" effort="10000000" velocity="0.646315"/>
   </joint>
   <joint name="stick_cylinder_joint" type="revolute">
     <parent link="stick"/><child link="stick_cylinder_rod"/>
     <origin xyz="-0.7 0 0.12" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-2.870342" upper="-0.574783" effort="10000000" velocity="0.748625"/>
+    <limit lower="-2.8704416" upper="-0.574682617" effort="10000000" velocity="0.748625"/>
   </joint>
   <joint name="front_left_steer_joint" type="revolute">
     <parent link="undercarriage"/><child link="front_left_knuckle"/>
     <origin xyz="1.35 0.97 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.8"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.8"/>
   </joint>
   <joint name="front_right_steer_joint" type="revolute">
     <parent link="undercarriage"/><child link="front_right_knuckle"/>
     <origin xyz="1.35 -0.97 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.8"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.8"/>
   </joint>
   <joint name="front_left_inner_wheel_joint" type="continuous">
     <parent link="front_left_knuckle"/><child link="front_left_inner_wheel"/>

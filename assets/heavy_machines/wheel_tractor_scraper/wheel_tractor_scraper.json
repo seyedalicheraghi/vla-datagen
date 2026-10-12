@@ -4,7 +4,7 @@
   "display_name": "Wheel Tractor-Scraper",
   "category": "grading",
   "reference": "15 m\u00b3 single-engine wheel tractor-scraper (CAT 621K class)",
-  "description": "Two-axle open-bowl scraper: single-axle tractor with engine hood and centre cab, 90\u00b0 steering hitch, gooseneck and draft arms carrying a 15 m\u00b3 bowl on the rear axle; the bowl lowers to cut 0.32 m deep, the apron (front gate) raises to open and the ejector (rear wall) pushes the load out forward.",
+  "description": "Two-axle open-bowl scraper: single-axle tractor with engine hood and centre cab, steering hitch (90\u00b0 each way on the real machine, \u00b10.9 rad here), gooseneck and draft arms carrying a 15 m\u00b3 bowl on the rear axle; the bowl lowers to cut 0.32 m deep, the apron (front gate) raises to open and the ejector (rear wall) pushes the load out forward.",
   "urdf": "wheel_tractor_scraper.urdf",
   "root_link": "tractor",
   "root_height_m": 1.03,
@@ -279,28 +279,28 @@
       "name": "left",
       "link": "tractor",
       "xyz": [
-        0.18,
-        1.12,
-        2.2699999999999996
+        -0.7,
+        1.62,
+        1.6199999999999999
       ],
       "rpy": [
         0.0,
-        0.3,
-        0.6
+        0.18,
+        2.85
       ]
     },
     {
       "name": "right",
       "link": "tractor",
       "xyz": [
-        0.18,
-        -1.12,
-        2.2699999999999996
+        -0.7,
+        -1.62,
+        1.6199999999999999
       ],
       "rpy": [
         0.0,
-        0.3,
-        -0.6
+        0.18,
+        -2.85
       ]
     }
   ]

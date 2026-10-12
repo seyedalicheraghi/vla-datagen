@@ -175,37 +175,37 @@
     <parent link="chassis"/><child link="lift_arm"/>
     <origin xyz="-1.08 0 1.12" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="1.156251" effort="10000000" velocity="0.35"/>
+    <limit lower="-0.0001" upper="1.15635063" effort="10000000" velocity="0.35"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="lift_arm"/><child link="bucket"/>
     <origin xyz="2.34 0 -1.37" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.88" upper="0.55" effort="10000000" velocity="0.9"/>
+    <limit lower="-1.8801" upper="0.5501" effort="10000000" velocity="0.9"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="chassis"/><child link="lift_cylinders"/>
     <origin xyz="-1.06 0 0.4" rpy="0 -0.864919 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.346641" upper="0.346641" effort="10000000" velocity="2"/>
+    <limit lower="-0.346740802" upper="0.346740802" effort="10000000" velocity="2"/>
   </joint>
   <joint name="lift_rod_joint" type="revolute">
     <parent link="lift_arm"/><child link="lift_rods"/>
     <origin xyz="0.8 0 -0.26" rpy="0 -3.428386 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.271485" upper="0.271485" effort="10000000" velocity="2"/>
+    <limit lower="-0.271584512" upper="0.271584512" effort="10000000" velocity="2"/>
   </joint>
   <joint name="tilt_cylinder_joint" type="revolute">
     <parent link="lift_arm"/><child link="tilt_cylinders"/>
     <origin xyz="1.8 0 -0.14" rpy="0 1.080972 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.027257" upper="0.027257" effort="10000000" velocity="2"/>
+    <limit lower="-0.0273565783" upper="0.0273565783" effort="10000000" velocity="2"/>
   </joint>
   <joint name="tilt_rod_joint" type="prismatic">
     <parent link="tilt_cylinders"/><child link="tilt_rods"/>
     <origin xyz="1.368426 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.173957" upper="0.173957" effort="10000000" velocity="2"/>
+    <limit lower="-0.17405654" upper="0.17405654" effort="10000000" velocity="2"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="chassis"/><child link="front_left_wheel"/>

@@ -15,49 +15,65 @@ Assumed / typical for the class:
     54°, self-levelling "parallel lift" (the shovel keeps its angle to the
     ground while the arms lift) · loader raise 4.7 s, carry-to-dump 1.4 s ·
     backhoe boom 2.35 m pin to pin, dipper 2.05 m, 0.6 m (24") bucket, 0.80 m
-    pin to tip · boom 151°, dipper 138°, bucket 203° rotation · boom raise
-    2.6 s, dipper 2.4 s, bucket 2.4 s, slew 172° in 3 s · vertical (slide)
+    pin to tip · boom 151°, dipper 120°, bucket 203° rotation · boom raise
+    2.6 s, dipper 2.1 s, bucket 2.4 s, slew 172° in 3 s · vertical (slide)
     stabiliser legs, 0.45 m stroke from the travel position to the pads on the
-    ground · front-wheel steer, inner wheel 44° at the 0.6 rad virtual lock.
+    ground · front-wheel steer, inner wheel 44° at the 0.6 rad virtual lock ·
+    loader towers in front of the cab (arm pivots 1.70 m up, 0.19 m ahead of
+    the windscreen).
 
 Model check (offline FK):
-    travel L × W × H 6.05 × 2.36 × 3.64 m (L +8 %: the shovel is carried
-    rolled back clear of the nose with its lowest point 0.33 m above the
-    ground; real 3CX shovels tuck closer) · dig depth 4.14 m · reach at ground
-    level from the slew centre 5.23 m · max bucket-pin height 4.82 m · loader
-    hinge pin 3.40 m, dump clearance at 45° 2.58 m, digs 0.08 m below grade ·
-    turning radius over the outer front tyre 4.8 m at full lock · mass 8,070 kg
-    (chassis/cab/engine/axles 4.47 t, wheels + knuckles 0.95 t, loader 1.19 t,
-    backhoe 1.28 t, stabiliser legs 0.19 t).
+    travel L × W × H 6.45 × 2.36 × 3.64 m (L +15 %: the dipper's "in" stop is
+    the tightest fold at which the 0.8 m bucket still rotates through its whole
+    range clear of the boom and king post, so the roading pose carries the
+    dipper ~20° behind the boom; the real 3CX tucks it closer, and the shovel
+    is carried rolled back with its lowest point 0.32 m above the ground) ·
+    dig depth 4.14 m · reach at ground level from the slew centre 5.23 m · max
+    bucket-pin height 4.82 m · loader hinge pin 3.40 m, dump clearance at 45°
+    2.58 m, digs 0.07 m below grade · turning radius over the outer front tyre
+    4.8 m at full lock · mass 8,070 kg (chassis/cab/engine/axles 4.47 t,
+    wheels + knuckles 0.95 t, loader 1.19 t, backhoe 1.28 t, stabiliser legs
+    0.19 t).
 
 Joint ranges / rates at full command:
-    loader_arm      -0.04 … +1.38 rad (hinge pin 3.40 m), 0.30 rad/s
+    loader_arm      -0.04 … +1.58 rad (hinge pin 3.40 m), 0.344 rad/s (4.7 s)
     loader_bucket   -0.95 (dump) … +0.75 rad (rollback), 1.15 rad/s; the angle
                     of the shovel floor to the ground (self-levelling follower)
     backhoe_swing   ±1.5 rad about the king post, 1.0 rad/s; +1 = "left" = CCW
                     seen from above (to the left of an operator facing the hoe)
     backhoe_boom    -1.15 … +1.48 rad (pin line to horizontal), 1.0 rad/s
-    backhoe_stick   -1.45 (in) … +0.95 rad (out), 1.0 rad/s
+    backhoe_stick   -1.15 (retract) … +0.95 rad (extend), 1.0 rad/s
     backhoe_bucket  -1.10 (dump) … +2.45 rad (curl), 1.5 rad/s
     stabilizers     0 … 0.45 m down (pads at grade), 0.25 m/s; right leg is a
                     follower of the left one
 
 Drive: Ackermann, front-wheel steer, rear (fixed) axle at x = 0.  max_speed
-11.1 m/s (40 km/h, same in reverse on the 4F/4R shuttle), max_steer 0.6 rad.
-Virtual steer rate 0.16 rad/s (lock to lock ≈ 7.5 s, a road-speed steering
-rate): the kinematic drive has no lateral-acceleration limit and on a 2.17 m
-wheelbase a site-speed rate (0.3 rad/s) spins the machine > 180° in 3 s at
-70 % of top speed.
+11.1 m/s (40 km/h, same in reverse on the 4F/4R shuttle), max_steer 0.6 rad,
+virtual steer rate 0.3 rad/s (lock to lock 4 s, hydrostatic steering).  At
+speed the environment narrows the lock to keep the lateral acceleration under
+Drive.max_lat_accel.
 
 Hydraulics (visual only): lift, boom and dipper rams are barrel/rod follower
 pairs whose axis is a linear fit of the true pin-to-pin line (≤ 1 cm off in
-the roading pose; worst 5 / 7 / 12 cm at the range ends).  The shovel rams are
-fixed on the arms (the parallel-lift tipping linkage is not modelled) and the
-bucket ram / dogbone links are fixed on the dipper.
+the roading pose; worst 8 / 10 / 10 cm at the range ends).  Every ram's pin
+distance changes monotonically over its joint range (cylinder_fit raises
+otherwise): lift 1.26 → 1.83 m (base on the front frame above the axle, eye on
+the arm just ahead of the tower), boom 1.05 → 1.45 m (base below the foot pin,
+eye under the boom), dipper 1.79 → 1.25 m.  The shovel rams ride on top of the
+arms (the parallel-lift tipping linkage is not modelled) and the bucket ram /
+dogbone links are fixed on the dipper.
 
-Init pose = roading pose: loader shovel rolled back just above the ground,
-backhoe boom raised, dipper folded in and hanging behind the boom, bucket just
-curled off the vertical, slew centred, stabilisers up.
+Init pose = roading pose: loader shovel rolled back (hinge pin 0.50 m, lowest
+point 0.32 m above the ground); backhoe boom fully raised, dipper fully in,
+bucket fully curled (lowest point 1.07 m above the ground), slew centred,
+stabilisers up.
+
+Cameras: "front" at the top of the windscreen, looking down over the bonnet at
+the shovel; "left" / "right" on the rear cab corners, each looking back ACROSS
+the machine (34° inward) so that together they keep the backhoe in view from
+the roading pose to the dig face and slewed to either side; each also sees the
+opposite stabiliser pad.  The left one is pitched 41° down (dig face), the
+right one 26° (raised boom and dipper).
 
 Root frame: chassis, origin at the rear-axle centre (rear axle at z = 0,
 ground at z = -REAR_R), +x towards the loader end.
@@ -88,24 +104,26 @@ CAB_TOP = 2.87                                    # top of the cab roof (AGL)
 NOSE_X = 2.70                                     # front of the grille / counterweight
 
 # --- loader (root frame (x, z) via agl(); arm frame root-aligned at q = 0) ---------------
-A_PIN = (1.00, agl(1.70))                         # loader-arm pivots on the cab-front towers
+A_PIN = (1.24, agl(1.70))                         # loader-arm pivots on towers in front of the cab
 ARM_Y, ARM_W = 0.64, 0.14
 HOOD_W = 0.82                                     # bonnet width
-B_PIN = (1.93, -1.42)                             # shovel hinge pin (arm frame), 0.28 m AGL at q = 0
-ARM_KNEE = (1.20, -0.66)                          # gentle bend of the arm above the front tyre
+B_PIN = (1.69, -1.42)                             # shovel hinge (arm fr.): x 2.93, 0.28 m AGL
+ARM_KNEE = (1.31, -0.60)                          # arm passes over the tyre, drops ahead of it
 B_MAX_H = 3.40                                    # hinge-pin height at full lift (AGL)
-LIFT_LO, LIFT_INIT = -0.04, 0.11                  # roading: hinge pin 0.50 m AGL
+LIFT_LO, LIFT_INIT = -0.04, 0.124                 # roading: hinge pin 0.50 m AGL
+LIFT_TIME = 4.7                                   # s, full raise at |cmd| = 1
 BKT_LO, BKT_HI, BKT_INIT = -0.95, 0.75, 0.70
 LEVEL = 1.0                                       # parallel lift: shovel keeps its ground angle
-LC_BASE = (2.57, agl(0.87))                       # lift-ram base pins at the nose (root frame)
-LC_EYE = (0.30, -0.70)                            # lift-ram eyes on drop lugs under the arms
+LC_BASE = (2.42, agl(0.70))                       # lift-ram bases: front frame, above the axle
+LC_EYE = (0.40, 0.0)                              # lift-ram eyes on the arms ahead of the towers
 LC_Y = 0.49                                       # lift rams run along the bonnet sides
-TILT_Y = 0.78                                     # shovel (tilt) rams outboard of the arms
+TILT_Y = ARM_Y                                    # shovel (tilt) rams ride on top of the arms
 BKT_W = 2.34
 # shovel profile (bucket frame: origin = hinge pin, +x toward the cutting edge, floor flat)
 SH_FLOOR, SH_EDGE, SH_BACK, SH_TOP, SH_LIP = -0.28, 0.88, 0.06, 0.50, 0.40
-TILT_BASE = (0.75, -0.36)                         # shovel-ram base lug (arm frame)
-TILT_LEVER = (1.83, -1.14)                        # tipping-lever pin above the hinge (arm frame)
+TILT_BASE = (0.60, 0.01)                          # shovel-ram base lug on top of the arm
+TILT_LEVER = (1.38, -0.40)                        # tipping-lever pin on top of the arm knee
+LINK_Y = ARM_Y + 0.10                             # tipping links, outboard of the arm noses
 
 # --- backhoe ---------------------------------------------------------------------------
 SWING_X, SWING_H = -1.20, 0.85                    # king-post axis, swing frame origin height
@@ -113,11 +131,14 @@ FOOT = (0.24, 0.05)                               # boom foot pin (swing frame, 
 BOOM_L, BOOM_KNEE = 2.35, (0.95, 0.33)
 STICK_L, STICK_TAIL, STICK_PITCH = 2.05, 0.34, 1.55
 HOE_W, HOE_R = 0.60, 0.80
-BOOM_LO, BOOM_HI, BOOM_INIT = -1.15, 1.48, 1.40
-STICK_LO, STICK_HI, STICK_INIT = -1.45, 0.95, -1.45
-HOE_LO, HOE_HI, HOE_INIT = -1.10, 2.45, 0.20
-BC_BASE = (0.05, -0.20)                           # boom-ram base inside the casting (swing frame)
-BC_EYE = (0.90, -0.05)                            # boom-ram eye under the boom (boom frame)
+# Roading = boom fully up, dipper fully in, bucket fully curled.  The dipper's "in"
+# stop is the tightest fold at which the 0.8 m bucket can still rotate through its
+# whole range without passing through the boom or the king-post casting.
+BOOM_LO, BOOM_HI, BOOM_INIT = -1.15, 1.48, 1.48
+STICK_LO, STICK_HI, STICK_INIT = -1.15, 0.95, -1.15
+HOE_LO, HOE_HI, HOE_INIT = -1.10, 2.45, 2.45
+BC_BASE = (0.28, -0.15)                           # boom-ram base below the foot pin (swing fr.)
+BC_EYE = (1.25, 0.0)                              # boom-ram eye on a lug under the boom
 DC_BASE = (0.95, 0.55)                            # dipper-ram base on top of the boom (boom frame)
 DC_EYE = (-0.30, 0.10)                            # dipper-ram eye on the dipper tail (stick frame)
 RAM_W_INIT = 10.0                                 # ram fits: weight of the roading pose
@@ -193,10 +214,20 @@ def cylinder_fit(base, origin, a0, eye, lo, hi, init=None, w_init=0.0, n=61):
     nearly exact); the rod follows the same line back from the eye.  Returns
     the barrel (k, c) in the parent frame, the rod (k, c) in the child frame,
     the worst lateral pin miss (m) and the min / max pin distance.
+
+    Raises ValueError unless the pin distance is strictly monotonic over the range
+    (a real ram cannot drive a joint through dead centre) and the stroke fits the
+    barrel / rod pair drawn by :func:`_ram_links` (l_max <= 2 l_min - 0.27).
     """
     def geo(q):
         e = _add(origin, _rot(eye, a0 + q))
         return _elev(_sub(e, base)), math.hypot(*_sub(e, base))
+    grid = [geo(lo + (hi - lo) * i / (n - 1))[1] for i in range(n)]
+    steps = [b - a for a, b in zip(grid, grid[1:])]
+    if not (all(s > 0 for s in steps) or all(s < 0 for s in steps)):
+        raise ValueError(f"ram {base}->{eye}: pin distance not monotonic over [{lo}, {hi}]")
+    if max(grid) > 2.0 * min(grid) - 0.27:
+        raise ValueError(f"ram {base}->{eye}: stroke {min(grid):.2f}..{max(grid):.2f} m too long")
     qs = [lo + (hi - lo) * i / (n - 1) for i in range(n)]
     if init is not None:
         qs = sorted(qs + [init])
@@ -365,9 +396,11 @@ def build() -> MachineSpec:
     sides = (1, -1)
 
     # ------------------------------------------------------------------ tool joints
+    lift_hi = round(_lift_hi(), 3)
     lift = Joint("loader_arm_joint", "revolute", "chassis", "loader_arm",
                  xyz=(A_PIN[0], 0.0, A_PIN[1]), axis=(0, -1, 0), lower=LIFT_LO,
-                 upper=round(_lift_hi(), 3), init=LIFT_INIT, velocity=0.30, role="tool")
+                 upper=lift_hi, init=LIFT_INIT, velocity=round((lift_hi - LIFT_LO) / LIFT_TIME, 3),
+                 role="tool")
     shovel = Joint("loader_bucket_joint", "revolute", "shovel_level", "loader_bucket",
                    axis=(0, -1, 0), lower=BKT_LO, upper=BKT_HI, init=BKT_INIT, velocity=1.15,
                    role="tool")
@@ -405,10 +438,12 @@ def build() -> MachineSpec:
     chassis = Link("chassis", M["chassis"], [
         # main frame rails from the king-post mount to the front counterweight
         box(NOSE_X - 0.05 + 1.00, 0.78, 0.40, at=((NOSE_X - 0.05 - 1.00) / 2, 0.0, agl(0.82))),
-        # rear axle + differential, front (steer) axle + differential (0.37 m clearance)
+        # rear axle + differential, front (steer) axle + differential (0.37 m clearance);
+        # the front axle tube stops 0.34 m inboard of the kingpins so the inner tyre
+        # clears it at full lock
         cyl(0.13, 1.42, axis="y", mat="dark"),
         sphere(0.22, mat="dark"),
-        cyl(0.10, 1.40, at=(WB, 0.0, agl(FRONT_R)), axis="y", mat="dark"),
+        cyl(0.10, 2 * (FRONT_Y - 0.34), at=(WB, 0.0, agl(FRONT_R)), axis="y", mat="dark"),
         sphere(0.15, at=(WB, 0.0, agl(0.52)), mat="dark"),
         box(0.40, 0.50, 0.14, at=(WB, 0.0, agl(0.66)), mat="dark"),
         # cab
@@ -448,14 +483,15 @@ def build() -> MachineSpec:
               mat="dark", collision=False) for s in sides],
         cyl(0.05, 2 * LC_Y + 0.20, at=(LC_BASE[0], 0.0, LC_BASE[1]), axis="y", mat="steel",
             collision=False),
-        # loader towers at the cab front corners carrying the arm pivots
+        # loader towers just in front of the cab carrying the arm pivots
         *[box(0.40, 0.08, 0.84, at=(a_x, s * 0.49, agl(1.42))) for s in sides],
         cyl(0.06, 2 * ARM_Y + 0.20, at=(a_x, 0.0, a_z), axis="y", mat="steel", collision=False),
         # rear frame: stabiliser cross beam, king-post brackets, stabiliser casings
         box(0.20, 2.10, 0.36, at=(STAB_X, 0.0, agl(1.18))),
-        # king-post brackets: top and bottom plates reaching back to the slew axis
-        box(STAB_X - SWING_X - 0.12, 0.50, 0.10,
-            at=((STAB_X + SWING_X + 0.12) / 2, 0.0, agl(SWING_H + 0.60))),
+        # king-post brackets: top and bottom plates reaching back to the slew axis (the
+        # top one stops short of the raised boom's foot so the boom can slew past it)
+        box(STAB_X - SWING_X - 0.18, 0.50, 0.10,
+            at=((STAB_X + SWING_X + 0.18) / 2, 0.0, agl(SWING_H + 0.60))),
         box(STAB_X - SWING_X, 0.50, 0.10, at=((STAB_X + SWING_X) / 2, 0.0, agl(SWING_H - 0.42)),
             mat="dark"),
         box(0.10, 0.50, 0.30, at=(STAB_X - 0.05, 0.0, agl(SWING_H - 0.27)), mat="dark"),
@@ -467,14 +503,15 @@ def build() -> MachineSpec:
     ])
 
     # ------------------------------------------------------------- loader arm
-    # The colliding arm section stops 0.50 m short of the hinge pin; the nose that
-    # sits between the shovel's hinge lugs is visual only.
-    b_end = _lerp(B_PIN, ARM_KNEE, 0.50 / math.hypot(*_sub(ARM_KNEE, B_PIN)))
+    # The colliding arm section stops 0.60 m short of the hinge pin; the nose that
+    # sits between the shovel's hinge lugs (and meets its spill guard at full
+    # rollback) is visual only.
+    b_end = _lerp(B_PIN, ARM_KNEE, 0.60 / math.hypot(*_sub(ARM_KNEE, B_PIN)))
     arm_shapes = []
     for s in sides:
         y = s * ARM_Y
         arm_shapes += [
-            beam((-0.10, 0.04), ARM_KNEE, ARM_W, 0.30, y=y),
+            beam((-0.02, 0.01), ARM_KNEE, ARM_W, 0.30, y=y),         # ends inside the pivot boss
             beam(ARM_KNEE, b_end, ARM_W, 0.26, y=y),
             beam(b_end, B_PIN, ARM_W, 0.20, y=y, collision=False),
             cyl(0.15, ARM_W, at=(ARM_KNEE[0], y, ARM_KNEE[1]), axis="y"),
@@ -482,25 +519,24 @@ def build() -> MachineSpec:
             cyl(0.12, ARM_W + 0.02, axis="y", at=(B_PIN[0], y, B_PIN[1]), collision=False),
             cyl(0.06, ARM_W + 0.10, axis="y", at=(B_PIN[0], y, B_PIN[1]), mat="steel",
                 collision=False),
-            box(0.22, ARM_Y - LC_Y + 0.10, 0.48,
-                at=(LC_EYE[0], s * (ARM_Y + LC_Y) / 2, LC_EYE[1] + 0.20), mat="dark",
-                collision=False),                                                    # lift-ram drop lug
+            cyl(0.08, ARM_Y - LC_Y + 0.10, axis="y", mat="dark", collision=False,
+                at=(LC_EYE[0], s * (ARM_Y + LC_Y) / 2, LC_EYE[1])),         # lift-ram eye boss
         ]
-        # shovel (tilt) ram outboard of each arm: from a lug behind the knee to the
-        # tipping-lever plate on the arm nose (the levelling linkage is not modelled)
+        # shovel (tilt) ram on top of each arm: from a lug near the tower to the
+        # tipping lever above the knee, link down to the shovel (the levelling
+        # linkage is not modelled)
         t0, t1 = TILT_BASE, TILT_LEVER
         tm = _lerp(t0, t1, 0.62)
         ty = s * TILT_Y
         arm_shapes += [
-            box(0.22, TILT_Y - ARM_Y + 0.08, 0.16, at=(t0[0], s * (ARM_Y + TILT_Y) / 2, t0[1] - 0.06),
-                mat="dark", collision=False),
+            box(0.22, 0.08, 0.16, at=(t0[0], ty, t0[1] - 0.06), mat="dark", collision=False),
             _rod(t0, tm, 0.07, y=ty, mat="dark"),
             cyl(0.08, 0.06, at=(tm[0], ty, tm[1]), rpy=(0.0, math.atan2(t1[0] - t0[0], t1[1] - t0[1]), 0.0),
                 mat="steel", collision=False),
             _rod(tm, t1, 0.04, y=ty),
-            cyl(0.06, TILT_Y - ARM_Y + 0.10, at=(t1[0], s * (ARM_Y + TILT_Y) / 2, t1[1]), axis="y",
-                mat="steel", collision=False),
-            beam(t1, B_PIN, 0.05, 0.20, y=s * (TILT_Y - 0.06), mat="dark", collision=False),
+            cyl(0.06, LINK_Y - TILT_Y + 0.10, at=(t1[0], s * (TILT_Y + LINK_Y) / 2, t1[1]),
+                axis="y", mat="steel", collision=False),
+            beam(t1, B_PIN, 0.05, 0.20, y=s * LINK_Y, mat="dark", collision=False),
         ]
     loader_arm = Link("loader_arm", M["arm"], arm_shapes)
 
@@ -511,8 +547,8 @@ def build() -> MachineSpec:
         cyl(0.10, 0.08, at=(0.0, 0.0, -0.39), mat="steel", collision=False),
         box(0.24, 0.40, 0.26, at=(FOOT[0], 0.0, FOOT[1]), mat="dark"),               # foot clevis
         cyl(0.07, 0.48, at=(FOOT[0], 0.0, FOOT[1]), axis="y", mat="steel", collision=False),
-        box(0.20, 0.30, 0.16, at=(BC_BASE[0] + 0.06, 0.0, BC_BASE[1]), mat="dark",
-            collision=False),
+        box(0.20, 0.30, 0.16, at=(BC_BASE[0] - 0.02, 0.0, BC_BASE[1]), mat="dark",
+            collision=False),                                                   # boom-ram base lug
         # slew rams either side of the casting (visual)
         *[_rod((-0.05, -0.05), (0.30, -0.05), 0.06, y=y, mat="dark") for y in (-0.30, 0.30)],
     ])
@@ -525,7 +561,7 @@ def build() -> MachineSpec:
         cyl(0.11, 0.34, at=(BOOM_L, 0.0, 0.0), axis="y", mat="steel", collision=False),
         box(0.30, 0.20, 0.30, at=(DC_BASE[0], 0.0, DC_BASE[1] - 0.12), mat="dark",
             collision=False),                                                       # dipper-ram bracket
-        box(0.24, 0.24, 0.14, at=(BC_EYE[0], 0.0, BC_EYE[1] + 0.07), mat="dark",
+        box(0.22, 0.24, 0.22, at=(BC_EYE[0], 0.0, BC_EYE[1] + 0.07), mat="dark",
             collision=False),                                                       # boom-ram lug
     ])
 
@@ -616,22 +652,27 @@ def build() -> MachineSpec:
         links=links,
         joints=joints,
         drive=Drive(type="ackermann", max_speed=11.1, wheelbase=WB, max_steer=0.60,
-                    steer_rate=0.16, fixed_axle_x=0.0, steer_axle="front"),
+                    steer_rate=0.30, fixed_axle_x=0.0, steer_axle="front"),
         tools=[
             Tool("loader_arm_joint", "loader_arm", positive="raise", negative="lower"),
             Tool("loader_bucket_joint", "loader_bucket", positive="curl", negative="dump"),
             Tool("swing_joint", "backhoe_swing", positive="left", negative="right"),
             Tool("boom_joint", "backhoe_boom", positive="raise", negative="lower"),
-            Tool("stick_joint", "backhoe_stick", positive="out", negative="in"),
+            Tool("stick_joint", "backhoe_stick", positive="extend", negative="retract"),
             Tool("backhoe_bucket_joint", "backhoe_bucket", positive="curl", negative="dump"),
             Tool("left_stabilizer_joint", "stabilizers", positive="lower", negative="raise"),
         ],
         cameras=[
-            # operator eye height, just ahead of the (opaque) windscreen, over the bonnet
-            Camera("front", "chassis", (CAB_X1 + 0.07, 0.0, agl(2.32)), (0.0, 0.30, 0.0)),
-            # outside the front cab corners under the roof rim, looking outward-forward
-            Camera("left", "chassis", (CAB_X1 + 0.06, CAB_HW + 0.10, agl(2.64)), (0.0, 0.40, 0.55)),
-            Camera("right", "chassis", (CAB_X1 + 0.06, -CAB_HW - 0.10, agl(2.64)), (0.0, 0.40, -0.55)),
+            # top of the (opaque) windscreen, looking down over the bonnet at the shovel
+            Camera("front", "chassis", (CAB_X1 + 0.07, 0.0, agl(2.62)), (0.0, 0.35, 0.0)),
+            # Rear cab corners, outside the roof rim, each looking back ACROSS the machine
+            # (34° inward): together they cover the hoe from roading to the dig face and
+            # slewed to either side.  The left one looks down steeply (dig face, the right
+            # stabiliser pad), the right one flatter (raised boom / dipper, left pad).
+            Camera("left", "chassis", (CAB_X0 - 0.07, CAB_HW + 0.12, agl(2.85)),
+                   (0.0, 0.72, -(math.pi - 0.60))),
+            Camera("right", "chassis", (CAB_X0 - 0.07, -CAB_HW - 0.12, agl(2.85)),
+                   (0.0, 0.45, math.pi - 0.60)),
         ],
         envelope=(5.62, 2.36, 3.61),
         operating_mass=8070.0,
@@ -641,5 +682,7 @@ def build() -> MachineSpec:
                "backhoe_swing +1 = CCW seen from above. The shovel self-levels through a "
                "follower (-1.0 x lift relative to the arms); ram barrels/rods are visual-only "
                "followers; the right stabiliser follows the left. Stabiliser pads stop at "
-               "grade (the kinematic base cannot be jacked up)."),
+               "grade (the kinematic base cannot be jacked up). Slewing beyond ±1.35 rad "
+               "with the hoe still folded for roading sets the curled bucket on the "
+               "stabiliser beam / casings (sweep warning); unfold the dipper first."),
     )

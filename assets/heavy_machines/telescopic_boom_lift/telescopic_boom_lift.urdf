@@ -273,61 +273,61 @@
     <parent link="turntable"/><child link="boom_base"/>
     <origin xyz="-1.45 0 1.13" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="1.308997" effort="10000000" velocity="0.11"/>
+    <limit lower="-0.0001" upper="1.30909694" effort="10000000" velocity="0.11"/>
   </joint>
   <joint name="telescope_joint" type="prismatic">
     <parent link="boom_base"/><child link="boom_mid"/>
     <origin xyz="0.13 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0" upper="4.585" effort="10000000" velocity="0.36"/>
+    <limit lower="-0.0001" upper="4.5851" effort="10000000" velocity="0.36"/>
   </joint>
   <joint name="fly_joint" type="prismatic">
     <parent link="boom_mid"/><child link="boom_fly"/>
     <origin xyz="0.2 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0" upper="4.585" effort="10000000" velocity="0.36"/>
+    <limit lower="-0.0001" upper="4.5851" effort="10000000" velocity="0.36"/>
   </joint>
   <joint name="jib_level_joint" type="revolute">
     <parent link="boom_fly"/><child link="jib_base"/>
     <origin xyz="5.84 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.358997" upper="0.05" effort="10000000" velocity="0.11"/>
+    <limit lower="-1.35909694" upper="0.0501" effort="10000000" velocity="0.11"/>
   </joint>
   <joint name="jib_joint" type="revolute">
     <parent link="jib_base"/><child link="jib"/>
     <origin xyz="0.45 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.134464" upper="1.22173" effort="10000000" velocity="0.2"/>
+    <limit lower="-1.13456401" upper="1.22183048" effort="10000000" velocity="0.2"/>
   </joint>
   <joint name="platform_level_joint" type="revolute">
     <parent link="jib"/><child link="rotator"/>
     <origin xyz="1.83 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.27173" upper="1.184464" effort="10000000" velocity="0.2"/>
+    <limit lower="-1.27183048" upper="1.18456401" effort="10000000" velocity="0.2"/>
   </joint>
   <joint name="platform_rotate_joint" type="revolute">
     <parent link="rotator"/><child link="platform"/>
     <origin xyz="0.32 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.396263" upper="1.396263" effort="10000000" velocity="0.25"/>
+    <limit lower="-1.3963634" upper="1.3963634" effort="10000000" velocity="0.25"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="turntable"/><child link="lift_cylinder"/>
     <origin xyz="-1.05 0 0.4" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0.044317" upper="1.46992" effort="10000000" velocity="0.152992"/>
+    <limit lower="0.0442169795" upper="1.47002036" effort="10000000" velocity="0.152992"/>
   </joint>
   <joint name="rear_left_steer_joint" type="revolute">
     <parent link="chassis"/><child link="rear_left_knuckle"/>
     <origin xyz="-1.23 1.015 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.6"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.6"/>
   </joint>
   <joint name="rear_right_steer_joint" type="revolute">
     <parent link="chassis"/><child link="rear_right_knuckle"/>
     <origin xyz="-1.23 -1.015 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.6"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.6"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="chassis"/><child link="front_left_wheel"/>

@@ -3,7 +3,7 @@
   "abbrev": "TH",
   "display_name": "Telehandler",
   "category": "lifting",
-  "reference": "17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH514D class)",
+  "reference": "17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH417D class)",
   "description": "Rigid-frame 4x4 telescopic handler with a left-hand cab, side engine, rear-pivot four-section telescopic boom (16.7 m lift height, 12.5 m reach), compensated tilting fork carriage with pallet forks, folded front stabilisers and front-wheel Ackermann steering.",
   "urdf": "telehandler.urdf",
   "root_link": "chassis",
@@ -17,7 +17,7 @@
   ],
   "model_bbox_m": [
     7.629,
-    2.48,
+    2.49,
     2.69
   ],
   "action": {
@@ -46,9 +46,9 @@
         "type": "revolute",
         "unit": "rad",
         "rate_at_full_command": 0.14,
-        "lower": -0.1269,
-        "upper": 1.2086,
-        "init": -0.1269,
+        "lower": -0.0478,
+        "upper": 1.2085,
+        "init": -0.0478,
         "positive": "raise",
         "negative": "lower"
       },
@@ -58,9 +58,9 @@
         "joint": "boom_telescope_joint",
         "type": "prismatic",
         "unit": "m",
-        "rate_at_full_command": 0.3,
+        "rate_at_full_command": 0.9,
         "lower": 0.0,
-        "upper": 3.712,
+        "upper": 11.199,
         "init": 0.0,
         "positive": "extend",
         "negative": "retract"
@@ -72,7 +72,7 @@
         "type": "revolute",
         "unit": "rad",
         "rate_at_full_command": 0.45,
-        "lower": -1.25,
+        "lower": -0.95,
         "upper": 0.4,
         "init": 0.05,
         "positive": "tilt_back",
@@ -100,7 +100,7 @@
     "max_reverse_speed_mps": 8.5,
     "wheelbase_m": 2.75,
     "max_steer_rad": 0.65,
-    "steer_rate_radps": 0.25,
+    "steer_rate_radps": 0.38,
     "fixed_axle_x_m": 0.0,
     "steer_axle": "front"
   },
@@ -111,9 +111,9 @@
       "role": "tool",
       "parent": "chassis",
       "child": "boom_base",
-      "lower": -0.1269,
-      "upper": 1.2086,
-      "init": -0.1269,
+      "lower": -0.0478,
+      "upper": 1.2085,
+      "init": -0.0478,
       "velocity": 0.14
     },
     {
@@ -121,9 +121,20 @@
       "type": "prismatic",
       "role": "tool",
       "parent": "boom_base",
+      "child": "boom_fly",
+      "lower": 0.0,
+      "upper": 11.199,
+      "init": 0.0,
+      "velocity": 0.9
+    },
+    {
+      "name": "boom_mid_1_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_base",
       "child": "boom_mid_1",
       "lower": 0.0,
-      "upper": 3.712,
+      "upper": 3.733,
       "init": 0.0,
       "velocity": 0.3
     },
@@ -131,23 +142,12 @@
       "name": "boom_mid_2_joint",
       "type": "prismatic",
       "role": "follower",
-      "parent": "boom_mid_1",
+      "parent": "boom_base",
       "child": "boom_mid_2",
       "lower": 0.0,
-      "upper": 3.712,
+      "upper": 7.466,
       "init": 0.0,
-      "velocity": 0.3
-    },
-    {
-      "name": "boom_fly_joint",
-      "type": "prismatic",
-      "role": "follower",
-      "parent": "boom_mid_2",
-      "child": "boom_fly",
-      "lower": 0.0,
-      "upper": 3.712,
-      "init": 0.0,
-      "velocity": 0.3
+      "velocity": 0.6
     },
     {
       "name": "carriage_level_joint",
@@ -155,9 +155,9 @@
       "role": "follower",
       "parent": "boom_fly",
       "child": "carriage_level",
-      "lower": -1.2586,
-      "upper": 0.1769,
-      "init": 0.1269,
+      "lower": -1.2585,
+      "upper": 0.0978,
+      "init": 0.0478,
       "velocity": 0.14
     },
     {
@@ -166,7 +166,7 @@
       "role": "tool",
       "parent": "carriage_level",
       "child": "carriage",
-      "lower": -1.25,
+      "lower": -0.95,
       "upper": 0.4,
       "init": 0.05,
       "velocity": 0.45
@@ -177,10 +177,10 @@
       "role": "follower",
       "parent": "chassis",
       "child": "lift_cylinder",
-      "lower": -0.6595158563409667,
-      "upper": 0.6595158563409667,
-      "init": -0.6395158563409666,
-      "velocity": 0.1840804491018126
+      "lower": -0.6144390919142826,
+      "upper": 0.6144390919142826,
+      "init": -0.5944390919142826,
+      "velocity": 0.1824866240038201
     },
     {
       "name": "lift_rod_joint",
@@ -188,10 +188,10 @@
       "role": "follower",
       "parent": "boom_base",
       "child": "lift_rod",
-      "lower": -0.04823414365903332,
-      "upper": 0.04823414365903332,
-      "init": 0.028234143659033317,
-      "velocity": 0.055919550898187446
+      "lower": -0.05371090808571735,
+      "upper": 0.05371090808571735,
+      "init": 0.033710908085717355,
+      "velocity": 0.05751337599617994
     },
     {
       "name": "front_left_steer_joint",
@@ -271,7 +271,7 @@
       ],
       "rpy": [
         0.0,
-        0.18,
+        0.0,
         -0.15
       ]
     },
@@ -294,8 +294,8 @@
       "link": "chassis",
       "xyz": [
         1.98,
-        -1.0899999999999999,
-        1.2249999999999999
+        -1.25,
+        1.295
       ],
       "rpy": [
         0.0,

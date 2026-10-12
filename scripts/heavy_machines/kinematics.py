@@ -157,7 +157,8 @@ def resolve_followers(spec: MachineSpec, q: dict[str, float]) -> dict[str, float
     for jt in spec.joints:
         if jt.role == "follower" and jt.follows:
             src, k, c = jt.follows
-            out[jt.name] = k * out.get(src, spec.joint(src).init) + c
+            val = k * out.get(src, spec.joint(src).init) + c
+            out[jt.name] = val if jt.type == "continuous" else min(max(val, jt.lower), jt.upper)
     return out
 
 

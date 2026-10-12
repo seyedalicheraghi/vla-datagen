@@ -230,37 +230,37 @@
     <parent link="front_frame"/><child link="rear_frame"/>
     <origin xyz="-2.15 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.785" upper="0.785" effort="10000000" velocity="0.35"/>
+    <limit lower="-0.7851" upper="0.7851" effort="10000000" velocity="0.35"/>
   </joint>
   <joint name="dump_joint" type="revolute">
     <parent link="rear_frame"/><child link="dump_body"/>
     <origin xyz="-5.55 0 0.745" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="1.22" effort="10000000" velocity="0.1"/>
+    <limit lower="-0.0001" upper="1.2201" effort="10000000" velocity="0.1"/>
   </joint>
   <joint name="left_hoist_barrel_joint" type="revolute">
     <parent link="rear_frame"/><child link="left_hoist_barrel"/>
     <origin xyz="-0.45 0.68 0.145" rpy="0 0 3.141593"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0.141874" upper="0.686772" effort="10000000" velocity="0.12827"/>
+    <limit lower="0.141774023" upper="0.68687242" effort="10000000" velocity="0.12827"/>
   </joint>
   <joint name="left_hoist_rod_joint" type="prismatic">
     <parent link="left_hoist_barrel"/><child link="left_hoist_rod"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.05" upper="2.355651" effort="10000000" velocity="0.288988"/>
+    <limit lower="-0.0501" upper="2.35575076" effort="10000000" velocity="0.288988"/>
   </joint>
   <joint name="right_hoist_barrel_joint" type="revolute">
     <parent link="rear_frame"/><child link="right_hoist_barrel"/>
     <origin xyz="-0.45 -0.68 0.145" rpy="0 0 3.141593"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0.141874" upper="0.686772" effort="10000000" velocity="0.12827"/>
+    <limit lower="0.141774023" upper="0.68687242" effort="10000000" velocity="0.12827"/>
   </joint>
   <joint name="right_hoist_rod_joint" type="prismatic">
     <parent link="right_hoist_barrel"/><child link="right_hoist_rod"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.05" upper="2.355651" effort="10000000" velocity="0.288988"/>
+    <limit lower="-0.0501" upper="2.35575076" effort="10000000" velocity="0.288988"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="front_frame"/><child link="front_left_wheel"/>

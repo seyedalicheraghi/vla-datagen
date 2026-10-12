@@ -18,7 +18,7 @@
   "model_bbox_m": [
     12.55,
     2.585,
-    3.69
+    3.505
   ],
   "action": {
     "dim": 6,
@@ -301,10 +301,10 @@
       "role": "follower",
       "parent": "superstructure",
       "child": "lift_cylinder",
-      "lower": 0.08761696029965417,
-      "upper": 1.47625746721857,
-      "init": 0.13761696029965417,
-      "velocity": 0.14545485236436412
+      "lower": 0.13345293125229463,
+      "upper": 1.43878567970009,
+      "init": 0.18345293125229462,
+      "velocity": 0.1392839072924293
     },
     {
       "name": "lift_cylinder_rod_joint",
@@ -312,10 +312,10 @@
       "role": "follower",
       "parent": "boom_base",
       "child": "lift_cylinder_rod",
-      "lower": 0.026257467218570876,
-      "upper": 0.1876169602996539,
-      "init": 0.1376169602996539,
-      "velocity": 0.05454514763563578
+      "lower": -0.01121432029991025,
+      "upper": 0.23345293125229466,
+      "init": 0.18345293125229467,
+      "velocity": 0.06071609270757074
     },
     {
       "name": "front_left_steer_joint",
@@ -395,7 +395,7 @@
       ],
       "rpy": [
         0.0,
-        0.08,
+        -0.35,
         -0.1
       ]
     },

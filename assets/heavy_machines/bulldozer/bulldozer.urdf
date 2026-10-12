@@ -336,91 +336,91 @@
     <parent link="tractor"/><child link="lift_frame"/>
     <origin xyz="-0.1 0 0.29" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.161481" upper="0.359077" effort="10000000" velocity="0.18"/>
+    <limit lower="-0.161581292" upper="0.35917731" effort="10000000" velocity="0.18"/>
   </joint>
   <joint name="blade_tilt_joint" type="revolute">
     <parent link="lift_frame"/><child link="blade"/>
     <origin xyz="2.8 0 -0.22" rpy="0 0 0"/>
     <axis xyz="-1 0 0"/>
-    <limit lower="-0.2" upper="0.2" effort="10000000" velocity="0.15"/>
+    <limit lower="-0.2001" upper="0.2001" effort="10000000" velocity="0.15"/>
   </joint>
   <joint name="left_push_arm_joint" type="revolute">
     <parent link="lift_frame"/><child link="left_push_arm"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.150532" upper="0.150321" effort="10000000" velocity="2"/>
+    <limit lower="-0.150631716" upper="0.150420929" effort="10000000" velocity="2"/>
   </joint>
   <joint name="right_push_arm_joint" type="revolute">
     <parent link="lift_frame"/><child link="right_push_arm"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.150321" upper="0.150532" effort="10000000" velocity="2"/>
+    <limit lower="-0.150420929" upper="0.150631716" effort="10000000" velocity="2"/>
   </joint>
   <joint name="right_tilt_cylinder_joint" type="revolute">
     <parent link="right_push_arm"/><child link="right_tilt_cylinder"/>
     <origin xyz="2.18 -1.3 0.04" rpy="0 -0.775544 0"/>
     <axis xyz="-0.602946 0.217958 0.767431"/>
-    <limit lower="-0.308326" upper="0.336875" effort="10000000" velocity="2"/>
+    <limit lower="-0.308425534" upper="0.336975461" effort="10000000" velocity="2"/>
   </joint>
   <joint name="right_tilt_rod_joint" type="revolute">
     <parent link="blade"/><child link="right_tilt_rod"/>
     <origin xyz="-0.09 -1.3 0.78" rpy="0 0.77565 3.141593"/>
     <axis xyz="0.982086 0.104707 0.156664"/>
-    <limit lower="-0.442427" upper="0.499594" effort="10000000" velocity="2"/>
+    <limit lower="-0.442526921" upper="0.499694044" effort="10000000" velocity="2"/>
   </joint>
   <joint name="left_tilt_brace_joint" type="revolute">
     <parent link="left_push_arm"/><child link="left_tilt_brace"/>
     <origin xyz="2.18 1.3 0.04" rpy="0 -0.776205 0"/>
     <axis xyz="-0.60296 -0.218018 0.767403"/>
-    <limit lower="-0.336773" upper="0.308225" effort="10000000" velocity="2"/>
+    <limit lower="-0.336873256" upper="0.308325241" effort="10000000" velocity="2"/>
   </joint>
   <joint name="left_brace_rod_joint" type="revolute">
     <parent link="blade"/><child link="left_brace_rod"/>
     <origin xyz="-0.09 1.3 0.78" rpy="0 0.776099 3.141593"/>
     <axis xyz="0.982246 -0.104434 0.155838"/>
-    <limit lower="-0.500925" upper="0.443577" effort="10000000" velocity="2"/>
+    <limit lower="-0.501025382" upper="0.443677319" effort="10000000" velocity="2"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="tractor"/><child link="lift_cylinders"/>
     <origin xyz="0.95 0 1.89" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.914184" upper="-0.303182" effort="10000000" velocity="2"/>
+    <limit lower="-0.914284385" upper="-0.303081521" effort="10000000" velocity="2"/>
   </joint>
   <joint name="lift_rod_joint" type="revolute">
     <parent link="lift_frame"/><child link="lift_rods"/>
     <origin xyz="2.7 0 0.18" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="2.379334" upper="2.48889" effort="10000000" velocity="2"/>
+    <limit lower="2.37923382" upper="2.48898956" effort="10000000" velocity="2"/>
   </joint>
   <joint name="ripper_joint" type="revolute">
     <parent link="tractor"/><child link="ripper_arm"/>
     <origin xyz="-2.12 0 0.67" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.544724" upper="0.555388" effort="10000000" velocity="0.3"/>
+    <limit lower="-0.544823722" upper="0.555487653" effort="10000000" velocity="0.3"/>
   </joint>
   <joint name="ripper_beam_joint" type="revolute">
     <parent link="ripper_arm"/><child link="ripper_beam"/>
     <origin xyz="-1.1 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.605388" upper="0.594724" effort="10000000" velocity="2"/>
+    <limit lower="-0.605487653" upper="0.594823722" effort="10000000" velocity="2"/>
   </joint>
   <joint name="ripper_link_joint" type="revolute">
     <parent link="tractor"/><child link="ripper_link"/>
     <origin xyz="-2.12 0 1.13" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-0.594724" upper="0.605388" effort="10000000" velocity="2"/>
+    <limit lower="-0.594823722" upper="0.605487653" effort="10000000" velocity="2"/>
   </joint>
   <joint name="ripper_cylinder_joint" type="revolute">
     <parent link="tractor"/><child link="ripper_cylinders"/>
     <origin xyz="-2.17 0 1.25" rpy="0 0 3.141593"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.927928" upper="0.024075" effort="10000000" velocity="2"/>
+    <limit lower="-0.928027997" upper="0.0241751097" effort="10000000" velocity="2"/>
   </joint>
   <joint name="ripper_rod_joint" type="revolute">
     <parent link="ripper_beam"/><child link="ripper_rods"/>
     <origin xyz="-0.1 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.024075" upper="0.927928" effort="10000000" velocity="2"/>
+    <limit lower="-0.0241751097" upper="0.928027997" effort="10000000" velocity="2"/>
   </joint>
   <joint name="left_sprocket_joint" type="continuous">
     <parent link="tractor"/><child link="left_sprocket"/>

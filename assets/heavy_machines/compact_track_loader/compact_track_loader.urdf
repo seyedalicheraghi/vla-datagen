@@ -196,25 +196,25 @@
     <parent link="chassis"/><child link="lift_arm"/>
     <origin xyz="-1.2 0 1.34" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.02" upper="1.06" effort="10000000" velocity="0.32"/>
+    <limit lower="-0.0201" upper="1.0601" effort="10000000" velocity="0.32"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="lift_arm"/><child link="bucket"/>
     <origin xyz="2.5 0 -1.4" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.8" upper="0.55" effort="10000000" velocity="1"/>
+    <limit lower="-1.8001" upper="0.5501" effort="10000000" velocity="1"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="chassis"/><child link="lift_cylinders"/>
     <origin xyz="-1 0 0.57" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0.750563" upper="1.401355" effort="10000000" velocity="1"/>
+    <limit lower="0.750462557" upper="1.401455" effort="10000000" velocity="1"/>
   </joint>
   <joint name="lift_rod_joint" type="revolute">
     <parent link="lift_arm"/><child link="lift_rods"/>
     <origin xyz="0.8 0 -0.14" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-2.900238" upper="-2.27103" effort="10000000" velocity="1"/>
+    <limit lower="-2.90033766" upper="-2.2709301" effort="10000000" velocity="1"/>
   </joint>
   <joint name="left_sprocket_joint" type="continuous">
     <parent link="chassis"/><child link="left_sprocket"/>

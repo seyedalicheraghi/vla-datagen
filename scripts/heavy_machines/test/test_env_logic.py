@@ -244,6 +244,53 @@ class TestEnvLogic(unittest.TestCase):
                     aj = spec.joint(d.articulation_joint)
                     self.assertGreaterEqual(g, aj.lower - 1e-6)
 
+    def test_no_side_slip(self):
+        """The reference axle (and an articulated machine's rear axle) roll without side slip."""
+        for name in self.names:
+            spec = make_env(name)[1]
+            d = spec.drive
+            if d.type == "skid":
+                continue
+            with self.subTest(machine=name):
+                env, _ = make_env(name, num_envs=1, cameras=False)
+                run(env, [0.4, 1.0] + [0.0] * len(spec.tools), 45)       # steering at lock, moving
+                env._pre_physics_step(torch.tensor([[0.4, 1.0] + [0.0] * len(spec.tools)]))
+
+                def points():
+                    x, y, yaw = env._xy[0, 0].item(), env._xy[0, 1].item(), env._yaw[0].item()
+                    c, s_ = math.cos(yaw), math.sin(yaw)
+                    front = (x + env.x_ref * c, y + env.x_ref * s_)
+                    pts = {"reference axle": (front, yaw)}
+                    if d.type == "articulated":
+                        hx, hy = env._hinge
+                        h = (x + hx * c - hy * s_, y + hx * s_ + hy * c)
+                        g = env._steer[0].item()
+                        pts["rear axle"] = ((h[0] - d.rear_length * math.cos(yaw + g),
+                                             h[1] - d.rear_length * math.sin(yaw + g)), yaw + g)
+                    return pts
+
+                before = points()
+                env._apply_action()
+                after = points()
+                dt = env.cfg.sim.dt
+                speed = abs(env._speed[0].item())
+                for key in before:
+                    (p0, h0), (p1, h1) = before[key], after[key]
+                    vx, vy = (p1[0] - p0[0]) / dt, (p1[1] - p0[1]) / dt
+                    hm = 0.5 * (h0 + h1)
+                    lateral = -vx * math.sin(hm) + vy * math.cos(hm)
+                    self.assertLess(abs(lateral), 2e-2 * max(speed, 0.1), f"{key} slips sideways")
+
+    def test_wheels_roll_at_ground_speed(self):
+        """Driving straight, every rolling joint spins at v / r in the forward sense."""
+        for name in self.names:
+            with self.subTest(machine=name):
+                env, spec = make_env(name, num_envs=1, cameras=False)
+                run(env, [0.5, 0.0] + [0.0] * len(spec.tools), 5)
+                v = env._speed[0].item()
+                for idx, sign, radius, *_ in env._roll:
+                    self.assertAlmostEqual(env._qd[0, idx].item() * sign * radius, v, delta=1e-3 + 1e-3 * abs(v))
+
     def test_skid_turn_in_place(self):
         for name in self.names:
             env, spec = make_env(name)

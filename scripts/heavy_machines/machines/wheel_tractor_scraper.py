@@ -14,17 +14,19 @@ from drawings / photos where no datasheet figure was to hand):
     ≈ 10 km/h.
 
 Model (offline FK): L × W × H 13.63 × 3.94 × 3.91 m (length to the push block,
-width over the trunnion caps, height to the beacon) · 33.4 t, 65 % on the front
-axle empty · wheelbase 8.90 m (hinge → front axle 1.45 m, hinge → rear axle
+width over the trunnion caps, height to the beacon) · 33.4 t, 64 % on the front
+axle empty (link-inertia COM 3.23 m behind the front axle; the datasheet's ≈ 67 %
+would need ≈ 1.2 t moved from the bowl to the tractor, not modelled — the env is
+kinematic) · wheelbase 8.90 m (hinge → front axle 1.45 m, hinge → rear axle
 7.45 m) · rear gauge 2.60 m (3.45 m over the rear tyres), front gauge 2.45 m ·
 bowl inside 3.02 m wide, floor 2.9 m long, sides 2.4 m high · cutting edge 0.45 m
 above grade in travel, 0.32 m below at full lower · apron lip 2.33 m above
 grade (1.9 m above the edge) fully open.
 
 Joint ranges / rates used:
-    steering hitch  ±0.90 rad (the real hitch turns ±90°; capped at 0.9 like
-                    the other articulated machines → front-axle turning radius
-                    10.7 m at full lock), 0.40 rad/s (lock to lock in 4.5 s)
+    steering hitch  ±0.90 rad (the real hitch turns ±90°; the model caps it at
+                    0.9 rad = 52° → front-axle turning radius 10.7 m at full
+                    lock), 0.40 rad/s (lock to lock in 4.5 s)
     bowl            -0.194 (cutting edge 0.32 m below grade) … 0 (travel, edge
                     0.45 m above grade) about the rear axle; 0.09 rad/s
                     (full raise ≈ 2.2 s)
@@ -40,7 +42,21 @@ Layout: the root link is the TRACTOR (engine hood, centre cab, front axle).  The
 steering hitch (vertical king pin 1.45 m behind the front axle) carries a small
 hitch casting; from it hang the gooseneck/draft frame (swan neck, yoke cross
 beam over the apron, draft arms down the bowl sides to trunnions at the rear of
-the bowl) and the bowl, which carries the rear axle.
+the bowl) and the bowl, which carries the rear axle.  The tractor frame rails
+stop 0.30 m ahead of the king pin and the hydraulic tank 0.30 m ahead of it, so
+the casting (king-pin boss r 0.24 m, box corners ≤ 0.20 m forward at full lock)
+turns freely between the upper and lower bearing plates.
+
+Cameras: front = operator eye height ahead of the windscreen, looking down the
+hood (driving view).  left / right = rear-view cameras on short posts at the
+rear outer corners of the front fenders (agl 2.65 m, 1.62 m off centre), looking
+back and 17° outward: they show the bowl front and apron (the apron lip closes
+onto the cutting edge, so lowering the bowl shows as the lip dropping to grade),
+the yoke and draft arms, and, with the apron open, the cutting edge and the
+ejector through the bowl mouth.  At full lock the rear unit swings out of the
+camera on the outside of the turn and fills the one on the inside.  Mirror-arm
+and cab-roof positions were tried: they see about half as much tool motion,
+because the yoke hides the bowl mouth from higher up.
 
 Bowl linkage: on the real machine the bowl (with the rear axle) is pinned to the
 draft arms at low rear trunnions and the lift cylinders between the yoke and
@@ -88,6 +104,9 @@ BUMPER_X = 2.85
 CAB_X0, CAB_X1, CAB_HW = -1.00, 0.25, 0.82
 CAB_Z0, CAB_Z1 = agl(2.09), agl(3.74)
 MIRROR = (0.18, 1.12, agl(3.05))       # left mirror head centre (right one mirrored)
+REAR_CAM = (-0.70, 1.62, agl(2.65))    # left rear-view camera lens (right one mirrored)
+FENDER_TOP = agl(2.20)                 # top of the flat front-fender plate (x -0.66 … 0.82)
+HITCH_CLEAR = 0.30                     # frame rails / tank stop this far ahead of the king pin
 
 # --- scraper: frames ----------------------------------------------------------------
 # Hitch-casting frame = king pin; the gooseneck pitches about a cross pin behind it.
@@ -256,8 +275,12 @@ def _cab() -> list[Shape]:
 def _tractor() -> Link:
     y_w = FRONT_GAUGE / 2
     hx = HITCH[0]
+    rail_x0, rail_x1 = hx + HITCH_CLEAR, 2.525       # rails end in the hitch bearing plates
+    tank_x0 = hx + HITCH_CLEAR                        # rear face of the hydraulic tank
+    cx, cy, cz = REAR_CAM
+    post_z1 = cz - 0.05                               # camera housing underside
     return Link("tractor", 13600.0, [
-        box(3.95, 0.90, 0.50, at=(0.55, 0.0, agl(1.00))),                              # frame rails
+        box(rail_x1 - rail_x0, 0.90, 0.50, at=((rail_x0 + rail_x1) / 2, 0.0, agl(1.00))),  # frame rails
         cyl(0.24, 1.58, axis="y", mat="dark"),                                          # front axle
         sphere(0.34, mat="dark"),                                                       # differential
         # engine hood: lower box + sloping top, radiator grille, bumper
@@ -281,7 +304,7 @@ def _tractor() -> Link:
             box(0.05, 0.16, 0.10, at=(1.28, y, agl(1.76)), mat="orange", collision=False))],
         # cab base / transmission housing, rear tank and hitch plates
         box(1.25, 1.56, 0.86, at=(-0.375, 0.0, agl(1.66))),
-        box(0.25, 1.40, 0.95, at=(-1.075, 0.0, agl(1.52)), mat="dark"),                 # hydraulic tank
+        box(0.25, 1.40, 0.95, at=(tank_x0 + 0.125, 0.0, agl(1.52)), mat="dark"),         # hydraulic tank
         # upper / lower hitch bearings round the king pin
         *[s for h in (1.72, 0.86) for s in (
             cyl(0.36, 0.14, at=(hx, 0.0, agl(h)), mat="dark"),
@@ -294,6 +317,12 @@ def _tractor() -> Link:
         *[box(0.30, 0.10, 0.04, at=(-1.22, 0.86, agl(h)), mat="steel", collision=False)
           for h in (1.20, 1.50, 1.80)],
         box(0.04, 0.04, 0.95, at=(-1.08, 0.86, agl(2.55)), mat="accent", collision=False),
+        # rear-view camera posts on the rear outer corners of the front fenders; the
+        # housing sits just ahead of the lens (the camera looks back)
+        *[s for sg in (1.0, -1.0) for s in (
+            box(0.05, 0.05, post_z1 - FENDER_TOP, at=(cx + 0.08, sg * cy, (FENDER_TOP + post_z1) / 2),
+                mat="accent", collision=False),
+            box(0.12, 0.11, 0.10, at=(cx + 0.075, sg * cy, cz), mat="dark", collision=False))],
         *_cab(),
     ])
 
@@ -309,9 +338,14 @@ def _wheel(name: str, sg: float) -> Link:
 
 
 def _hitch() -> Link:
-    """Hitch casting between the tractor's hitch plates (king pin + gooseneck cross pin)."""
+    """Hitch casting between the tractor's hitch plates (king pin + gooseneck cross pin).
+
+    The box runs from 0.12 m behind the king pin back to the cross pin, so the round
+    king-pin boss is its front: the swept radius ahead of the pin stays 0.24 m.
+    """
+    x0, x1 = -0.625, -0.12
     return Link("hitch", 700.0, [
-        box(0.85, 0.70, 0.55, at=(-0.20, 0.0, 0.0), mat="dark"),
+        box(x1 - x0, 0.70, 0.55, at=((x0 + x1) / 2, 0.0, 0.0), mat="dark"),
         cyl(0.24, 0.60, mat="dark"),                                                    # king-pin boss
         cyl(0.17, 0.92, at=(PD[0], 0.0, PD[1]), axis="y", mat="steel", collision=False),  # cross pin
     ])
@@ -527,7 +561,8 @@ def build() -> MachineSpec:
         category="grading",
         reference="15 m³ single-engine wheel tractor-scraper (CAT 621K class)",
         description=("Two-axle open-bowl scraper: single-axle tractor with engine hood and "
-                     "centre cab, 90° steering hitch, gooseneck and draft arms carrying a "
+                     "centre cab, steering hitch (90° each way on the real machine, ±0.9 rad "
+                     "here), gooseneck and draft arms carrying a "
                      "15 m³ bowl on the rear axle; the bowl lowers to cut 0.32 m deep, the "
                      "apron (front gate) raises to open and the ejector (rear wall) pushes the "
                      "load out forward."),
@@ -546,9 +581,10 @@ def build() -> MachineSpec:
             # operator eye height on the centre line, just ahead of the windscreen
             # (the glass panes are opaque boxes), looking down the hood
             Camera("front", "tractor", (CAB_X1 + 0.07, 0.0, cam_z), (0.0, 0.25, 0.0)),
-            # on the mirror-arm ends above the mirror heads, looking outward-forward
-            Camera("left", "tractor", (MIRROR[0], MIRROR[1], MIRROR[2] + 0.25), (0.0, 0.30, 0.60)),
-            Camera("right", "tractor", (MIRROR[0], -MIRROR[1], MIRROR[2] + 0.25), (0.0, 0.30, -0.60)),
+            # rear-view cameras on the front-fender posts, looking back (17° outward) at
+            # the apron, cutting edge, bowl mouth and draft arms
+            Camera("left", "tractor", REAR_CAM, (0.0, 0.18, 2.85)),
+            Camera("right", "tractor", (REAR_CAM[0], -REAR_CAM[1], REAR_CAM[2]), (0.0, 0.18, -2.85)),
         ],
         envelope=(14.0, 3.75, 3.85),
         operating_mass=33200.0,
@@ -556,5 +592,8 @@ def build() -> MachineSpec:
                "follower so the draft arms stay on the bowl trunnions, and the lift / ejector "
                "cylinders are cosmetic followers.  apron raise = open.  Ejector +1 = eject "
                "(forward, towards the tractor), not auto-verifiable because 'out' is measured "
-               "from the root origin, which lies ahead of the ejector."),
+               "from the root origin, which lies ahead of the ejector.  left/right cameras "
+               "are rear-view cameras on the front fenders. Between them they see the bowl "
+               "front and apron in every pose, but the ejector only through the open apron. "
+               "At full lock the rear unit leaves the camera on the outside of the turn."),
     )

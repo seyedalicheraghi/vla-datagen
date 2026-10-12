@@ -352,85 +352,85 @@
     <parent link="front_frame"/><child link="rear_frame"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.35"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.35"/>
   </joint>
   <joint name="lift_arm_joint" type="revolute">
     <parent link="front_frame"/><child link="lift_arm"/>
     <origin xyz="0.5 0 1.245" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.03" upper="1.273328" effort="10000000" velocity="0.215"/>
+    <limit lower="-0.0301" upper="1.27342795" effort="10000000" velocity="0.215"/>
   </joint>
   <joint name="bucket_level_joint" type="revolute">
     <parent link="lift_arm"/><child link="bucket_level"/>
     <origin xyz="2.65 0 -1.65" rpy="0 0.497331 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.541331" upper="0.541331" effort="10000000" velocity="0.272"/>
+    <limit lower="-0.541431181" upper="0.541431181" effort="10000000" velocity="0.272"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="bucket_level"/><child link="bucket"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.13" upper="0.82" effort="10000000" velocity="1.15"/>
+    <limit lower="-1.1301" upper="0.8201" effort="10000000" velocity="1.15"/>
   </joint>
   <joint name="tilt_lever_level_joint" type="revolute">
     <parent link="lift_arm"/><child link="tilt_lever_level"/>
     <origin xyz="1.9 0 -0.56" rpy="0 0.497331 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.541331" upper="0.541331" effort="10000000" velocity="0.272"/>
+    <limit lower="-0.541431181" upper="0.541431181" effort="10000000" velocity="0.272"/>
   </joint>
   <joint name="tilt_lever_joint" type="revolute">
     <parent link="tilt_lever_level"/><child link="tilt_lever"/>
     <origin xyz="0 0 0" rpy="0 0.155 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.995" upper="0.995" effort="10000000" velocity="1.25"/>
+    <limit lower="-0.9951" upper="0.9951" effort="10000000" velocity="1.25"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="front_frame"/><child link="lift_cylinders"/>
     <origin xyz="0.2 0 0.045" rpy="0 -0.590937 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.389493" upper="0.389493" effort="10000000" velocity="0.221905"/>
+    <limit lower="-0.389593474" upper="0.389593474" effort="10000000" velocity="0.221905"/>
   </joint>
   <joint name="lift_rod_joint" type="revolute">
     <parent link="lift_arm"/><child link="lift_rods"/>
     <origin xyz="1.15 0 -0.85" rpy="0 -3.110865 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.302171" upper="0.302171" effort="10000000" velocity="0.193095"/>
+    <limit lower="-0.302270502" upper="0.302270502" effort="10000000" velocity="0.193095"/>
   </joint>
   <joint name="tilt_links_level_joint" type="revolute">
     <parent link="tilt_lever"/><child link="tilt_links_level"/>
     <origin xyz="0.22 0 0.66" rpy="0 0.470789 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.541331" upper="0.541331" effort="10000000" velocity="0.272"/>
+    <limit lower="-0.541431181" upper="0.541431181" effort="10000000" velocity="0.272"/>
   </joint>
   <joint name="tilt_links_joint" type="revolute">
     <parent link="tilt_links_level"/><child link="tilt_links"/>
     <origin xyz="0 0 0" rpy="0 -0.155 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.995" upper="0.995" effort="10000000" velocity="1.25"/>
+    <limit lower="-0.9951" upper="0.9951" effort="10000000" velocity="1.25"/>
   </joint>
   <joint name="tilt_cylinder_level_joint" type="revolute">
     <parent link="front_frame"/><child link="tilt_cylinder_level"/>
     <origin xyz="0.2 0 1.345" rpy="0 -0.261099 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.560881" upper="0.560881" effort="10000000" velocity="0.27845"/>
+    <limit lower="-0.5609811" upper="0.5609811" effort="10000000" velocity="0.27845"/>
   </joint>
   <joint name="tilt_cylinder_joint" type="revolute">
     <parent link="tilt_cylinder_level"/><child link="tilt_cylinder"/>
     <origin xyz="0 0 0" rpy="0 0.013485 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.104825" upper="0.104825" effort="10000000" velocity="0.20005"/>
+    <limit lower="-0.104925" upper="0.104925" effort="10000000" velocity="0.20005"/>
   </joint>
   <joint name="tilt_rod_level_joint" type="revolute">
     <parent link="tilt_lever"/><child link="tilt_rod_level"/>
     <origin xyz="0.255 0 0.055" rpy="0 -3.278359 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.430548" upper="0.430548" effort="10000000" velocity="0.23545"/>
+    <limit lower="-0.430648305" upper="0.430648305" effort="10000000" velocity="0.23545"/>
   </joint>
   <joint name="tilt_rod_joint" type="revolute">
     <parent link="tilt_rod_level"/><child link="tilt_rod"/>
     <origin xyz="0 0 0" rpy="0 -0.141515 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.910175" upper="0.910175" effort="10000000" velocity="1.14995"/>
+    <limit lower="-0.910275" upper="0.910275" effort="10000000" velocity="1.14995"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="front_frame"/><child link="front_left_wheel"/>

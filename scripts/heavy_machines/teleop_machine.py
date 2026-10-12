@@ -41,9 +41,13 @@ args_cli.enable_cameras = not args_cli.no_cameras
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
+import time  # noqa: E402
+
 import carb.input  # noqa: E402
 import omni.appwindow  # noqa: E402
 import torch  # noqa: E402
+
+from heavy_machines import kinematics as K  # noqa: E402
 
 from heavy_machines.checks import TOOL_KEY_PAIRS  # noqa: E402
 from heavy_machines.machine_env import HeavyMachineEnv, make_env_cfg  # noqa: E402
@@ -51,8 +55,10 @@ from heavy_machines.machine_env import HeavyMachineEnv, make_env_cfg  # noqa: E4
 
 def main():
     spec = registry.get(args_cli.machine)
-    env = HeavyMachineEnv(make_env_cfg(spec.name, enable_cameras=args_cli.enable_cameras,
-                                       randomize_spawn=args_cli.random_spawn))
+    cfg = make_env_cfg(spec.name, enable_cameras=args_cli.enable_cameras,
+                       randomize_spawn=args_cli.random_spawn)
+    cfg.sim.device = args_cli.device
+    env = HeavyMachineEnv(cfg)
 
     held: set[str] = set()
     reset_requested = [False]
@@ -85,9 +91,21 @@ def main():
     print("  R      reset")
     print("=" * 64 + "\n")
 
+    def follow_camera():
+        """Chase view that follows the machine (GUI only)."""
+        vcc = env.viewport_camera_controller
+        if vcc is None:
+            return
+        lo, hi = K.bounding_box(spec)
+        size = max(hi[0] - lo[0], 6.0)
+        vcc.update_view_to_asset_root("machine")
+        vcc.update_view_location(eye=(-1.3 * size, -1.0 * size, 0.6 * size), lookat=(0.2 * size, 0.0, 1.5))
+
     env.reset()
+    follow_camera()
     action = torch.zeros(env.num_envs, spec.action_dim, device=env.device)
     while simulation_app.is_running():
+        t0 = time.perf_counter()
         if reset_requested[0]:
             reset_requested[0] = False
             env.reset()
@@ -97,6 +115,7 @@ def main():
         for i, (kp, kn) in enumerate(TOOL_KEY_PAIRS[:len(spec.tools)]):
             action[:, 2 + i] = float(kp in held) - float(kn in held)
         env.step(action)
+        time.sleep(max(0.0, env.step_dt - (time.perf_counter() - t0)))   # real-time pacing
 
     inp.unsubscribe_to_keyboard_events(keyboard, sub)
     env.close()

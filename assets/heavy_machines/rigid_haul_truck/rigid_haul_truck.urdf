@@ -297,37 +297,37 @@
     <parent link="chassis"/><child link="dump_body"/>
     <origin xyz="-1.95 0 0.85" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="0.96" effort="10000000" velocity="0.096"/>
+    <limit lower="-0.0001" upper="0.9601" effort="10000000" velocity="0.096"/>
   </joint>
   <joint name="hoist_barrel_joint" type="revolute">
     <parent link="chassis"/><child link="hoist_barrels"/>
     <origin xyz="0.6 0 -0.25" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0.793505" upper="1.745207" effort="10000000" velocity="0.14117"/>
+    <limit lower="0.79340491" upper="1.74530668" effort="10000000" velocity="0.14117"/>
   </joint>
   <joint name="hoist_stage_joint" type="prismatic">
     <parent link="hoist_barrels"/><child link="hoist_stages"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.011723" upper="1.308912" effort="10000000" velocity="0.178063"/>
+    <limit lower="-0.0118226254" upper="1.30901153" effort="10000000" velocity="0.178063"/>
   </joint>
   <joint name="hoist_rod_joint" type="prismatic">
     <parent link="hoist_stages"/><child link="hoist_rods"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.011723" upper="1.308912" effort="10000000" velocity="0.178063"/>
+    <limit lower="-0.0118226254" upper="1.30901153" effort="10000000" velocity="0.178063"/>
   </joint>
   <joint name="front_left_steer_joint" type="revolute">
     <parent link="chassis"/><child link="front_left_knuckle"/>
     <origin xyz="4.2 1.46 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.8"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.8"/>
   </joint>
   <joint name="front_right_steer_joint" type="revolute">
     <parent link="chassis"/><child link="front_right_knuckle"/>
     <origin xyz="4.2 -1.46 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.7" upper="0.7" effort="10000000" velocity="0.8"/>
+    <limit lower="-0.7001" upper="0.7001" effort="10000000" velocity="0.8"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="front_left_knuckle"/><child link="front_left_wheel"/>

@@ -278,7 +278,7 @@
     <parent link="undercarriage"/><child link="blade"/>
     <origin xyz="0.15 0 0.02" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.390613" upper="0.347905" effort="10000000" velocity="0.35"/>
+    <limit lower="-0.390713215" upper="0.348005248" effort="10000000" velocity="0.35"/>
   </joint>
   <joint name="swing_joint" type="continuous">
     <parent link="undercarriage"/><child link="upper_structure"/>
@@ -290,25 +290,25 @@
     <parent link="upper_structure"/><child link="swing_bracket"/>
     <origin xyz="0.86 0 0.26" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-1.05" upper="1.31" effort="10000000" velocity="0.45"/>
+    <limit lower="-1.0501" upper="1.3101" effort="10000000" velocity="0.45"/>
   </joint>
   <joint name="boom_joint" type="revolute">
     <parent link="swing_bracket"/><child link="boom"/>
     <origin xyz="0.2 0 0.2" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.16" upper="1.12" effort="10000000" velocity="0.75"/>
+    <limit lower="-1.1601" upper="1.1201" effort="10000000" velocity="0.75"/>
   </joint>
   <joint name="stick_joint" type="revolute">
     <parent link="boom"/><child link="stick"/>
     <origin xyz="2.4 0 0.4" rpy="0 1.4 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.05" upper="0.85" effort="10000000" velocity="0.85"/>
+    <limit lower="-1.0501" upper="0.8501" effort="10000000" velocity="0.85"/>
   </joint>
   <joint name="bucket_joint" type="revolute">
     <parent link="stick"/><child link="bucket"/>
     <origin xyz="1.35 0 0" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="-1.05" upper="2.15" effort="10000000" velocity="1.3"/>
+    <limit lower="-1.0501" upper="2.1501" effort="10000000" velocity="1.3"/>
   </joint>
   <joint name="left_sprocket_joint" type="continuous">
     <parent link="undercarriage"/><child link="left_sprocket"/>
@@ -326,60 +326,60 @@
     <parent link="swing_bracket"/><child link="boom_cyl_barrel"/>
     <origin xyz="0.14 0 0" rpy="0 -0.429173 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.053015" upper="1.053015" effort="10000000" velocity="0.729615"/>
+    <limit lower="-1.05311505" upper="1.05311505" effort="10000000" velocity="0.729615"/>
   </joint>
   <joint name="boom_cyl_rod_joint" type="revolute">
     <parent link="boom"/><child link="boom_cyl_rod"/>
     <origin xyz="0.99 0 0.32" rpy="0 -3.590766 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.126985" upper="0.126985" effort="10000000" velocity="0.120385"/>
+    <limit lower="-0.127084951" upper="0.127084951" effort="10000000" velocity="0.120385"/>
   </joint>
   <joint name="arm_cyl_barrel_joint" type="revolute">
     <parent link="boom"/><child link="arm_cyl_barrel"/>
     <origin xyz="0.785 0 0.646" rpy="0 0.029787 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.077589" upper="0.077589" effort="10000000" velocity="0.101527"/>
+    <limit lower="-0.0776888836" upper="0.0776888836" effort="10000000" velocity="0.101527"/>
   </joint>
   <joint name="arm_cyl_rod_joint" type="revolute">
     <parent link="stick"/><child link="arm_cyl_rod"/>
     <origin xyz="-0.25 0 0.12" rpy="0 -4.611806 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.912411" upper="0.912411" effort="10000000" velocity="0.848473"/>
+    <limit lower="-0.912511116" upper="0.912511116" effort="10000000" velocity="0.848473"/>
   </joint>
   <joint name="blade_cyl_barrel_joint" type="revolute">
     <parent link="undercarriage"/><child link="blade_cyl_barrel"/>
     <origin xyz="0.5 0 0.2" rpy="0 0.329535 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.551507" upper="0.551507" effort="10000000" velocity="0.553786"/>
+    <limit lower="-0.551607269" upper="0.551607269" effort="10000000" velocity="0.553786"/>
   </joint>
   <joint name="blade_cyl_rod_joint" type="revolute">
     <parent link="blade"/><child link="blade_cyl_rod"/>
     <origin xyz="0.96 0 -0.03" rpy="0 -2.833411 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.182248" upper="0.182248" effort="10000000" velocity="0.203786"/>
+    <limit lower="-0.182348038" upper="0.182348038" effort="10000000" velocity="0.203786"/>
   </joint>
   <joint name="bucket_dogbone_joint" type="revolute">
     <parent link="stick"/><child link="bucket_dogbone"/>
     <origin xyz="1.17 0 0.02" rpy="0 -0.95758 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.950526" upper="0.950526" effort="10000000" velocity="0.806052"/>
+    <limit lower="-0.95062564" upper="0.95062564" effort="10000000" velocity="0.806052"/>
   </joint>
   <joint name="bucket_hlink_joint" type="revolute">
     <parent link="bucket"/><child link="bucket_hlink"/>
     <origin xyz="0.08 0 0.2" rpy="0 -2.702876 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.068864" upper="1.068864" effort="10000000" velocity="0.902202"/>
+    <limit lower="-1.06896408" upper="1.06896408" effort="10000000" velocity="0.902202"/>
   </joint>
   <joint name="bucket_cyl_barrel_joint" type="revolute">
     <parent link="stick"/><child link="bucket_cyl_barrel"/>
     <origin xyz="0.05 0 0.2" rpy="0 -0.018791 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.150643" upper="0.150643" effort="10000000" velocity="0.156148"/>
+    <limit lower="-0.15074316" upper="0.15074316" effort="10000000" velocity="0.156148"/>
   </joint>
   <joint name="bucket_cyl_rod_joint" type="revolute">
     <parent link="bucket_dogbone"/><child link="bucket_cyl_rod"/>
     <origin xyz="0.31 0 0" rpy="0 -2.202803 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.819882" upper="0.819882" effort="10000000" velocity="0.699905"/>
+    <limit lower="-0.81998248" upper="0.81998248" effort="10000000" velocity="0.699905"/>
   </joint>
 </robot>

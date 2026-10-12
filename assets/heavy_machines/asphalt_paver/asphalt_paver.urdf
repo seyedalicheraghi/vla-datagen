@@ -283,43 +283,43 @@
     <parent link="tractor"/><child link="left_wing"/>
     <origin xyz="1 0.62 0.42" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0" upper="1.15" effort="10000000" velocity="0.25"/>
+    <limit lower="-0.0001" upper="1.1501" effort="10000000" velocity="0.25"/>
   </joint>
   <joint name="right_wing_joint" type="revolute">
     <parent link="tractor"/><child link="right_wing"/>
     <origin xyz="1 -0.62 0.42" rpy="0 0 0"/>
     <axis xyz="-1 0 0"/>
-    <limit lower="0" upper="1.15" effort="10000000" velocity="0.25"/>
+    <limit lower="-0.0001" upper="1.1501" effort="10000000" velocity="0.25"/>
   </joint>
   <joint name="screed_lift_joint" type="prismatic">
     <parent link="lift_cylinders"/><child link="lift_rods"/>
     <origin xyz="0.784092 0 0" rpy="0 3.141593 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0" upper="0.279482" effort="10000000" velocity="0.079852"/>
+    <limit lower="-0.0001" upper="0.279581773" effort="10000000" velocity="0.079852"/>
   </joint>
   <joint name="lift_cylinder_joint" type="revolute">
     <parent link="tractor"/><child link="lift_cylinders"/>
     <origin xyz="-2.14 0 1.2" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-1.765719" upper="-1.623177" effort="10000000" velocity="1"/>
+    <limit lower="-1.76581946" upper="-1.62307685" effort="10000000" velocity="1"/>
   </joint>
   <joint name="tow_arm_joint" type="revolute">
     <parent link="tractor"/><child link="screed"/>
     <origin xyz="0.9 0 0.48" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="0" upper="0.09" effort="10000000" velocity="0.025714"/>
+    <limit lower="-0.0001" upper="0.0901" effort="10000000" velocity="0.025714"/>
   </joint>
   <joint name="left_extension_joint" type="prismatic">
     <parent link="screed"/><child link="left_extension"/>
     <origin xyz="-4.14 0 -0.78" rpy="0 0 0"/>
     <axis xyz="0 1 0"/>
-    <limit lower="0" upper="1.225" effort="10000000" velocity="0.15"/>
+    <limit lower="-0.0001" upper="1.2251" effort="10000000" velocity="0.15"/>
   </joint>
   <joint name="right_extension_joint" type="prismatic">
     <parent link="screed"/><child link="right_extension"/>
     <origin xyz="-4.14 0 -0.78" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="1.225" effort="10000000" velocity="0.15"/>
+    <limit lower="-0.0001" upper="1.2251" effort="10000000" velocity="0.15"/>
   </joint>
   <joint name="left_sprocket_joint" type="continuous">
     <parent link="tractor"/><child link="left_sprocket"/>

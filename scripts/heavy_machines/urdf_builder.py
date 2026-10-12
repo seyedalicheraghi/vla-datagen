@@ -9,6 +9,12 @@ from xml.sax.saxutils import escape
 from . import kinematics as K
 from .spec import Box, Cylinder, Link, MachineSpec, Shape, Sphere
 
+# Revolute/prismatic limits are written this far OUTSIDE the spec limits.  Isaac Lab
+# rejects default joint positions outside the PhysX limits (compared in float32,
+# revolute limits round-tripped through degrees), and many joints start exactly on
+# a limit.  The environment clamps every joint to the exact spec limits itself.
+LIMIT_PAD = 1e-4
+
 ASSET_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..",
                                           "assets", "heavy_machines"))
 
@@ -122,7 +128,7 @@ def build_urdf(spec: MachineSpec) -> str:
         if jt.type != "fixed":
             out.append(f'    <axis xyz="{_v(K.vunit(jt.axis))}"/>')
         if jt.type in ("revolute", "prismatic"):
-            out.append(f'    <limit lower="{_f(jt.lower)}" upper="{_f(jt.upper)}" '
+            out.append(f'    <limit lower="{jt.lower - LIMIT_PAD:.9g}" upper="{jt.upper + LIMIT_PAD:.9g}" '
                        f'effort="{_f(jt.effort)}" velocity="{_f(jt.velocity)}"/>')
         elif jt.type == "continuous":
             out.append(f'    <limit effort="{_f(jt.effort)}" velocity="{_f(jt.velocity)}"/>')

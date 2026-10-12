@@ -9,7 +9,9 @@ AppLauncher must be started by the caller BEFORE importing this module.
 
 Action  (all in [-1, 1]):  [drive, turn, tool_1, ..., tool_k]
     drive  +1 = full forward speed, -1 = full reverse speed
-    turn   +1 = turn left (CCW from above), -1 = right
+    turn   +1 = steer left, -1 = right.  Driving forward that yaws CCW (left).
+           Wheeled machines (Ackermann / articulated) yaw CW when reversing with
+           left steer, like a car; skid machines always yaw CCW for turn > 0.
     tool_i +1 = tool joint at its maximum rate in its "positive" direction
             (see assets/heavy_machines/<name>/<name>.json for labels and units)
 
@@ -18,6 +20,7 @@ Observation dict:
                  x, y are env-local (relative to the env origin)
     "joint_pos"  (N, J):     every articulation joint, in articulation order
     "base_pose_w"(N, 7):     world position + quaternion (w, x, y, z)
+    "base_twist_body"(N, 3): root-origin velocity in the root frame (vx, vy, yaw_rate)
     "rgb_front", "rgb_left", "rgb_right" (N, H, W, 3/4) when cameras are enabled
 
 How the machine moves
@@ -25,15 +28,17 @@ How the machine moves
 Like the forklift environment, the base is moved kinematically: every physics
 substep the environment integrates the drive model (skid steer, Ackermann or
 articulated), writes the root pose/velocity, and writes every joint position
-directly (tools, steering, articulation, cosmetic wheel spin). Gravity is
-disabled on the machine so it never sags; the ground plane and props still
-collide with it. This keeps motion exact and stable for data collection,
-at the cost of no load/terrain dynamics.
+directly (tools, steering, articulation, per-wheel rolling). PhysX is given zero
+velocities, so it never moves the machine away from that pose; gravity is off so
+nothing sags. Motion is exact and repeatable for data collection, but there are
+no load/terrain dynamics, and props do NOT stop the machine (it passes through
+them). Props are placed in an annulus outside the area scripted episodes use.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import random
 
 import torch
@@ -76,19 +81,23 @@ class HeavyMachineEnvCfg(DirectRLEnvCfg):
 
     enable_cameras: bool = True
     camera_resolution: tuple = (224, 224)     # (W, H)
-    camera_update_hz: float = 15.0
+    # 0 → refresh on every control step (a fixed period drifts in float32 and
+    # repeats frames). Collectors subsample themselves.
+    camera_update_period: float = 0.0
+    # Re-render after a reset so the first frame of an episode shows the new spawn.
+    num_rerenders_on_reset: int = 3
 
     # Spawn: env-local (x, y, yaw_rad); used when randomize_spawn is False.
     spawn_pose: tuple = (0.0, 0.0, 0.0)
     randomize_spawn: bool = False
-    spawn_region: tuple = (-8.0, -8.0, 8.0, 8.0)   # xmin, ymin, xmax, ymax
+    spawn_region: tuple = (-5.0, -5.0, 5.0, 5.0)   # xmin, ymin, xmax, ymax
     spawn_seed: int | None = None
 
     # Construction-site props (static colliders) in an annulus around each env origin.
     n_props: int = 28
     props_seed: int = 0
-    props_inner_radius: float = 14.0
-    props_outer_radius: float = 34.0
+    props_inner_radius: float = 32.0      # clear of spawn region + scripted excursions
+    props_outer_radius: float = 55.0
 
     status_interval: int = 60                 # control steps between status lines; 0 = silent
 
@@ -115,9 +124,11 @@ def articulation_cfg(spec: MachineSpec, prim_path: str, fix_base: bool = False) 
         prim_path=prim_path,
         spawn=sim_utils.UrdfFileCfg(
             asset_path=urdf_path,
+            # Cache the converted USD next to the URDF (re-imported only when the
+            # URDF or these settings change); git-ignored.
+            usd_dir=os.path.join(os.path.dirname(urdf_path), "usd_fixed" if fix_base else "usd"),
             fix_base=fix_base,
             merge_fixed_joints=True,
-            make_instanceable=True,
             joint_drive=UrdfConverterCfg.JointDriveCfg(
                 drive_type="force", target_type="position", gains=gains),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
@@ -201,7 +212,7 @@ class HeavyMachineEnv(DirectRLEnv):
             for cam in spec.cameras:
                 self.cams[cam.name] = Camera(CameraCfg(
                     prim_path=f"/World/envs/env_.*/MachineCam_{cam.name}",
-                    update_period=1.0 / self.cfg.camera_update_hz,
+                    update_period=self.cfg.camera_update_period,
                     height=h, width=w,
                     data_types=["rgb"],
                     spawn=sim_utils.PinholeCameraCfg(
@@ -218,6 +229,7 @@ class HeavyMachineEnv(DirectRLEnv):
 
     def _spawn_site_props(self):
         """Static construction-site clutter (dirt piles, boulders, barriers, cones, pipes)."""
+        sim_utils.create_prim("/World/envs/env_0/Site", "Xform")
         rng = random.Random(self.cfg.props_seed)
         r_in, r_out = self.cfg.props_inner_radius, self.cfg.props_outer_radius
         col = sim_utils.CollisionPropertiesCfg()
@@ -279,9 +291,6 @@ class HeavyMachineEnv(DirectRLEnv):
         self._tool_hi = torch.tensor([j.upper if j.type != "continuous" else math.inf for j in tools], device=dev)
         self._tool_wrap = torch.tensor([j.type == "continuous" for j in tools], dtype=torch.bool, device=dev)
 
-        self._roll: list[tuple[int, str, float]] = [
-            (self._jidx[j.name], j.role, j.wheel_radius) for j in spec.joints_with_role(*ROLLING_ROLES)]
-
         jf = K.joint_frames(spec)
         steers = spec.joints_with_role("steer")
         self._steer_ids = torch.tensor([self._jidx[j.name] for j in steers], dtype=torch.long, device=dev)
@@ -290,14 +299,35 @@ class HeavyMachineEnv(DirectRLEnv):
         d = spec.drive
         self._artic_idx = -1
         self._artic_lo = self._artic_hi = 0.0
-        self._x_ref = 0.0
+        self._hinge = (0.0, 0.0)
+        self.x_ref = 0.0          # x (root frame) of the axle point that rolls without side slip
+        rear_links: set[str] = set()
         if d.type == "articulated":
             aj = spec.joint(d.articulation_joint)
             self._artic_idx = self._jidx[aj.name]
             self._artic_lo, self._artic_hi = aj.lower, aj.upper
-            self._x_ref = jf[aj.name].t[0] + d.front_length       # front axle in root frame
+            self._hinge = (jf[aj.name].t[0], jf[aj.name].t[1])
+            self.x_ref = jf[aj.name].t[0] + d.front_length         # front axle in root frame
+            rear_links = set(K.subtree_links(spec, aj.child))
+            rear_inv = K.Tf(K.transpose(jf[aj.name].R),
+                            K.vscale(K.mat_vec(K.transpose(jf[aj.name].R), jf[aj.name].t), -1.0))
         elif d.type == "ackermann":
-            self._x_ref = d.fixed_axle_x
+            self.x_ref = d.fixed_axle_x
+
+        # Rolling elements: (joint idx, spin sign, radius, frame, x, y, steer joint idx or -1).
+        # Each wheel spins at its own ground speed (inner/outer, steered, rear frame).
+        child_of = {j.child: j for j in spec.joints}
+        self._roll = []
+        for j in spec.joints_with_role(*ROLLING_ROLES):
+            sign = 1.0 if K.vunit(j.axis)[1] > 0 else -1.0
+            parent_joint = child_of.get(j.parent)
+            steer_idx = self._jidx[parent_joint.name] if parent_joint and parent_joint.role == "steer" else -1
+            p = jf[j.name].t
+            if j.child in rear_links:
+                pr = rear_inv.apply(p)
+                self._roll.append((self._jidx[j.name], sign, j.wheel_radius, "rear", pr[0], pr[1], -1))
+            else:
+                self._roll.append((self._jidx[j.name], sign, j.wheel_radius, "root", p[0], p[1], steer_idx))
 
         self._followers = []
         for j in spec.joints_with_role("follower"):
@@ -305,6 +335,7 @@ class HeavyMachineEnv(DirectRLEnv):
             lo, hi = (j.lower, j.upper) if j.type != "continuous" else (-math.inf, math.inf)
             self._followers.append((self._jidx[j.name], self._jidx[src], k, c, lo, hi))
 
+        self._x_ref = self.x_ref   # backwards-compatible alias
         q0 = [0.0] * self._num_joints
         for j in spec.movable_joints:
             q0[self._jidx[j.name]] = j.init
@@ -340,6 +371,7 @@ class HeavyMachineEnv(DirectRLEnv):
         # --- base kinematics ------------------------------------------------
         if d.type == "skid":
             w = turn * d.max_yaw_rate
+            g_dot = torch.zeros_like(v)
         elif d.type == "ackermann":
             s = 1.0 if d.steer_axle == "front" else -1.0
             # speed-dependent lock: |v·w| = v²·tan(δ)/L ≤ max_lat_accel
@@ -354,8 +386,10 @@ class HeavyMachineEnv(DirectRLEnv):
             r_icr = s * d.wheelbase / torch.where(ok, tan_d, torch.ones_like(tan_d))
             ang = s * torch.atan(d.wheelbase / (r_icr.unsqueeze(1) - self._steer_y.unsqueeze(0)))
             ang = torch.where(ok.unsqueeze(1), ang, torch.zeros_like(ang))
+            prev = self._q[:, self._steer_ids].clone()
             self._q[:, self._steer_ids] = ang
-            qd[:, self._steer_ids] = step.unsqueeze(1) / dt
+            qd[:, self._steer_ids] = (ang - prev) / dt
+            g_dot = torch.zeros_like(v)
         else:  # articulated
             g_max = min(abs(self._artic_lo), abs(self._artic_hi))
             # speed-dependent lock: |v·w| ≈ v²·sin(γ)/(Lf+Lr) ≤ max_lat_accel
@@ -380,16 +414,20 @@ class HeavyMachineEnv(DirectRLEnv):
         self._yaw = torch.atan2(torch.sin(self._yaw + w * dt), torch.cos(self._yaw + w * dt))
         self._speed, self._yaw_rate = v, w
 
-        # --- cosmetic rolling elements --------------------------------------
-        half_w = 0.5 * d.track_width
-        for idx, role, radius in self._roll:
-            if role == "roll_left":
-                sp = v - w * half_w
-            elif role == "roll_right":
-                sp = v + w * half_w
-            else:
-                sp = v
-            omega = sp / radius
+        # --- rolling elements: each at its own ground speed ------------------
+        # Root-frame velocity of a point (x, y) on the root: (v - w*y, w*(x - x_ref)).
+        for idx, sign, radius, frame, px, py, steer_idx in self._roll:
+            if frame == "root":
+                sp = v - w * py
+                if steer_idx >= 0:
+                    phi = self._q[:, steer_idx]
+                    sp = sp * torch.cos(phi) + w * (px - self.x_ref) * torch.sin(phi)
+            else:  # rear frame of an articulated machine
+                hx, hy = self._hinge
+                g = self._steer
+                vh_x, vh_y = v - w * hy, w * (hx - self.x_ref)
+                sp = torch.cos(g) * vh_x + torch.sin(g) * vh_y - (w + g_dot) * py
+            omega = sign * sp / radius
             ang = self._q[:, idx] + omega * dt
             self._q[:, idx] = torch.atan2(torch.sin(ang), torch.cos(ang))
             qd[:, idx] = omega
@@ -397,16 +435,17 @@ class HeavyMachineEnv(DirectRLEnv):
         # --- tools --------------------------------------------------------------
         if len(spec.tools):
             rate = a[:, 2:] * self._tool_rate
-            q = self._q[:, self._tool_ids] + rate * dt
+            q_old = self._q[:, self._tool_ids]
+            q = q_old + rate * dt
             q = torch.where(self._tool_wrap, torch.atan2(torch.sin(q), torch.cos(q)),
                             torch.maximum(torch.minimum(q, self._tool_hi), self._tool_lo))
-            hit = (q <= self._tool_lo) | (q >= self._tool_hi)
             self._q[:, self._tool_ids] = q
-            qd[:, self._tool_ids] = torch.where(hit, torch.zeros_like(rate), rate)
+            qd[:, self._tool_ids] = torch.where(self._tool_wrap, rate, (q - q_old) / dt)
 
         for idx, src, k, c0, lo, hi in self._followers:
-            self._q[:, idx] = (k * self._q[:, src] + c0).clamp(lo, hi)
-            qd[:, idx] = k * qd[:, src]
+            val = k * self._q[:, src] + c0
+            self._q[:, idx] = val.clamp(lo, hi)
+            qd[:, idx] = torch.where((val < lo) | (val > hi), torch.zeros_like(val), k * qd[:, src])
         self._qd = qd
 
         self._write_state()
@@ -430,15 +469,12 @@ class HeavyMachineEnv(DirectRLEnv):
     def _write_state(self, env_ids=None):
         ids = slice(None) if env_ids is None else env_ids
         pose = self._root_pose_w(env_ids)
-        vel = torch.zeros(pose.shape[0], 6, device=self.device)
-        if env_ids is None:
-            c, s = torch.cos(self._yaw), torch.sin(self._yaw)
-            vel[:, 0] = self._speed * c + self._x_ref * self._yaw_rate * s
-            vel[:, 1] = self._speed * s - self._x_ref * self._yaw_rate * c
-            vel[:, 5] = self._yaw_rate
+        # The pose is authoritative: PhysX gets zero velocities so it never moves the
+        # machine (or its cameras' view of it) away from this pose during the substep.
+        # True velocities live in self._qd / observations.
         self.robot.write_root_pose_to_sim(pose, env_ids=env_ids)
-        self.robot.write_root_velocity_to_sim(vel, env_ids=env_ids)
-        self.robot.write_joint_state_to_sim(self._q[ids], self._qd[ids], env_ids=env_ids)
+        self.robot.write_root_velocity_to_sim(torch.zeros(pose.shape[0], 6, device=self.device), env_ids=env_ids)
+        self.robot.write_joint_state_to_sim(self._q[ids], torch.zeros_like(self._q[ids]), env_ids=env_ids)
         self.robot.set_joint_position_target(self._q[ids], env_ids=env_ids)
 
     # ------------------------------------------------------------------
@@ -481,8 +517,10 @@ class HeavyMachineEnv(DirectRLEnv):
             self._steer.unsqueeze(1),
             self._q[:, self._tool_ids],
         ], dim=1)
+        twist = torch.stack([self._speed, -self.x_ref * self._yaw_rate, self._yaw_rate], dim=1)
         obs = {"policy": state, "state": state, "joint_pos": self._q.clone(),
-               "base_pose_w": self._root_pose_w()}
+               "joint_vel": self._qd.clone(), "base_pose_w": self._root_pose_w(),
+               "base_twist_body": twist}
         for name, cam in self.cams.items():
             obs[f"rgb_{name}"] = cam.data.output["rgb"]
 

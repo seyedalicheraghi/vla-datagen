@@ -17,30 +17,46 @@ Datasheet numbers (Grove RT540E product guide, rounded):
 Assumed / typical for the class:
     tread (tyre centre to centre) 2.02 m → width over tyres 2.54 m · carrier
     deck 1.65 m above ground, slewing-ring top 1.85 m · boom foot pin 3.0 m above
-    ground, 1.55 m behind the slew axis · base section 0.72 × 0.86 m ·
-    single lift cylinder (≈ 3.6 m closed, 5.0 m extended) · 2-part hoist
-    reeving, hook block ≈ 0.4 t · max virtual steer 0.55 rad (inner wheel 37°,
-    2-wheel-steer only — crab / 4-wheel steer are not modelled) · steer rate
-    0.3 rad/s · counterweight 4.3 t in the superstructure link · optional
-    bi-fold lattice jib shown stowed on the right of the base section (visual).
+    ground, 1.55 m behind the slew axis · base section 0.72 × 0.86 m · drop-nose
+    boom head, 0.68 m head sheave · single-stage lift cylinder low in the
+    turntable front (2.7 m closed, 4.2 m extended pin to pin, ≈ 10° in travel)
+    · 2-part hoist reeving, hook block ≈ 0.4 t · max virtual steer 0.55 rad
+    (inner wheel 37°, 2-wheel-steer only — crab / 4-wheel steer are not
+    modelled) · steer rate 0.3 rad/s · counterweight 4.3 t in the
+    superstructure link · optional bi-fold lattice jib shown stowed on the
+    right of the base section (visual).
 
 Joint ranges / rates (rad, m; per second at full command):
     slew           continuous, 0.26 rad/s (2.5 rpm, datasheet)
-    boom_luff      -0.05..+1.35 rad (-3°..+77°); 0.10 rad/s
+    boom_luff      0..+1.35 rad (0°..+77°); 0.10 rad/s
     boom_telescope 0..7.2 m per section (three sections in lock-step →
                    9.4-31.0 m boom); 0.50 m/s per section (1.5 m/s at the tip)
-    hoist          rope length 0.8..14.0 m below the head sheave; 1.0 m/s
+    hoist          rope length 0.8..14.0 m below the head-sheave pin; 1.0 m/s
                    (2-part reeving at ≈ 120 m/min line speed)
     Luff and telescope rates are 2-5 × the real machine's (luff ≈ 35 s,
-    full telescope ≈ 75 s) because the environment tests require every tool
-    to traverse its full range within 15 s.
+    full telescope ≈ 75 s) so each tool crosses its range in ≤ 15 s and
+    scripted episodes stay short.
+
+Deviations: the luff stops at 0° instead of the datasheet's -3°.  Below 0°
+telescoping drives the boom head (and the hook under it) toward the ground —
+at -3° and full extension the hook would be ≈ 1 m below grade.  At 0° the
+head-pin height does not depend on the telescope.  The hook block is visual
+only (no collision shapes): its height comes from the rope length alone, so a
+block paid out into the ground must not fight the ground plane.
 
 Init pose = travel pose: superstructure facing forward, boom fully retracted
-and lowered to -3° over the front of the carrier, hook block hoisted up to
-0.8 m below the head sheave (hook 0.3 m above ground, 3.9 m ahead of the
-front bumper).  Model check (offline FK): L × W × H 12.22 × 2.58 × 3.45 m
-(width over the hub caps), head-sheave height 33.2 m at 77° fully extended
-(datasheet tip height ≈ 33.5 m), tail-swing radius 3.85 m, mass 29.7 t.
+and level over the front of the carrier, hook block hoisted to 0.8 m below
+the head-sheave pin and hanging free (the bumper tie-down is not used): hook
+0.67 m above ground, 4.1 m ahead of the front bumper.  Model check (offline
+FK): L × W × H 12.55 × 2.58 × 3.51 m (width over the hub caps), head-sheave
+top 33.5 m above ground at 77° fully extended (datasheet tip height ≈ 33.5 m),
+tail-swing radius 3.85 m, mass 29.7 t, lowest carrier point 0.44 m (axle
+differentials; stowed outrigger pads 0.47 m).
+
+Rigging: both falls leave the FRONT of the head sheave (level-frame x =
+SHEAVE_R, side by side in y), so the block hangs ahead of the boom nose and
+clears it at every luff angle and rope length.  The hoist line runs from the
+winch drum over the top of the boom sections into the head sheave.
 
 Cosmetic followers: telescope sections 3 and 4 follow section 2 (k = 1); the
 hook swivel counter-rotates the luff angle (k = -1) so the hook block and
@@ -70,13 +86,13 @@ SLEW_Z = 1.10                        # top of the slewing ring (1.845 m above gr
 
 # --- Superstructure (z' = 0 at the top of the slewing ring) ---------------------------
 FOOT = (-1.55, 0.0, 1.15)            # boom foot pin
-LIFT_BASE = (-0.95, 0.25)            # lift-cylinder base pin (x', z')
+LIFT_BASE = (-1.00, 0.05)            # lift-cylinder base pin (x', z'), low in the turntable front
 CAB = (-0.75, 0.95, 0.45, 1.25, 0.02, 1.42)   # x0, x1, y0, y1, z0, z1 (left of the boom)
 
 # --- Boom (boom frame: origin at the foot pin, x along the boom) -------------------------
 LUFF_LO, LUFF_HI = 0.0, 1.35         # datasheet -3°..+78°; see "Deviations" above
 TELE_STROKE = 7.20                   # per section
-LIFT_EYE = (4.20, -0.50)             # lift-cylinder eye under the base section
+LIFT_EYE = (3.20, -0.70)             # lift-cylinder eye in a bracket under the base section
 HEAD_PIN = (9.40, -0.24)             # head sheave pin (on the fly section, retracted): drop nose,
 SHEAVE_R = 0.34                      # sheave hangs 0.32 m below the fly section like the real head
 JIB_X = (2.30, 8.45)                 # stowed jib extent along the base section
@@ -92,6 +108,7 @@ FALL_Y, ROPE_R = 0.06, 0.022         # the two falls side by side at y = ±FALL_
 SEG_LEN = 1.45                       # each rope piece (both falls)
 SEG_MID = SEG_LEN / 2                # piece centre depth at ROPE_MIN: sheave tangent → into the block
 N_SEG = 9                            # sliding rope segments: gaps stay closed up to ROPE_MAX
+assert (ROPE_MAX - ROPE_MIN) / (N_SEG + 1) <= SEG_LEN - 0.05, "rope pieces would gap: add segments"
 
 
 # ---------------------------------------------------------------------------------
@@ -239,11 +256,13 @@ def _stowed_jib() -> list[Shape]:
 def build() -> MachineSpec:
     y_t = TREAD / 2
     z_deck = (DECK_BOT + DECK_TOP) / 2
+    rope_z = SECTIONS[0][3] / 2 + ROPE_R + 0.005                 # hoist line over the boom (taut)
 
     # ------------------------------------------------------------------ carrier
     out_x = 3.60                                                     # outrigger box centres (±)
     carrier_shapes = [
-        box(6.50, 0.84, DECK_BOT + 0.12, at=(0.0, 0.0, (DECK_BOT - 0.12) / 2), mat="dark"),  # frame
+        # frame (0.70 m wide so the inner tyre clears it at full lock)
+        box(6.50, 0.70, DECK_BOT + 0.12, at=(0.0, 0.0, (DECK_BOT - 0.12) / 2), mat="dark"),
         box(6.50, 2.54, DECK_TOP - DECK_BOT, at=(0.0, 0.0, z_deck)),                        # deck
         cyl(0.95, 0.20, at=(0.0, 0.0, SLEW_Z - 0.10), mat="dark"),                          # slewing ring
         cyl(0.85, 0.04, at=(0.0, 0.0, SLEW_Z - 0.02), mat="steel", collision=False),
@@ -258,11 +277,11 @@ def build() -> MachineSpec:
             box(0.70, 2.40, 0.70, at=(sx * out_x, 0.0, 0.55)),
             *[t for sy in (1.0, -1.0) for t in (
                 box(0.38, 0.20, 0.95, at=(sx * out_x, sy * 1.16, 0.40)),
-                cyl(0.08, 0.30, at=(sx * out_x, sy * 1.16, -0.20), mat="steel"),
-                box(0.36, 0.22, 0.05, at=(sx * out_x, sy * 1.16, -0.37), mat="dark"),
+                cyl(0.08, 0.30, at=(sx * out_x, sy * 1.16, -0.10), mat="steel"),
+                box(0.36, 0.22, 0.05, at=(sx * out_x, sy * 1.16, -0.25), mat="dark"),  # 0.47 m up
                 box(0.02, 0.18, 0.40, at=(sx * (out_x + 0.20), sy * 1.16, 0.55), mat="accent",
                     collision=False))])],
-        # bumpers, lights, hook-block tie-down
+        # bumpers, lights, hook-block tie-down (unused: the block hangs free in travel)
         box(0.12, 2.00, 0.28, at=(3.99, 0.0, 0.30), mat="dark"),
         box(0.12, 2.00, 0.28, at=(-3.99, 0.0, 0.30), mat="dark"),
         *[box(0.04, 0.22, 0.14, at=(3.97, sy * 0.80, 0.70), mat="white", collision=False)
@@ -305,8 +324,8 @@ def build() -> MachineSpec:
             beam((fx + 0.45, 1.05), (fx + 1.35, 0.30), 0.08, 0.30, y=sy * 0.42),
             cyl(0.30, 0.08, at=(fx, sy * 0.42, fz), axis="y"))],
         cyl(0.10, 1.00, at=FOOT, axis="y", mat="steel", collision=False),
-        # lift-cylinder base bracket
-        box(0.45, 0.50, 0.30, at=(LIFT_BASE[0], 0.0, LIFT_BASE[1]), mat="dark", collision=False),
+        # lift-cylinder base clevis (the pin sits low in the turntable front)
+        box(0.45, 0.50, 0.30, at=(LIFT_BASE[0], 0.0, 0.20), mat="dark", collision=False),
         # counterweight (4.3 t) with rounded rear corners and a black band
         box(0.80, 2.00, 1.00, at=(-3.30, 0.0, 0.55)),
         cyl(0.30, 1.00, at=(-3.40, 0.95, 0.55)),
@@ -322,6 +341,9 @@ def build() -> MachineSpec:
         cyl(0.13, 0.30, at=(-2.58, -0.65, 0.92), axis="y", mat="dark", collision=False),  # hoist motor
         *[cyl(0.305, 0.03, at=(-2.58, y, 0.92), axis="y", mat="steel", collision=False)
           for y in (-0.25, -0.05, 0.15, 0.35)],                                          # rope wraps
+        # hoist line from the drum to the top of the boom above the foot pin (meets the
+        # boom-top rope at 0° luff; at higher luff its end hides inside the boom)
+        rod((-2.58, 0.92 + 0.305 + ROPE_R), (fx, fz + rope_z), ROPE_R),
         # right-hand hydraulic tank / valve housing with grille and handrail
         box(2.30, 0.60, 0.80, at=(-0.75, -0.85, 0.40)),
         box(1.20, 0.02, 0.40, at=(-0.90, -1.16, 0.45), mat="accent", collision=False),
@@ -351,11 +373,19 @@ def build() -> MachineSpec:
     rod_len = l_max - barrel_len + 0.30
 
     # ------------------------------------------------------------------- boom
+    lug_top = -SECTIONS[0][3] / 2 + 0.02                         # eye bracket: boom underside → eye
+    lug_h = lug_top - (LIFT_EYE[1] - 0.12)
+
+    def top_rope(x0: float, x1: float) -> Shape:
+        return cyl(ROPE_R, x1 - x0, at=((x0 + x1) / 2, 0.0, rope_z), axis="x", mat="steel",
+                   collision=False)
+
     boom_base = Link("boom_base", 3350.0, [
         *_section(0),
+        top_rope(0.0, SECTIONS[0][1]),
         *_stowed_jib(),
         cyl(0.22, 0.76, axis="y", mat="steel", collision=False),                      # foot boss
-        box(0.40, 0.34, 0.18, at=(LIFT_EYE[0], 0.0, LIFT_EYE[1] + 0.12), mat="dark",
+        box(0.40, 0.34, lug_h, at=(LIFT_EYE[0], 0.0, lug_top - lug_h / 2), mat="dark",
             collision=False),                                                            # eye lugs
         cyl(0.20, 0.10, at=(1.10, -0.42, 0.05), axis="y", mat="dark", collision=False),  # A2B cable reel
         box(0.10, 0.06, 0.08, at=(7.8, 0.40, 0.25), mat="white", collision=False),       # boom light
@@ -363,18 +393,21 @@ def build() -> MachineSpec:
     hx, hz = HEAD_PIN
     top, bot = SECTIONS[3][3] / 2 + 0.04, hz - SHEAVE_R - 0.04       # head cheek plates (z)
     sec4_shapes = _section(3) + [
-        *[box(0.70, 0.06, top - bot, at=(hx - 0.05, sy * 0.19, (top + bot) / 2)) for sy in (1.0, -1.0)],
+        *[box(0.70, 0.06, top - bot, at=(hx - 0.05, sy * 0.19, (top + bot) / 2))
+          for sy in (1.0, -1.0)],
         box(0.64, 0.44, 0.06, at=(hx - 0.07, 0.0, top), collision=False),                # head cover
         cyl(SHEAVE_R, 0.24, at=(hx, 0.0, hz), axis="y", mat="steel", collision=False),  # head sheave
         cyl(0.07, 0.52, at=(hx, 0.0, hz), axis="y", mat="dark", collision=False),        # sheave pin
-        cyl(0.02, 0.30, at=(hx - 0.20, 0.0, top + 0.18), mat="accent", collision=False),  # anemometer
-        sphere(0.05, at=(hx - 0.20, 0.0, top + 0.34), mat="accent", collision=False),
+        top_rope(SECTIONS[3][0], hx - 0.50),                                             # hoist line
+        rod((hx - 0.50, rope_z), (hx, hz + SHEAVE_R + ROPE_R), ROPE_R),                  # to the sheave
+        cyl(0.02, 0.12, at=(hx - 0.20, 0.15, top + 0.09), mat="accent", collision=False),  # anemometer
+        sphere(0.035, at=(hx - 0.20, 0.15, top + 0.17), mat="accent", collision=False),
         box(0.04, 0.10, 0.10, at=(hx + 0.32, 0.15, top - 0.10), mat="red", collision=False),
     ]
     boom_links = [
         boom_base,
-        Link("boom_sec2", 1250.0, _section(1)),
-        Link("boom_sec3", 1000.0, _section(2)),
+        Link("boom_sec2", 1250.0, _section(1) + [top_rope(*SECTIONS[1][:2])]),
+        Link("boom_sec3", 1000.0, _section(2) + [top_rope(*SECTIONS[2][:2])]),
         Link("boom_sec4", 850.0, sec4_shapes),
     ]
 
@@ -394,8 +427,6 @@ def build() -> MachineSpec:
         return [cyl(ROPE_R, SEG_LEN, at=(x, sy * FALL_Y, z), mat="steel", collision=False)
                 for sy in (1.0, -1.0)]
 
-    # rope pieces must overlap at full pay-out: spacing (ROPE_MAX - ROPE_MIN) / (N_SEG + 1)
-    assert (ROPE_MAX - ROPE_MIN) / (N_SEG + 1) <= SEG_LEN - 0.05, "add rope segments"
     swivel = Link("hook_swivel", 20.0, falls(-SEG_MID, HOOK_X))
     # The block is visual only (no collision): positions are written kinematically and
     # there is no load physics, so a block paid out into the ground must not fight it.
@@ -429,9 +460,11 @@ def build() -> MachineSpec:
     wheel_links, wheel_joints, knuckles, steer_joints = [], [], [], []
     for side, sy in (("left", 1.0), ("right", -1.0)):
         kn = f"front_{side}_knuckle"
+        # Planetary steer axle: king pin on the steer axis inside the dished rim (as on real
+        # crane axles), knuckle stub between it and the axle end (inside the rim as well).
         knuckles.append(Link(kn, 120.0, [
-            cyl(0.15, 0.24, at=(0.0, -sy * 0.39, 0.0), axis="y", mat="dark"),
-            cyl(0.09, 0.40, at=(0.0, -sy * 0.42, 0.0), mat="dark", collision=False),     # king pin
+            cyl(0.15, 0.20, at=(0.0, -sy * 0.17, 0.0), axis="y", mat="dark"),
+            cyl(0.09, 0.40, mat="dark", collision=False),                                 # king pin
         ]))
         steer_joints.append(Joint(f"front_{side}_steer_joint", "revolute", "carrier", kn,
                                   xyz=(X_FRONT, sy * y_t, 0.0), axis=(0, 0, 1),
@@ -489,9 +522,10 @@ def build() -> MachineSpec:
             Tool("hoist_joint", "hoist", positive="lower", negative="raise"),
         ],
         cameras=[
-            # operator eye height just ahead of the windscreen, looking along the boom; only
-            # slightly down so the hook stays in view when it is lifted (up to ≈ 40° elevation)
-            Camera("front", "superstructure", (CAB[1] + 0.04, 0.85, 1.05), (0.0, 0.08, -0.10)),
+            # operator eye height just ahead of the windscreen, looking along the boom and 20°
+            # UP (the cab's roof-window view): the boom head stays in view up to ≈ 53° luff and
+            # the travel-pose hook near the bottom; the deck hides the near ground anyway
+            Camera("front", "superstructure", (CAB[1] + 0.04, 0.85, 1.05), (0.0, -0.35, -0.10)),
             # front-left corner of the cab roof / front-right corner of the hydraulic tank
             Camera("left", "superstructure", (CAB[1] + 0.03, CAB[3] + 0.02, CAB[5] + 0.08),
                    (0.0, 0.30, 0.65)),
@@ -505,5 +539,6 @@ def build() -> MachineSpec:
                           ("boom_sec2", "boom_sec4")],
         notes=("Hoist +1 pays out rope (hook down). Telescope sections 3/4, the hook swivel, "
                "rope segments and the lift cylinder are cosmetic followers. Outriggers are "
-               "shown stowed and are not actuated."),
+               "shown stowed and are not actuated. The hook block has no collision shapes and the "
+               "hoist is not stopped at the ground (paying out at low luff buries the hook)."),
     )

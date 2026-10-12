@@ -300,7 +300,7 @@
     <parent link="front_frame"/><child link="rear_frame"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.593" upper="0.593" effort="10000000" velocity="0.3"/>
+    <limit lower="-0.5931" upper="0.5931" effort="10000000" velocity="0.3"/>
   </joint>
   <joint name="drum_joint" type="continuous">
     <parent link="front_frame"/><child link="drum"/>
@@ -312,19 +312,19 @@
     <parent link="front_frame"/><child link="blade"/>
     <origin xyz="1.1 0 0.353" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.405" upper="0" effort="10000000" velocity="0.16"/>
+    <limit lower="-0.4051" upper="0.0001" effort="10000000" velocity="0.16"/>
   </joint>
   <joint name="blade_cylinder_joint" type="revolute">
     <parent link="front_frame"/><child link="blade_cylinders"/>
     <origin xyz="1.7 0 0.533" rpy="0 0.821118 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.291762" upper="0.291762" effort="10000000" velocity="0.314725"/>
+    <limit lower="-0.291861564" upper="0.291861564" effort="10000000" velocity="0.314725"/>
   </joint>
   <joint name="blade_cylinder_rod_joint" type="prismatic">
     <parent link="blade_cylinders"/><child link="blade_cylinder_rods"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.015657" upper="0.230489" effort="10000000" velocity="0.189341"/>
+    <limit lower="-0.0157567872" upper="0.23058856" effort="10000000" velocity="0.189341"/>
   </joint>
   <joint name="rear_left_wheel_joint" type="continuous">
     <parent link="rear_frame"/><child link="rear_left_wheel"/>

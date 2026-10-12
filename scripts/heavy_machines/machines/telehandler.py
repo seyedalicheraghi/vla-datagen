@@ -1,4 +1,4 @@
-"""Telehandler (TH), 17 m / 4 t class — modelled on a JCB 540-170 Loadall (CAT TH514D class).
+"""Telehandler (TH), 17 m / 4 t class — modelled on a JCB 540-170 Loadall (CAT TH417D class).
 
 Datasheet numbers used (JCB 540-170 static-dimension / performance sheet, rounded):
     max lift height 16.7 m · max forward reach 12.5 m · max payload 4.0 t ·
@@ -6,46 +6,60 @@ Datasheet numbers used (JCB 540-170 static-dimension / performance sheet, rounde
     carriage face, 5.08 m to the front tyres (7.56 m with 1.2 m pallet forks) ·
     overall width 2.44 m over tyres · overall height 2.69 m (cab roof) ·
     wheelbase 2.75 m · stabiliser width deployed 3.55 m · 4-speed powershift.
+    (The brief named the CAT TH514D, which is CAT's 5 t / 14 m machine; the
+    4 t / 17 m CAT equivalent of the 540-170 is the TH417D.)
 Assumed / typical for the class:
     ≈ 30 km/h top speed · 500/70 R24 tyres (Ø 1.31 m, 0.50 m section) → track 1.94 m · ground
     clearance ≈ 0.40 m · JCB side-engine layout: cab on the left, boom pivot at
     the rear (1.75 m above the ground, 1.30 m behind the rear axle) with the
     boom running down the right-hand side of the cab, engine bay on the right
-    under the boom · four-section boom (base + 3 telescopic sections, the
-    outer two chain/rope-synchronised to the first one → followers with k = 1),
-    5.63 m retracted / 16.77 m extended pivot-to-carriage-pin (3 × 3.71 m
-    stroke), carriage pin on a 0.30 m drop nose below the boom axis ·
-    single lift ram between a chassis lug behind the rear axle and the boom
-    belly (2.43 → 3.47 m pin to pin) · automatic carriage compensation (the
-    master/slave levelling rams keep the fork angle constant while luffing) ·
-    folded front stabilisers (not driven) · front-wheel Ackermann steer
-    (the real machine also has 4WS / crab modes).
-Model check (offline FK): forks 0.12-0.14 m above the ground in the travel
-    pose; fork underside 16.70 m above the ground at boom 69.3° / full
-    extension (forks level); 12.50 m reach from the front tyres to the fork
-    heel at boom 0° / full extension; carriage exactly level at every luff
-    angle with fork_tilt = 0 · lift ram ≈ 0.6 m minimum lever arm about the
-    foot pin over the whole luff range (barrel / rod are linear-fit followers,
-    ≤ 9 cm lateral pin miss at the range ends and mid-range) · inner / outer
-    front wheel 46.1° / 30.9° at max_steer 0.65 rad (2WS turning radius
-    ≈ 5.6 m over the outer tyre) · travel-pose envelope 7.63 × 2.48 × 2.69 m.
+    under the boom · box-frame side rails ending behind the front tyres and a
+    narrow (0.50 m) front nose carrying the steer axle and the folded
+    stabilisers ahead of the tyres, so the steered tyres clear everything at
+    full lock · four-section boom (base + 3 telescopic sections, rope/chain
+    synchronised so each strokes a third of the total), 5.57 m retracted /
+    16.77 m extended pivot-to-carriage-pin (11.2 m total extension), carriage
+    pin in a rounded drop nose 0.30 m below the boom axis · single lift ram
+    between a chassis lug behind the rear axle and the boom belly (2.49 →
+    3.47 m pin to pin) · automatic carriage compensation (the master/slave
+    levelling rams keep the fork angle constant while luffing) · quick-hitch
+    carriage with two side plates straddling the boom nose · folded front
+    stabilisers (not driven) · front-wheel Ackermann steer (the real machine
+    also has 4WS / crab modes).
+Model check (offline FK): fork underside 0.56 m above the ground in the travel
+    pose (boom fully lowered and retracted) and 0.03 m at full extension with
+    the boom fully lowered, so no luff / telescope combination puts the
+    carriage below grade; fork underside 16.70 m above the ground at boom
+    69.2° / full extension (forks level); 12.50 m reach from the front tyres
+    to the fork heel at boom 0° / full extension; carriage exactly level at
+    every luff angle with fork_tilt = 0 · lift ram ≈ 0.6 m minimum lever arm
+    about the foot pin over the whole luff range (barrel / rod are linear-fit
+    followers, ≤ 8 cm lateral pin miss) · inner / outer front wheel 46.1° /
+    30.9° at max_steer 0.65 rad (2WS turning radius ≈ 5.6 m over the outer
+    tyre); no tyre / mudguard / chassis overlap anywhere in the lock range ·
+    no carriage / boom overlap over the luff × telescope × tilt range ·
+    travel-pose envelope 7.63 × 2.49 × 2.69 m.
 
 Joint ranges and rates at full command:
-    boom_luff       -0.127 (forks just above the ground) … +1.209 rad (69.3°),
-                    0.14 rad/s (≈ 9.5 s boom up, the class figure is 9-10 s)
-    boom_telescope  0 … 3.71 m per section (11.1 m total), 0.30 m/s per section
-                    (0.9 m/s total, ≈ 12.4 s extend; real ≈ 13-16 s)
-    fork_tilt       -1.25 (tilt forward 72°) … +0.40 rad (tilt back 23°) relative to
-                    level (compensated), 0.45 rad/s; +1 = tilt back (fork tips up)
+    boom_luff       -0.048 (forks reach grade at full extension) … +1.208 rad
+                    (69.2°), 0.14 rad/s (≈ 9 s boom up, the class figure is 9-10 s)
+    boom_telescope  0 … 11.20 m TOTAL extension (the fly section; the two
+                    intermediate sections follow at 1/3 and 2/3), 0.9 m/s
+                    (≈ 12.4 s extend; real ≈ 13-16 s)
+    fork_tilt       -0.95 (tilt forward 54°) … +0.40 rad (tilt back 23°) relative to
+                    level (compensated), 0.45 rad/s; +1 = tilt back (fork tips up).
+                    Relative to the boom that is -124° … +26° (≈ 150° of carriage
+                    rotation, class figure ≈ 140-150°).
 
 Drive: Ackermann, front-wheel steer, rear (fixed) axle at x = 0, max_speed
 8.5 m/s (30.6 km/h) both ways (powershift shuttle), max_steer 0.65 rad,
-steer rate 0.25 rad/s (2.6 s centre to full lock, ≈ 5 s lock to lock ≈ 4
-steering-wheel turns at a normal pace).  The kinematic drive has no
-lateral-acceleration limit, so full lock at speed is not physically limited.
+steer rate 0.38 rad/s (1.7 s centre to full lock, ≈ 3.4 s lock to lock).
+The environment limits the lock at speed (drive.max_lat_accel).
 
 Init pose = travel pose: boom fully lowered and retracted, forks level-ish
-(tilted back 3°) just above the ground.
+(tilted back 3°) at a 0.56 m carry height.  (Lower would let a fully lowered
+boom bury the carriage up to 1.3 m when extended; the env cannot limit the
+luff by the extension.)
 
 Root frame: chassis, origin at the rear-axle centre (axle at z = 0, ground at
 z = -WHEEL_R), +x forward (towards the forks), +y left (cab side).
@@ -63,6 +77,13 @@ WHEEL_R, TYRE_W = 0.655, 0.50          # 500/70 R24
 WB = 2.75                              # wheelbase, rear axle at x = 0
 Y_W = 0.97                             # wheel centre → track 1.94 m, 2.44 m over tyres
 REAR_X = -1.675                        # rear face of the counterweight (5.08 m to front tyres)
+MAX_STEER = 0.65                       # virtual centre-wheel lock → 46.1° inner / 30.9° outer
+# Front chassis kept out of the steered tyres' sweep (each tyre swings 0.70 m about its
+# steer axis in plan view, reaching |y| = 0.33 behind the axle and x = 3.41 ahead of it).
+FRAME_X0, FRAME_X1 = -1.10, 2.05       # side rails end behind the front tyres
+NOSE_HW, NOSE_X1 = 0.25, 3.70          # narrow front nose (|y| ≤ 0.25) carries axle + stabilisers
+AXLE_HL = 0.42                         # front axle housing half length (kingpins in the rims)
+STAB_X = 3.56                          # folded stabilisers, ahead of the front tyres' sweep
 
 
 def agl(h: float) -> float:
@@ -79,11 +100,14 @@ BASE_X0, BASE_X1 = -0.35, 4.50         # base section extent (tail behind the fo
 MID1_X0, MID1_LEN = -0.10, 4.80        # section origins (retracted) in the parent section
 MID2_X0, MID2_LEN = 0.10, 4.90
 FLY_X0, FLY_LEN = 0.10, 4.95
+SEC_X0 = MID1_X0 + MID2_X0 + FLY_X0    # retracted fly origin ahead of the foot pin
 DROP = 0.30                            # carriage pin below the boom axis (drop nose)
+NOSE_R = 0.20                          # rounded boom-head nose around the carriage pin
 HEEL_X = 0.44                          # fork-shank front face ahead of the carriage pin
 FORK_DROP = 0.62                       # fork underside below the carriage pin (level)
 FORK_LEN = 1.20
-FORK_CLEAR = 0.12                      # fork underside above the ground in the travel pose
+FORK_GRADE = 0.03                      # level-fork underside above the ground at FULL
+                                       # extension with the boom fully lowered
 CARRIAGE_FACE_X = REAR_X + 6.36        # overall length to the carriage face
 FRONT_TYRE_X = WB + WHEEL_R
 LIFT_HEIGHT, REACH = 16.7, 12.5
@@ -98,6 +122,7 @@ CAB_X0, CAB_X1 = 0.62, 2.12            # glazed upper cab
 CAB_LX0, CAB_LX1 = 0.74, 2.02          # lower cab between the tyres
 CAB_FLOOR, CAB_BELT, CAB_ROOF = 0.82, 1.40, 2.58
 ENG_Y0, ENG_Y1 = -1.15, -0.45          # engine bay (right side)
+RCAM = (CAB_LX1 - 0.04, ENG_Y0 - 0.10, agl(1.95))   # right camera, outboard of the mudguard
 
 # --- masses (kg) ---------------------------------------------------------------------------
 M = dict(chassis=7180.0, wheel=280.0, knuckle=60.0, base=1300.0, mid1=700.0, mid2=520.0,
@@ -117,26 +142,38 @@ def _elev(v):
     return math.atan2(v[1], v[0])
 
 
-def _retracted_len() -> float:
-    return MID1_X0 + MID2_X0 + FLY_X0 + _pin_x_fly()
-
-
-def _pin_x_fly() -> float:
-    """Carriage-pin x in the fly frame so the travel pose matches the datasheet length."""
-    pin = (CARRIAGE_FACE_X - HEEL_X, agl(FORK_CLEAR + FORK_DROP))
-    d = math.hypot(pin[0] - PIVOT[0], pin[1] - PIVOT[1])
-    return math.sqrt(d * d - DROP * DROP) - (MID1_X0 + MID2_X0 + FLY_X0)
-
-
 def _luff_for_pin_height(length: float, dz: float) -> float:
     """Boom angle that puts the pin (length, -DROP) at height dz above the foot pin."""
     return math.asin(dz / math.hypot(length, DROP)) - math.atan2(-DROP, length)
 
 
+def _extended_len() -> float:
+    """Foot pin → carriage pin at full extension, from the datasheet reach (boom at 0°,
+    fork heel 12.5 m ahead of the front tyres)."""
+    return REACH + FRONT_TYRE_X - PIVOT[0] - HEEL_X
+
+
+def _luff_lo() -> float:
+    """Lowest boom angle: level forks FORK_GRADE above the ground at FULL extension, so
+    no telescope position can push the carriage into the ground."""
+    return _luff_for_pin_height(_extended_len(), agl(FORK_GRADE + FORK_DROP) - PIVOT[1])
+
+
+def _retracted_len() -> float:
+    """Foot pin → carriage pin, retracted, so the travel pose (boom fully lowered) matches
+    the datasheet length to the carriage face."""
+    q = _luff_lo()
+    return (CARRIAGE_FACE_X - HEEL_X - PIVOT[0] - math.sin(q) * DROP) / math.cos(q)
+
+
+def _pin_x_fly() -> float:
+    """Carriage-pin x in the fly frame."""
+    return _retracted_len() - SEC_X0
+
+
 def _stroke() -> float:
-    """Per-section stroke from the datasheet reach (boom at 0°, fork heel to front tyres)."""
-    l_ext = REACH + FRONT_TYRE_X - PIVOT[0] - HEEL_X
-    return (l_ext - _retracted_len()) / 3.0
+    """Per-section stroke (three equal telescopic sections)."""
+    return (_extended_len() - _retracted_len()) / 3.0
 
 
 def _ram_fit(lo: float, hi: float, n: int = 61):
@@ -316,28 +353,34 @@ def _counterweight_and_pivot() -> list[Shape]:
 
 
 def _chassis_frame() -> list[Shape]:
-    x0, x1 = -1.10, 3.05
+    x0, x1 = FRAME_X0, FRAME_X1
     cx, lx = (x0 + x1) / 2, x1 - x0
+    nx0 = x1 - 0.10
     sides = (1, -1)
     return [
-        # box frame: two side rails with the boom (and lift ram) nesting between them
+        # box frame: two side rails with the boom (and lift ram) nesting between them; they
+        # end behind the front tyres, which sweep to |y| = 0.33 at full lock
         *[box(lx, 0.08, 0.50, at=(cx, BOOM_Y + s * 0.33, agl(0.67)), mat="dark") for s in sides],
         box(lx, 0.58, 0.08, at=(cx, BOOM_Y, agl(0.46)), mat="dark"),
-        # axles (0.40 m ground clearance under the differentials)
+        # narrow front nose (symmetric, under the lowered boom) carrying the front axle and
+        # the stabiliser beam
+        box(NOSE_X1 - nx0, 2 * NOSE_HW, 0.44, at=((nx0 + NOSE_X1) / 2, 0.0, agl(0.70)), mat="dark"),
+        # axles (0.40 m ground clearance under the differentials); the steer-axle housing
+        # stops short of the tyres' sweep, the knuckle hubs bridge the gap
         cyl(0.15, 1.44, axis="y", mat="dark"),
         sphere(0.24, at=(0.0, 0.0, -0.01), mat="dark"),
         *[cyl(0.20, 0.14, at=(0.0, s * (Y_W - 0.32), 0.0), axis="y", mat="dark") for s in sides],
-        cyl(0.15, 1.20, at=(WB, 0.0, 0.0), axis="y", mat="dark"),
+        cyl(0.15, 2 * AXLE_HL, at=(WB, 0.0, 0.0), axis="y", mat="dark"),
         sphere(0.24, at=(WB, 0.0, -0.01), mat="dark"),
         # lift ram base clevis
         box(0.26, 0.30, 0.24, at=(RAM_BASE[0], BOOM_Y, RAM_BASE[1] - 0.06), mat="dark",
             collision=False),
-        # folded front stabilisers (beam, legs and pads up for travel)
-        box(0.24, 1.20, 0.30, at=(3.20, 0.0, agl(0.64)), mat="dark"),
-        *[box(0.16, 0.14, 0.72, at=(3.20, s * 0.55, agl(0.83)), mat="body") for s in sides],
-        *[box(0.32, 0.26, 0.05, at=(3.20, s * 0.55, agl(0.455)), mat="dark") for s in sides],
-        *[cyl(0.045, 0.50, at=(3.12, s * 0.42, agl(1.00)), mat="steel", collision=False)
-          for s in sides],
+        # folded front stabilisers (beam, legs and pads up for travel), ahead of the tyres
+        box(0.24, 1.20, 0.30, at=(STAB_X, 0.0, agl(0.64)), mat="dark"),
+        *[box(0.16, 0.14, 0.72, at=(STAB_X, s * 0.55, agl(0.83)), mat="body") for s in sides],
+        *[box(0.32, 0.26, 0.05, at=(STAB_X, s * 0.55, agl(0.455)), mat="dark") for s in sides],
+        *[cyl(0.045, 0.50, at=(STAB_X - 0.08, s * 0.42, agl(1.00)), mat="steel",
+              collision=False) for s in sides],
     ]
 
 
@@ -345,7 +388,9 @@ def _knuckle(name: str, s: float) -> Link:
     """Front steering knuckle: wheel hub + steering mudguard with a road light."""
     r = WHEEL_R
     return Link(name, M["knuckle"], [
-        cyl(0.20, 0.14, at=(0.0, -s * 0.32, 0.0), axis="y", mat="dark"),
+        # hub reaching in toward the axle housing (≤ 0.50 m inboard, so it never sweeps into
+        # the housing end 0.55 m inboard when steering)
+        cyl(0.17, 0.25, at=(0.0, -s * 0.375, 0.0), axis="y", mat="dark"),
         cyl(0.07, 0.36, at=(0.0, -s * 0.33, 0.0), mat="dark", collision=False),      # king pin
         box(0.70, 0.50, 0.04, at=(0.0, 0.0, r + 0.09), mat="accent", collision=False),
         beam((0.35, r + 0.09), (0.62, r - 0.18), 0.50, 0.04, mat="accent", collision=False),
@@ -363,7 +408,9 @@ def _carriage() -> list[Shape]:
         box(0.12, 1.28, 0.14, at=(cx, 0.0, 0.45), mat="dark"),                   # top bar
         box(0.12, 1.28, 0.14, at=(cx, 0.0, fz + 0.13), mat="dark"),               # bottom bar
         *[box(0.12, 0.10, 0.80, at=(cx, s * 0.59, -0.01), mat="dark") for s in (1, -1)],
-        box(0.10, 0.50, 0.80, at=(cx - 0.01, 0.0, -0.01), mat="dark"),            # hitch plate
+        # hitch side plates straddling the boom nose (outboard of its ±0.20 m), so the
+        # carriage can rotate about the pin without cutting into the boom head
+        *[box(0.10, 0.05, 0.80, at=(cx - 0.01, s * 0.24, -0.01), mat="dark") for s in (1, -1)],
         # pivot lugs around the boom-head pin + tilt-ram lug (visual)
         *[box(0.34, 0.05, 0.24, at=(0.15, s * 0.24, 0.0), mat="dark", collision=False)
           for s in (1, -1)],
@@ -389,21 +436,25 @@ def _carriage() -> list[Shape]:
 def build() -> MachineSpec:
     sides = (1, -1)
     pin_x = _pin_x_fly()
-    l_ret = _retracted_len()
-    stroke = round(_stroke(), 3)
-    l_ext = l_ret + 3 * stroke
-    luff_lo = round(_luff_for_pin_height(l_ret, agl(FORK_CLEAR + FORK_DROP) - PIVOT[1]), 4)
+    ext = round(3 * _stroke(), 3)                  # total extension (three sections)
+    l_ext = _retracted_len() + ext
+    luff_lo = round(_luff_lo(), 4)
     luff_hi = round(_luff_for_pin_height(l_ext, LIFT_HEIGHT + FORK_DROP - (PIVOT[1] + WHEEL_R)), 4)
 
     # ------------------------------------------------------------------ tool joints
     luff = Joint("boom_luff_joint", "revolute", "chassis", "boom_base",
                  xyz=(PIVOT[0], BOOM_Y, PIVOT[1]), axis=(0, -1, 0), lower=luff_lo, upper=luff_hi,
                  init=luff_lo, velocity=0.14, role="tool")
-    tele = Joint("boom_telescope_joint", "prismatic", "boom_base", "boom_mid_1",
-                 xyz=(MID1_X0, 0.0, 0.0), axis=(1, 0, 0), lower=0.0, upper=stroke, init=0.0,
-                 velocity=0.30, role="tool")
+    # The telescope tool drives the fly section directly (total extension); the two
+    # intermediate sections are siblings on the base section that follow it at 1/3 and
+    # 2/3 (rope/chain synchronised), so no follower chains.
+    tele = Joint("boom_telescope_joint", "prismatic", "boom_base", "boom_fly",
+                 xyz=(SEC_X0, 0.0, 0.0), axis=(1, 0, 0), lower=0.0, upper=ext, init=0.0,
+                 velocity=0.90, role="tool")
+    # Fork tilt relative to level: 54° forward … 23° back, i.e. ≈ 150° of carriage
+    # rotation relative to the boom over the luff range (class figure ≈ 140-150°).
     tilt = Joint("fork_tilt_joint", "revolute", "carriage_level", "carriage",
-                 axis=(0, -1, 0), lower=-1.25, upper=0.40, init=0.05, velocity=0.45, role="tool")
+                 axis=(0, -1, 0), lower=-0.95, upper=0.40, init=0.05, velocity=0.45, role="tool")
 
     # ------------------------------------------------------------------ lift ram fit
     (kb, cb), _, l_min, l_max = _ram_fit(luff.lower, luff.upper)
@@ -413,8 +464,12 @@ def build() -> MachineSpec:
     # ------------------------------------------------------------------ chassis
     chassis = Link("chassis", M["chassis"], [
         *_chassis_frame(), *_counterweight_and_pivot(), *_cab(), *_engine_bay(),
-        # right-side camera post on the engine cover
-        box(0.05, 0.05, 0.42, at=(CAB_LX1 - 0.04, ENG_Y0 + 0.06, agl(1.63)), mat="accent",
+        # right-side camera post on the engine cover, with an arm carrying the camera
+        # outboard of the front-right mudguard
+        box(0.05, 0.05, 0.50, at=(RCAM[0], ENG_Y0 + 0.06, agl(1.67)), mat="accent",
+            collision=False),
+        box(0.05, ENG_Y0 + 0.085 - RCAM[1], 0.04,
+            at=(RCAM[0], (ENG_Y0 + 0.085 + RCAM[1]) / 2, RCAM[2] - 0.04), mat="accent",
             collision=False),
     ])
 
@@ -439,12 +494,18 @@ def build() -> MachineSpec:
     mid2 = Link("boom_mid_2", M["mid2"], [*_tube(0.0, MID2_LEN, MID2_SEC),
                                           *_collar(MID2_LEN - 0.05, MID2_SEC)])
     fw, fh = FLY_SEC
-    head_x0, head_x1 = FLY_LEN - 0.05, pin_x + 0.17
+    head_x0, head_x1 = FLY_LEN - 0.05, pin_x - 0.05
+    head_z0, head_z1 = -fh / 2 - 0.005, 0.16
     fly = Link("boom_fly", M["fly"], [
         box(FLY_LEN, fw, fh, at=(FLY_LEN / 2, 0.0, 0.0)),
-        # boom head with the drop nose carrying the carriage pin
-        box(head_x1 - head_x0, 0.40, 0.56, at=((head_x0 + head_x1) / 2, 0.0, -0.12), mat="dark"),
-        cyl(0.11, 0.44, at=(pin_x, 0.0, -DROP), axis="y", mat="dark", collision=False),
+        # boom head: block ending 5 cm behind the carriage pin, short drop web and a
+        # rounded nose around the pin (nothing below the fly section behind the pin, so
+        # the carriage frame can swing under the head when tilted forward at high luff)
+        box(head_x1 - head_x0, 0.40, head_z1 - head_z0,
+            at=((head_x0 + head_x1) / 2, 0.0, (head_z0 + head_z1) / 2), mat="dark"),
+        box(0.15, 0.40, head_z0 + DROP + 0.02, at=(pin_x - 0.125, 0.0, (head_z0 - DROP + 0.02) / 2),
+            mat="dark"),
+        cyl(NOSE_R, 0.40, at=(pin_x, 0.0, -DROP), axis="y", mat="dark"),
         # compensation (slave) ram on top of the head, hydraulic quick couplers
         _rod((FLY_LEN - 1.30, fh / 2 + 0.07), (FLY_LEN - 0.30, fh / 2 + 0.07), 0.065, mat="body"),
         _rod((FLY_LEN - 0.40, fh / 2 + 0.07), (head_x1 - 0.05, 0.18), 0.04),
@@ -486,13 +547,11 @@ def build() -> MachineSpec:
     joints = [
         luff,
         tele,
-        # the outer telescopic sections are synchronised to the first one (same stroke)
-        Joint("boom_mid_2_joint", "prismatic", "boom_mid_1", "boom_mid_2",
-              xyz=(MID2_X0, 0.0, 0.0), axis=(1, 0, 0), lower=0.0, upper=stroke, init=0.0,
-              velocity=tele.velocity, role="follower", follows=(tele.name, 1.0, 0.0)),
-        Joint("boom_fly_joint", "prismatic", "boom_mid_2", "boom_fly",
-              xyz=(FLY_X0, 0.0, 0.0), axis=(1, 0, 0), lower=0.0, upper=stroke, init=0.0,
-              velocity=tele.velocity, role="follower", follows=(tele.name, 1.0, 0.0)),
+        # intermediate sections synchronised to the fly: each section strokes ext / 3
+        *[Joint(f"boom_mid_{i}_joint", "prismatic", "boom_base", f"boom_mid_{i}",
+                xyz=(x0, 0.0, 0.0), axis=(1, 0, 0), lower=0.0, upper=ext * i / 3, init=0.0,
+                velocity=tele.velocity * i / 3, role="follower", follows=(tele.name, i / 3, 0.0))
+          for i, x0 in ((1, MID1_X0), (2, MID1_X0 + MID2_X0))],
         # carriage compensation: the levelling frame cancels the boom angle
         Joint("carriage_level_joint", "revolute", "boom_fly", "carriage_level",
               xyz=(pin_x, 0.0, -DROP), axis=(0, -1, 0), lower=-luff.upper - 0.05,
@@ -513,7 +572,7 @@ def build() -> MachineSpec:
         abbrev="TH",
         display_name="Telehandler",
         category="lifting",
-        reference="17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH514D class)",
+        reference="17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH417D class)",
         description=("Rigid-frame 4x4 telescopic handler with a left-hand cab, side engine, "
                      "rear-pivot four-section telescopic boom (16.7 m lift height, 12.5 m "
                      "reach), compensated tilting fork carriage with pallet forks, folded "
@@ -521,8 +580,8 @@ def build() -> MachineSpec:
         root="chassis",
         links=links,
         joints=joints,
-        drive=Drive(type="ackermann", max_speed=8.5, wheelbase=WB, max_steer=0.65,
-                    steer_rate=0.25, fixed_axle_x=0.0, steer_axle="front"),
+        drive=Drive(type="ackermann", max_speed=8.5, wheelbase=WB, max_steer=MAX_STEER,
+                    steer_rate=0.38, fixed_axle_x=0.0, steer_axle="front"),
         tools=[
             Tool("boom_luff_joint", "boom_luff", positive="raise", negative="lower"),
             Tool("boom_telescope_joint", "boom_telescope", positive="extend", negative="retract"),
@@ -530,20 +589,24 @@ def build() -> MachineSpec:
         ],
         cameras=[
             # operator eye point just ahead of the windscreen, looking down the boom at the forks
+            # (level: keeps the forks in view from ground work up to mid-height lifts)
             Camera("front", "chassis", (CAB_X1 + 0.07, cab_y - 0.03, agl(2.05)),
-                   (0.0, 0.18, -0.15)),
+                   (0.0, 0.0, -0.15)),
             # cab front-left roof corner (mirror position) looking out to the left
             Camera("left", "chassis", (CAB_X1 + 0.04, CAB_Y1 - 0.03, agl(2.50)),
                    (0.0, 0.35, 0.65)),
-            # post on the front-right corner of the engine cover looking out to the right
-            Camera("right", "chassis", (CAB_LX1 - 0.04, ENG_Y0 + 0.06, agl(1.88)),
-                   (0.0, 0.32, -0.75)),
+            # arm on the front-right corner of the engine cover looking out to the right
+            Camera("right", "chassis", RCAM, (0.0, 0.32, -0.75)),
         ],
         envelope=(7.56, 2.44, 2.69),
         operating_mass=12060.0,
         notes=("Fork tilt is relative to level (automatic carriage compensation follows the "
                "boom with k = -1), so 0 = forks level whatever the boom angle; tilt_back / "
                "tilt_forward are verified visually (not in the auto-verified vocabulary). The "
-               "telescope tool position is the stroke of ONE section; the two outer sections "
-               "follow 1:1, so total extension = 3 x tool position."),
+               "telescope tool position is the TOTAL boom extension (fly section); the two "
+               "intermediate sections follow at 1/3 and 2/3. Limitation: with the boom fully "
+               "lowered (travel pose) tilting the forks forward past ≈ 23° (fork_tilt below "
+               "≈ 40%) pushes the fork tips below grade (0.5 m at full forward tilt); the "
+               "kinematic env does not stop it, so goal sampling should avoid such tilt goals "
+               "at luff 0%. Stabilisers are modelled folded and are not operable."),
     )

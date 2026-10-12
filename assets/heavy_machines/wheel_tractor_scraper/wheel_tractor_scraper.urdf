@@ -12,8 +12,8 @@
   <material name="steel"><color rgba="0.5 0.5 0.52 1"/></material>
   <material name="white"><color rgba="0.9 0.9 0.88 1"/></material>
   <link name="tractor">
-    <visual><origin xyz="0.55 0 -0.03" rpy="0 0 0"/><geometry><box size="3.95 0.9 0.5"/></geometry><material name="body"/></visual>
-    <collision><origin xyz="0.55 0 -0.03" rpy="0 0 0"/><geometry><box size="3.95 0.9 0.5"/></geometry></collision>
+    <visual><origin xyz="0.6875 0 -0.03" rpy="0 0 0"/><geometry><box size="3.675 0.9 0.5"/></geometry><material name="body"/></visual>
+    <collision><origin xyz="0.6875 0 -0.03" rpy="0 0 0"/><geometry><box size="3.675 0.9 0.5"/></geometry></collision>
     <visual><origin xyz="0 0 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.24" length="1.58"/></geometry><material name="dark"/></visual>
     <collision><origin xyz="0 0 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.24" length="1.58"/></geometry></collision>
     <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><sphere radius="0.34"/></geometry><material name="dark"/></visual>
@@ -51,8 +51,8 @@
     <visual><origin xyz="1.28 -1.225 0.73" rpy="0 0 0"/><geometry><box size="0.05 0.16 0.1"/></geometry><material name="orange"/></visual>
     <visual><origin xyz="-0.375 0 0.63" rpy="0 0 0"/><geometry><box size="1.25 1.56 0.86"/></geometry><material name="body"/></visual>
     <collision><origin xyz="-0.375 0 0.63" rpy="0 0 0"/><geometry><box size="1.25 1.56 0.86"/></geometry></collision>
-    <visual><origin xyz="-1.075 0 0.49" rpy="0 0 0"/><geometry><box size="0.25 1.4 0.95"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="-1.075 0 0.49" rpy="0 0 0"/><geometry><box size="0.25 1.4 0.95"/></geometry></collision>
+    <visual><origin xyz="-1.025 0 0.49" rpy="0 0 0"/><geometry><box size="0.25 1.4 0.95"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="-1.025 0 0.49" rpy="0 0 0"/><geometry><box size="0.25 1.4 0.95"/></geometry></collision>
     <visual><origin xyz="-1.45 0 0.69" rpy="0 0 0"/><geometry><cylinder radius="0.36" length="0.14"/></geometry><material name="dark"/></visual>
     <collision><origin xyz="-1.45 0 0.69" rpy="0 0 0"/><geometry><cylinder radius="0.36" length="0.14"/></geometry></collision>
     <visual><origin xyz="-1.25 0 0.69" rpy="0 0 0"/><geometry><box size="0.4 0.72 0.14"/></geometry><material name="dark"/></visual>
@@ -68,6 +68,10 @@
     <visual><origin xyz="-1.22 0.86 0.47" rpy="0 0 0"/><geometry><box size="0.3 0.1 0.04"/></geometry><material name="steel"/></visual>
     <visual><origin xyz="-1.22 0.86 0.77" rpy="0 0 0"/><geometry><box size="0.3 0.1 0.04"/></geometry><material name="steel"/></visual>
     <visual><origin xyz="-1.08 0.86 1.52" rpy="0 0 0"/><geometry><box size="0.04 0.04 0.95"/></geometry><material name="accent"/></visual>
+    <visual><origin xyz="-0.62 1.62 1.37" rpy="0 0 0"/><geometry><box size="0.05 0.05 0.4"/></geometry><material name="accent"/></visual>
+    <visual><origin xyz="-0.625 1.62 1.62" rpy="0 0 0"/><geometry><box size="0.12 0.11 0.1"/></geometry><material name="dark"/></visual>
+    <visual><origin xyz="-0.62 -1.62 1.37" rpy="0 0 0"/><geometry><box size="0.05 0.05 0.4"/></geometry><material name="accent"/></visual>
+    <visual><origin xyz="-0.625 -1.62 1.62" rpy="0 0 0"/><geometry><box size="0.12 0.11 0.1"/></geometry><material name="dark"/></visual>
     <visual><origin xyz="-0.375 0 1.885" rpy="0 0 0"/><geometry><box size="1.25 1.64 1.65"/></geometry><material name="body"/></visual>
     <collision><origin xyz="-0.375 0 1.885" rpy="0 0 0"/><geometry><box size="1.25 1.64 1.65"/></geometry></collision>
     <visual><origin xyz="-0.395 0 2.755" rpy="0 0 0"/><geometry><box size="1.39 1.74 0.09"/></geometry><material name="body"/></visual>
@@ -89,15 +93,15 @@
     <visual><origin xyz="0.205 -0.965 2.19" rpy="0 0 -1.784857"/><geometry><box size="0.235372 0.03 0.03"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="0.18 1.12 2.02" rpy="0 0 0"/><geometry><box size="0.05 0.16 0.3"/></geometry><material name="accent"/></visual>
     <visual><origin xyz="0.18 -1.12 2.02" rpy="0 0 0"/><geometry><box size="0.05 0.16 0.3"/></geometry><material name="accent"/></visual>
-    <inertial><origin xyz="0.340383 0.000303 0.907206" rpy="0 0 0"/><mass value="13600"/><inertia ixx="11966.065209" ixy="6.208337" ixz="4165.809937" iyy="24848.592959" iyz="2.474542" izz="19345.441574"/></inertial>
+    <inertial><origin xyz="0.357389 0.000306 0.916663" rpy="0 0 0"/><mass value="13600"/><inertia ixx="11963.916718" ixy="6.337871" ixz="4422.359815" iyy="24559.225149" iyz="2.537303" izz="19127.782525"/></inertial>
   </link>
   <link name="hitch">
-    <visual><origin xyz="-0.2 0 0" rpy="0 0 0"/><geometry><box size="0.85 0.7 0.55"/></geometry><material name="dark"/></visual>
-    <collision><origin xyz="-0.2 0 0" rpy="0 0 0"/><geometry><box size="0.85 0.7 0.55"/></geometry></collision>
+    <visual><origin xyz="-0.3725 0 0" rpy="0 0 0"/><geometry><box size="0.505 0.7 0.55"/></geometry><material name="dark"/></visual>
+    <collision><origin xyz="-0.3725 0 0" rpy="0 0 0"/><geometry><box size="0.505 0.7 0.55"/></geometry></collision>
     <visual><origin xyz="0 0 0" rpy="0 0 0"/><geometry><cylinder radius="0.24" length="0.6"/></geometry><material name="dark"/></visual>
     <collision><origin xyz="0 0 0" rpy="0 0 0"/><geometry><cylinder radius="0.24" length="0.6"/></geometry></collision>
     <visual><origin xyz="-0.62 0 0" rpy="1.570796 0 0"/><geometry><cylinder radius="0.17" length="0.92"/></geometry><material name="steel"/></visual>
-    <inertial><origin xyz="-0.225739 0 0" rpy="0 0 0"/><mass value="700"/><inertia ixx="44.451243" ixy="0" ixz="0" iyy="71.119129" iyz="0" izz="82.855516"/></inertial>
+    <inertial><origin xyz="-0.321352 0 0" rpy="0 0 0"/><mass value="700"/><inertia ixx="43.816229" ixy="0" ixz="0" iyy="62.063004" iyz="0" izz="74.073918"/></inertial>
   </link>
   <link name="gooseneck">
     <visual><origin xyz="-0.2 0 0.69" rpy="0 -1.897623 0"/><geometry><box size="1.245953 0.8 0.62"/></geometry><material name="body"/></visual>
@@ -271,61 +275,61 @@
     <parent link="tractor"/><child link="hitch"/>
     <origin xyz="-1.45 0 0.22" rpy="0 0 0"/>
     <axis xyz="0 0 1"/>
-    <limit lower="-0.9" upper="0.9" effort="10000000" velocity="0.4"/>
+    <limit lower="-0.9001" upper="0.9001" effort="10000000" velocity="0.4"/>
   </joint>
   <joint name="gooseneck_pitch_joint" type="revolute">
     <parent link="hitch"/><child link="gooseneck"/>
     <origin xyz="-0.62 0 0" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.019889" upper="0.067855" effort="10000000" velocity="0.072136"/>
+    <limit lower="-0.0199886413" upper="0.0679549372" effort="10000000" velocity="0.072136"/>
   </joint>
   <joint name="bowl_joint" type="revolute">
     <parent link="hitch"/><child link="bowl"/>
     <origin xyz="-7.45 0 -0.22" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.194112" upper="0" effort="10000000" velocity="0.09"/>
+    <limit lower="-0.194212434" upper="0.0001" effort="10000000" velocity="0.09"/>
   </joint>
   <joint name="apron_joint" type="revolute">
     <parent link="bowl"/><child link="apron"/>
     <origin xyz="1.4 0 1.67" rpy="0 0 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="0" upper="0.55" effort="10000000" velocity="0.3"/>
+    <limit lower="-0.0001" upper="0.5501" effort="10000000" velocity="0.3"/>
   </joint>
   <joint name="ejector_joint" type="prismatic">
     <parent link="bowl"/><child link="ejector"/>
     <origin xyz="1.25 0 0.67" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0" upper="2.1" effort="10000000" velocity="0.35"/>
+    <limit lower="-0.0001" upper="2.1001" effort="10000000" velocity="0.35"/>
   </joint>
   <joint name="ejector_stage_joint" type="prismatic">
     <parent link="bowl"/><child link="ejector_stage"/>
     <origin xyz="1.12 0 0.67" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.02" upper="1.07" effort="10000000" velocity="0.225"/>
+    <limit lower="-0.0201" upper="1.0701" effort="10000000" velocity="0.225"/>
   </joint>
   <joint name="left_lift_barrel_joint" type="revolute">
     <parent link="gooseneck"/><child link="left_lift_barrel"/>
     <origin xyz="-1.62 1.82 1.55" rpy="0 2.235392 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.042793" upper="0.150021" effort="10000000" velocity="0.093033"/>
+    <limit lower="-0.0428926545" upper="0.150121401" effort="10000000" velocity="0.093033"/>
   </joint>
   <joint name="left_lift_rod_joint" type="prismatic">
     <parent link="left_lift_barrel"/><child link="left_lift_rod"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.05" upper="0.597417" effort="10000000" velocity="0.303809"/>
+    <limit lower="-0.0501" upper="0.597516837" effort="10000000" velocity="0.303809"/>
   </joint>
   <joint name="right_lift_barrel_joint" type="revolute">
     <parent link="gooseneck"/><child link="right_lift_barrel"/>
     <origin xyz="-1.62 -1.82 1.55" rpy="0 2.235392 0"/>
     <axis xyz="0 -1 0"/>
-    <limit lower="-0.042793" upper="0.150021" effort="10000000" velocity="0.093033"/>
+    <limit lower="-0.0428926545" upper="0.150121401" effort="10000000" velocity="0.093033"/>
   </joint>
   <joint name="right_lift_rod_joint" type="prismatic">
     <parent link="right_lift_barrel"/><child link="right_lift_rod"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.05" upper="0.597417" effort="10000000" velocity="0.303809"/>
+    <limit lower="-0.0501" upper="0.597516837" effort="10000000" velocity="0.303809"/>
   </joint>
   <joint name="front_left_wheel_joint" type="continuous">
     <parent link="tractor"/><child link="front_left_wheel"/>

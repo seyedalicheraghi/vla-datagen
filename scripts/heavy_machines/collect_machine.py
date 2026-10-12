@@ -241,17 +241,16 @@ def run_episode(env, spec, ep, seed, bag, msgs, lerobot, image_period, urdf_text
 
         if bag:
             q = obs["joint_pos"][0].tolist()
-            qd = env._qd[0].tolist()
+            qd = obs["joint_vel"][0].tolist()
             pose = obs["base_pose_w"][0].tolist()
             tfs = [msgs.tf_stamped(t_ns, WORLD, root, pose[:3], pose[3:])]
             tfs += [msgs.tf_stamped(t_ns, movable[n].parent, movable[n].child, *joint_tf(movable[n], q[i]))
                     for i, n in enumerate(names) if n in movable]
             bag.write("/tf", "tf2_msgs/msg/TFMessage", t_ns, msgs.tf(tfs))
             bag.write("/joint_states", "sensor_msgs/msg/JointState", t_ns, msgs.joint_state(t_ns, names, q, qd))
-            yaw = state[2]
-            lin = (state[3] * math.cos(yaw), state[3] * math.sin(yaw), 0.0)
+            tw = obs["base_twist_body"][0].tolist()      # root-frame twist (REP 105: child frame)
             bag.write(f"/{spec.name}/odom", "nav_msgs/msg/Odometry", t_ns,
-                      msgs.odom(t_ns, root, pose[:3], pose[3:], lin, (0.0, 0.0, state[4])))
+                      msgs.odom(t_ns, root, pose[:3], pose[3:], (tw[0], tw[1], 0.0), (0.0, 0.0, tw[2])))
             bag.write(f"/{spec.name}/state", "std_msgs/msg/Float32MultiArray", t_ns,
                       msgs.float_array(state, spec.state_labels))
             bag.write("/action", "std_msgs/msg/Float32MultiArray", t_ns,
@@ -287,9 +286,10 @@ def main():
     spec = registry.get(args_cli.machine)
     out_dir = Path(os.path.expanduser(args_cli.out_dir.format(machine=spec.name)))
     out_dir.mkdir(parents=True, exist_ok=True)
-    env = HeavyMachineEnv(make_env_cfg(spec.name, randomize_spawn=True, spawn_seed=args_cli.base_seed,
-                                       camera_resolution=(args_cli.camera_w, args_cli.camera_h),
-                                       status_interval=0))
+    cfg = make_env_cfg(spec.name, randomize_spawn=True, spawn_seed=args_cli.base_seed,
+                       camera_resolution=(args_cli.camera_w, args_cli.camera_h), status_interval=0)
+    cfg.sim.device = args_cli.device
+    env = HeavyMachineEnv(cfg)
     fps = round(1.0 / (env.cfg.sim.dt * env.cfg.decimation))
     image_period = max(1, round(fps / args_cli.image_rate_hz))
     urdf_text = build_urdf(spec)

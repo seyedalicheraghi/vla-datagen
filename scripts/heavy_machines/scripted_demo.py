@@ -42,10 +42,11 @@ import torch  # noqa: E402
 from heavy_machines import registry  # noqa: E402
 from heavy_machines.machine_env import HeavyMachineEnv, make_env_cfg  # noqa: E402
 
-CONTROL_HZ = 30
-
 
 def build_script(spec) -> list[tuple[str, list[float], float]]:
+    # Drive at a realistic pace for road-speed machines too (and stay inside the
+    # prop-free work area).
+    drive = min(1.0, 2.5 / spec.drive.max_speed)
     """(phase name, action, seconds)."""
     n = spec.action_dim
 
@@ -56,10 +57,10 @@ def build_script(spec) -> list[tuple[str, list[float], float]]:
             a[2 + kw["tool"]] = kw["cmd"]
         return a
 
-    script = [("drive forward", act(drive=0.6), 3.0),
-              ("forward + turn left", act(drive=0.6, turn=1.0), 3.0),
-              ("reverse + turn right", act(drive=-0.6, turn=-1.0), 2.0),
-              ("stop", act(), 1.0)]
+    script = [("drive forward", act(drive=drive), 3.0),
+              ("forward + turn left", act(drive=drive, turn=1.0), 3.0),
+              ("reverse + turn right", act(drive=-drive, turn=-1.0), 2.0),
+              ("stop", act(), 1.5)]
     for i, tool in enumerate(spec.tools):
         j = spec.joint(tool.joint)
         span = math.pi / 2 if j.type == "continuous" else (j.upper - j.lower)
@@ -85,10 +86,13 @@ def main():
     frames_dir = os.path.join(out_dir, "frames")
     os.makedirs(frames_dir, exist_ok=True)
 
-    env = HeavyMachineEnv(make_env_cfg(spec.name, enable_cameras=args_cli.enable_cameras))
+    cfg = make_env_cfg(spec.name, enable_cameras=args_cli.enable_cameras)
+    cfg.sim.device = args_cli.device
+    env = HeavyMachineEnv(cfg)
     obs, _ = env.reset()
+    control_hz = round(1.0 / env.step_dt)
     script = build_script(spec)
-    total = sum(int(s * CONTROL_HZ) for _, _, s in script)
+    total = sum(int(s * control_hz) for _, _, s in script)
     print(f"[demo] {spec.display_name}: {len(script)} phases, {total} steps → {out_dir}", flush=True)
 
     with open(os.path.join(out_dir, "state.csv"), "w", newline="") as f:
@@ -98,7 +102,7 @@ def main():
         for phase, a, secs in script:
             print(f"[demo] {phase}", flush=True)
             action = torch.tensor([a] * env.num_envs, device=env.device)
-            for _ in range(int(secs * CONTROL_HZ)):
+            for _ in range(int(secs * control_hz)):
                 if not simulation_app.is_running():
                     break
                 obs, _, _, _, _ = env.step(action)
