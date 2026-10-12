@@ -1,0 +1,431 @@
+{
+  "name": "rough_terrain_crane",
+  "abbrev": "RTC",
+  "display_name": "Rough Terrain Crane",
+  "category": "lifting",
+  "reference": "36 t rough-terrain crane (Grove RT540E / Tadano GR-300EX class)",
+  "description": "Two-axle rough-terrain mobile crane with large equal tyres, front-wheel Ackermann steering, outrigger boxes front and rear, a 360\u00b0 superstructure with the cab left of the boom, a 4-section 9.4-31 m telescopic boom and a 2-fall hook block.",
+  "urdf": "rough_terrain_crane.urdf",
+  "root_link": "carrier",
+  "root_height_m": 0.745,
+  "operating_mass_kg": 29700.0,
+  "model_mass_kg": 29744.0,
+  "envelope_m": [
+    12.2,
+    2.54,
+    3.41
+  ],
+  "model_bbox_m": [
+    12.55,
+    2.585,
+    3.69
+  ],
+  "action": {
+    "dim": 6,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "slew",
+        "joint": "slew_joint",
+        "type": "continuous",
+        "unit": "rad",
+        "rate_at_full_command": 0.26,
+        "lower": null,
+        "upper": null,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 3,
+        "label": "boom_luff",
+        "joint": "boom_luff_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.1,
+        "lower": 0.0,
+        "upper": 1.35,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "boom_telescope",
+        "joint": "boom_telescope_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.5,
+        "lower": 0.0,
+        "upper": 7.2,
+        "init": 0.0,
+        "positive": "extend",
+        "negative": "retract"
+      },
+      {
+        "action_index": 5,
+        "label": "hoist",
+        "joint": "hoist_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 1.0,
+        "lower": 0.8,
+        "upper": 14.0,
+        "init": 0.8,
+        "positive": "lower",
+        "negative": "raise"
+      }
+    ]
+  },
+  "state": {
+    "dim": 10,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "slew_pos",
+      "boom_luff_pos",
+      "boom_telescope_pos",
+      "hoist_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 11.1,
+    "max_reverse_speed_mps": 11.1,
+    "wheelbase_m": 3.35,
+    "max_steer_rad": 0.55,
+    "steer_rate_radps": 0.3,
+    "fixed_axle_x_m": -1.675,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "slew_joint",
+      "type": "continuous",
+      "role": "tool",
+      "parent": "carrier",
+      "child": "superstructure",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 0.26
+    },
+    {
+      "name": "boom_luff_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "superstructure",
+      "child": "boom_base",
+      "lower": 0.0,
+      "upper": 1.35,
+      "init": 0.0,
+      "velocity": 0.1
+    },
+    {
+      "name": "boom_telescope_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "boom_base",
+      "child": "boom_sec2",
+      "lower": 0.0,
+      "upper": 7.2,
+      "init": 0.0,
+      "velocity": 0.5
+    },
+    {
+      "name": "boom_sec3_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_sec2",
+      "child": "boom_sec3",
+      "lower": -0.01,
+      "upper": 7.21,
+      "init": 0.0,
+      "velocity": 0.55
+    },
+    {
+      "name": "boom_sec4_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_sec3",
+      "child": "boom_sec4",
+      "lower": -0.01,
+      "upper": 7.21,
+      "init": 0.0,
+      "velocity": 0.55
+    },
+    {
+      "name": "hook_swivel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom_sec4",
+      "child": "hook_swivel",
+      "lower": -1.36,
+      "upper": 0.01,
+      "init": 0.0,
+      "velocity": 0.15000000000000002
+    },
+    {
+      "name": "hoist_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "hook_swivel",
+      "child": "hook_block",
+      "lower": 0.8,
+      "upper": 14.0,
+      "init": 0.8,
+      "velocity": 1.0
+    },
+    {
+      "name": "rope_seg_1_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_1",
+      "lower": 0.7150000000000001,
+      "upper": 2.0549999999999997,
+      "init": 0.7250000000000001,
+      "velocity": 0.15000000000000002
+    },
+    {
+      "name": "rope_seg_2_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_2",
+      "lower": 0.715,
+      "upper": 3.375,
+      "init": 0.725,
+      "velocity": 0.25
+    },
+    {
+      "name": "rope_seg_3_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_3",
+      "lower": 0.715,
+      "upper": 4.695,
+      "init": 0.725,
+      "velocity": 0.35
+    },
+    {
+      "name": "rope_seg_4_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_4",
+      "lower": 0.715,
+      "upper": 6.015000000000001,
+      "init": 0.725,
+      "velocity": 0.45
+    },
+    {
+      "name": "rope_seg_5_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_5",
+      "lower": 0.715,
+      "upper": 7.335,
+      "init": 0.725,
+      "velocity": 0.55
+    },
+    {
+      "name": "rope_seg_6_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_6",
+      "lower": 0.715,
+      "upper": 8.655,
+      "init": 0.725,
+      "velocity": 0.65
+    },
+    {
+      "name": "rope_seg_7_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_7",
+      "lower": 0.715,
+      "upper": 9.975,
+      "init": 0.725,
+      "velocity": 0.75
+    },
+    {
+      "name": "rope_seg_8_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_8",
+      "lower": 0.715,
+      "upper": 11.295,
+      "init": 0.725,
+      "velocity": 0.8500000000000001
+    },
+    {
+      "name": "rope_seg_9_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "hook_swivel",
+      "child": "rope_seg_9",
+      "lower": 0.715,
+      "upper": 12.615,
+      "init": 0.725,
+      "velocity": 0.9500000000000001
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "superstructure",
+      "child": "lift_cylinder",
+      "lower": 0.08761696029965417,
+      "upper": 1.47625746721857,
+      "init": 0.13761696029965417,
+      "velocity": 0.14545485236436412
+    },
+    {
+      "name": "lift_cylinder_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom_base",
+      "child": "lift_cylinder_rod",
+      "lower": 0.026257467218570876,
+      "upper": 0.1876169602996539,
+      "init": 0.1376169602996539,
+      "velocity": 0.05454514763563578
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "carrier",
+      "child": "front_left_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.6
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "carrier",
+      "child": "front_right_knuckle",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.6
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "carrier",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "carrier",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "superstructure",
+      "xyz": [
+        0.99,
+        0.85,
+        1.05
+      ],
+      "rpy": [
+        0.0,
+        0.08,
+        -0.1
+      ]
+    },
+    {
+      "name": "left",
+      "link": "superstructure",
+      "xyz": [
+        0.98,
+        1.27,
+        1.5
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.65
+      ]
+    },
+    {
+      "name": "right",
+      "link": "superstructure",
+      "xyz": [
+        0.42,
+        -1.17,
+        0.95
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.65
+      ]
+    }
+  ]
+}

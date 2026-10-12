@@ -1,0 +1,337 @@
+{
+  "name": "wheel_loader",
+  "abbrev": "WL",
+  "display_name": "Wheel Loader",
+  "category": "loading",
+  "reference": "18.7 t articulated wheel loader (CAT 950 GC / Volvo L120H class)",
+  "description": "Medium articulated wheel loader on 23.5R25 tyres with a centre cab on the rear frame, a single-tilt-cylinder loader linkage and a 3.1 m\u00b3 general-purpose bucket.",
+  "urdf": "wheel_loader.urdf",
+  "root_link": "front_frame",
+  "root_height_m": 0.805,
+  "operating_mass_kg": 18700.0,
+  "model_mass_kg": 18890.0,
+  "envelope_m": [
+    8.3,
+    2.95,
+    3.52
+  ],
+  "model_bbox_m": [
+    8.348,
+    2.96,
+    3.52
+  ],
+  "action": {
+    "dim": 4,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "lift_arm",
+        "joint": "lift_arm_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.215,
+        "lower": -0.03,
+        "upper": 1.27332795176893,
+        "init": 0.035,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "bucket",
+        "joint": "bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.15,
+        "lower": -1.13,
+        "upper": 0.82,
+        "init": 0.8,
+        "positive": "curl",
+        "negative": "dump"
+      }
+    ]
+  },
+  "state": {
+    "dim": 8,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "articulation_angle",
+      "lift_arm_pos",
+      "bucket_pos"
+    ]
+  },
+  "drive": {
+    "type": "articulated",
+    "max_speed_mps": 8.6,
+    "max_reverse_speed_mps": 6.9,
+    "articulation_joint": "articulation_joint",
+    "front_length_m": 1.675,
+    "rear_length_m": 1.675,
+    "articulation_rate_radps": 0.35,
+    "max_articulation_rad": 0.7
+  },
+  "joints": [
+    {
+      "name": "articulation_joint",
+      "type": "revolute",
+      "role": "articulation",
+      "parent": "front_frame",
+      "child": "rear_frame",
+      "lower": -0.7,
+      "upper": 0.7,
+      "init": 0.0,
+      "velocity": 0.35
+    },
+    {
+      "name": "lift_arm_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "front_frame",
+      "child": "lift_arm",
+      "lower": -0.03,
+      "upper": 1.27332795176893,
+      "init": 0.035,
+      "velocity": 0.215
+    },
+    {
+      "name": "bucket_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_arm",
+      "child": "bucket_level",
+      "lower": -0.541331180707572,
+      "upper": 0.541331180707572,
+      "init": 0.46933118070757196,
+      "velocity": 0.272
+    },
+    {
+      "name": "bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "bucket_level",
+      "child": "bucket",
+      "lower": -1.13,
+      "upper": 0.82,
+      "init": 0.8,
+      "velocity": 1.15
+    },
+    {
+      "name": "tilt_lever_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_arm",
+      "child": "tilt_lever_level",
+      "lower": -0.541331180707572,
+      "upper": 0.541331180707572,
+      "init": 0.46933118070757196,
+      "velocity": 0.272
+    },
+    {
+      "name": "tilt_lever_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_lever_level",
+      "child": "tilt_lever",
+      "lower": -0.9949999999999999,
+      "upper": 0.9949999999999999,
+      "init": 0.9550000000000001,
+      "velocity": 1.25
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "front_frame",
+      "child": "lift_cylinders",
+      "lower": -0.3894934743264916,
+      "upper": 0.3894934743264916,
+      "init": -0.33263847432649163,
+      "velocity": 0.221905
+    },
+    {
+      "name": "lift_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_arm",
+      "child": "lift_rods",
+      "lower": -0.3021705015579734,
+      "upper": 0.30217050155797337,
+      "init": 0.2540255015579733,
+      "velocity": 0.19309500000000002
+    },
+    {
+      "name": "tilt_links_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_lever",
+      "child": "tilt_links_level",
+      "lower": -0.541331180707572,
+      "upper": 0.541331180707572,
+      "init": -0.46933118070757196,
+      "velocity": 0.272
+    },
+    {
+      "name": "tilt_links_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_links_level",
+      "child": "tilt_links",
+      "lower": -0.9949999999999999,
+      "upper": 0.9949999999999999,
+      "init": -0.9550000000000001,
+      "velocity": 1.25
+    },
+    {
+      "name": "tilt_cylinder_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "front_frame",
+      "child": "tilt_cylinder_level",
+      "lower": -0.560881099984106,
+      "upper": 0.5608810999841058,
+      "init": -0.4869310999841059,
+      "velocity": 0.27845
+    },
+    {
+      "name": "tilt_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_cylinder_level",
+      "child": "tilt_cylinder",
+      "lower": -0.10482499999999999,
+      "upper": 0.10482499999999999,
+      "init": 0.08308499999999999,
+      "velocity": 0.20005
+    },
+    {
+      "name": "tilt_rod_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_lever",
+      "child": "tilt_rod_level",
+      "lower": -0.43054830480721296,
+      "upper": 0.4305483048072129,
+      "init": -0.36959830480721295,
+      "velocity": 0.23545
+    },
+    {
+      "name": "tilt_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tilt_rod_level",
+      "child": "tilt_rod",
+      "lower": -0.910175,
+      "upper": 0.9101750000000001,
+      "init": -0.871915,
+      "velocity": 1.14995
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_frame",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_frame",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "rear_frame",
+      "xyz": [
+        -0.38,
+        0.0,
+        2.145
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "rear_frame",
+      "xyz": [
+        -0.36,
+        0.86,
+        2.445
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        0.55
+      ]
+    },
+    {
+      "name": "right",
+      "link": "rear_frame",
+      "xyz": [
+        -0.36,
+        -0.86,
+        2.445
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        -0.55
+      ]
+    }
+  ]
+}

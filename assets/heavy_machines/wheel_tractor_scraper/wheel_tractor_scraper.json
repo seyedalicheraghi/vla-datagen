@@ -1,0 +1,307 @@
+{
+  "name": "wheel_tractor_scraper",
+  "abbrev": "WTS",
+  "display_name": "Wheel Tractor-Scraper",
+  "category": "grading",
+  "reference": "15 m\u00b3 single-engine wheel tractor-scraper (CAT 621K class)",
+  "description": "Two-axle open-bowl scraper: single-axle tractor with engine hood and centre cab, 90\u00b0 steering hitch, gooseneck and draft arms carrying a 15 m\u00b3 bowl on the rear axle; the bowl lowers to cut 0.32 m deep, the apron (front gate) raises to open and the ejector (rear wall) pushes the load out forward.",
+  "urdf": "wheel_tractor_scraper.urdf",
+  "root_link": "tractor",
+  "root_height_m": 1.03,
+  "operating_mass_kg": 33200.0,
+  "model_mass_kg": 33410.0,
+  "envelope_m": [
+    14.0,
+    3.75,
+    3.85
+  ],
+  "model_bbox_m": [
+    13.63,
+    3.94,
+    3.91
+  ],
+  "action": {
+    "dim": 5,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "bowl",
+        "joint": "bowl_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.09,
+        "lower": -0.1941124335979844,
+        "upper": 0.0,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "apron",
+        "joint": "apron_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.3,
+        "lower": 0.0,
+        "upper": 0.55,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 4,
+        "label": "ejector",
+        "joint": "ejector_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.35,
+        "lower": 0.0,
+        "upper": 2.1,
+        "init": 0.0,
+        "positive": "eject",
+        "negative": "return"
+      }
+    ]
+  },
+  "state": {
+    "dim": 9,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "articulation_angle",
+      "bowl_pos",
+      "apron_pos",
+      "ejector_pos"
+    ]
+  },
+  "drive": {
+    "type": "articulated",
+    "max_speed_mps": 15.3,
+    "max_reverse_speed_mps": 2.8,
+    "articulation_joint": "steering_hitch_joint",
+    "front_length_m": 1.45,
+    "rear_length_m": 7.45,
+    "articulation_rate_radps": 0.4,
+    "max_articulation_rad": 0.9
+  },
+  "joints": [
+    {
+      "name": "steering_hitch_joint",
+      "type": "revolute",
+      "role": "articulation",
+      "parent": "tractor",
+      "child": "hitch",
+      "lower": -0.9,
+      "upper": 0.9,
+      "init": 0.0,
+      "velocity": 0.4
+    },
+    {
+      "name": "gooseneck_pitch_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "hitch",
+      "child": "gooseneck",
+      "lower": -0.019888641337961564,
+      "upper": 0.06785493720033761,
+      "init": 0.00011135866203843686,
+      "velocity": 0.0721362536587741
+    },
+    {
+      "name": "bowl_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "hitch",
+      "child": "bowl",
+      "lower": -0.1941124335979844,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 0.09
+    },
+    {
+      "name": "apron_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "bowl",
+      "child": "apron",
+      "lower": 0.0,
+      "upper": 0.55,
+      "init": 0.0,
+      "velocity": 0.3
+    },
+    {
+      "name": "ejector_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "bowl",
+      "child": "ejector",
+      "lower": 0.0,
+      "upper": 2.1,
+      "init": 0.0,
+      "velocity": 0.35
+    },
+    {
+      "name": "ejector_stage_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "bowl",
+      "child": "ejector_stage",
+      "lower": -0.02,
+      "upper": 1.07,
+      "init": 0.0,
+      "velocity": 0.22499999999999998
+    },
+    {
+      "name": "left_lift_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "gooseneck",
+      "child": "left_lift_barrel",
+      "lower": -0.04279265446157564,
+      "upper": 0.1500214008380526,
+      "init": 0.007207345538424361,
+      "velocity": 0.09303312684372672
+    },
+    {
+      "name": "left_lift_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "left_lift_barrel",
+      "child": "left_lift_rod",
+      "lower": -0.05,
+      "upper": 0.5974168373551222,
+      "init": 0.0,
+      "velocity": 0.30380916847395895
+    },
+    {
+      "name": "right_lift_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "gooseneck",
+      "child": "right_lift_barrel",
+      "lower": -0.04279265446157564,
+      "upper": 0.1500214008380526,
+      "init": 0.007207345538424361,
+      "velocity": 0.09303312684372672
+    },
+    {
+      "name": "right_lift_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "right_lift_barrel",
+      "child": "right_lift_rod",
+      "lower": -0.05,
+      "upper": 0.5974168373551222,
+      "init": 0.0,
+      "velocity": 0.30380916847395895
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "tractor",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "tractor",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "bowl",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "bowl",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "tractor",
+      "xyz": [
+        0.32,
+        0.0,
+        2.12
+      ],
+      "rpy": [
+        0.0,
+        0.25,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "tractor",
+      "xyz": [
+        0.18,
+        1.12,
+        2.2699999999999996
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.6
+      ]
+    },
+    {
+      "name": "right",
+      "link": "tractor",
+      "xyz": [
+        0.18,
+        -1.12,
+        2.2699999999999996
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.6
+      ]
+    }
+  ]
+}

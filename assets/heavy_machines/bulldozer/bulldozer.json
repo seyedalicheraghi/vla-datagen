@@ -1,0 +1,337 @@
+{
+  "name": "bulldozer",
+  "abbrev": "DOZ",
+  "display_name": "Bulldozer",
+  "category": "dozing",
+  "reference": "20 t medium crawler dozer (CAT D6 / Komatsu D65EX class)",
+  "description": "High-drive crawler dozer with a 3.4 m semi-U tilt blade on outboard push arms and a rear single-shank ripper.",
+  "urdf": "bulldozer.urdf",
+  "root_link": "tractor",
+  "root_height_m": 0.33,
+  "operating_mass_kg": 20500.0,
+  "model_mass_kg": 20480.0,
+  "envelope_m": [
+    6.6,
+    3.42,
+    3.2
+  ],
+  "model_bbox_m": [
+    6.635,
+    3.426,
+    3.2
+  ],
+  "action": {
+    "dim": 5,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "blade_lift",
+        "joint": "blade_lift_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.18,
+        "lower": -0.1614812919258275,
+        "upper": 0.359077309830321,
+        "init": 0.1253705301341791,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "blade_tilt",
+        "joint": "blade_tilt_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.15,
+        "lower": -0.2,
+        "upper": 0.2,
+        "init": 0.0,
+        "positive": "tilt_left",
+        "negative": "tilt_right"
+      },
+      {
+        "action_index": 4,
+        "label": "ripper",
+        "joint": "ripper_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.3,
+        "lower": -0.5447237223709273,
+        "upper": 0.555387653253582,
+        "init": 0.555387653253582,
+        "positive": "raise",
+        "negative": "lower"
+      }
+    ]
+  },
+  "state": {
+    "dim": 9,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "unused",
+      "blade_lift_pos",
+      "blade_tilt_pos",
+      "ripper_pos"
+    ]
+  },
+  "drive": {
+    "type": "skid",
+    "max_speed_mps": 2.8,
+    "max_reverse_speed_mps": 3.3,
+    "max_yaw_rate_radps": 0.5,
+    "track_width_m": 1.88
+  },
+  "joints": [
+    {
+      "name": "blade_lift_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "tractor",
+      "child": "lift_frame",
+      "lower": -0.1614812919258275,
+      "upper": 0.359077309830321,
+      "init": 0.1253705301341791,
+      "velocity": 0.18
+    },
+    {
+      "name": "blade_tilt_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "lift_frame",
+      "child": "blade",
+      "lower": -0.2,
+      "upper": 0.2,
+      "init": 0.0,
+      "velocity": 0.15
+    },
+    {
+      "name": "left_push_arm_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_frame",
+      "child": "left_push_arm",
+      "lower": -0.1505317163258681,
+      "upper": 0.15032092926035864,
+      "init": -0.00010539353275472898,
+      "velocity": 2.0
+    },
+    {
+      "name": "right_push_arm_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_frame",
+      "child": "right_push_arm",
+      "lower": -0.15032092926035864,
+      "upper": 0.1505317163258681,
+      "init": 0.00010539353275472898,
+      "velocity": 2.0
+    },
+    {
+      "name": "right_tilt_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "right_push_arm",
+      "child": "right_tilt_cylinder",
+      "lower": -0.3083255339051094,
+      "upper": 0.3368754612836732,
+      "init": 0.01427496368928187,
+      "velocity": 2.0
+    },
+    {
+      "name": "right_tilt_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "blade",
+      "child": "right_tilt_rod",
+      "lower": -0.4424269209557025,
+      "upper": 0.49959404354121734,
+      "init": 0.02858356129275738,
+      "velocity": 2.0
+    },
+    {
+      "name": "left_tilt_brace_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "left_push_arm",
+      "child": "left_tilt_brace",
+      "lower": -0.3367732561635492,
+      "upper": 0.3082252410748129,
+      "init": -0.014274007544368122,
+      "velocity": 2.0
+    },
+    {
+      "name": "left_brace_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "blade",
+      "child": "left_brace_rod",
+      "lower": -0.5009253818138523,
+      "upper": 0.44357731927983063,
+      "init": -0.028674031267010788,
+      "velocity": 2.0
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "lift_cylinders",
+      "lower": -0.9141843851997139,
+      "upper": -0.30318152145968374,
+      "init": -0.582598215943838,
+      "velocity": 2.0
+    },
+    {
+      "name": "lift_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_frame",
+      "child": "lift_rods",
+      "lower": 2.3793338222997886,
+      "upper": 2.4888895603159065,
+      "init": 2.4336239075117763,
+      "velocity": 2.0
+    },
+    {
+      "name": "ripper_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "tractor",
+      "child": "ripper_arm",
+      "lower": -0.5447237223709273,
+      "upper": 0.555387653253582,
+      "init": 0.555387653253582,
+      "velocity": 0.3
+    },
+    {
+      "name": "ripper_beam_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "ripper_arm",
+      "child": "ripper_beam",
+      "lower": -0.605387653253582,
+      "upper": 0.5947237223709273,
+      "init": -0.555387653253582,
+      "velocity": 2.0
+    },
+    {
+      "name": "ripper_link_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "ripper_link",
+      "lower": -0.5947237223709273,
+      "upper": 0.605387653253582,
+      "init": 0.555387653253582,
+      "velocity": 2.0
+    },
+    {
+      "name": "ripper_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "tractor",
+      "child": "ripper_cylinders",
+      "lower": -0.9279279968742251,
+      "upper": 0.02407510971955619,
+      "init": -0.025924890280443813,
+      "velocity": 2.0
+    },
+    {
+      "name": "ripper_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "ripper_beam",
+      "child": "ripper_rods",
+      "lower": -0.02407510971955619,
+      "upper": 0.9279279968742251,
+      "init": 0.025924890280443813,
+      "velocity": 2.0
+    },
+    {
+      "name": "left_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "tractor",
+      "child": "left_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    },
+    {
+      "name": "right_sprocket_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "tractor",
+      "child": "right_sprocket",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 20.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "tractor",
+      "xyz": [
+        0.36,
+        0.0,
+        2.93
+      ],
+      "rpy": [
+        0.0,
+        0.55,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "tractor",
+      "xyz": [
+        0.32,
+        0.94,
+        2.8200000000000003
+      ],
+      "rpy": [
+        0.0,
+        0.45,
+        0.4
+      ]
+    },
+    {
+      "name": "right",
+      "link": "tractor",
+      "xyz": [
+        0.32,
+        -0.94,
+        2.8200000000000003
+      ],
+      "rpy": [
+        0.0,
+        0.45,
+        -0.4
+      ]
+    }
+  ]
+}

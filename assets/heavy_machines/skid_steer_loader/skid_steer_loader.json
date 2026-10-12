@@ -1,0 +1,246 @@
+{
+  "name": "skid_steer_loader",
+  "abbrev": "SSL",
+  "display_name": "Skid Steer Loader",
+  "category": "loading",
+  "reference": "3.5 t wheeled skid steer loader (Bobcat S650 / CAT 262D3 class)",
+  "description": "Four-wheel skid-steered compact loader with a centre ROPS cab, rear-pivot lift arms and a 1.83 m bucket on a quick coupler.",
+  "urdf": "skid_steer_loader.urdf",
+  "root_link": "chassis",
+  "root_height_m": 0.42,
+  "operating_mass_kg": 3600.0,
+  "model_mass_kg": 3600.0,
+  "envelope_m": [
+    3.45,
+    1.83,
+    2.06
+  ],
+  "model_bbox_m": [
+    3.554,
+    1.83,
+    2.06
+  ],
+  "action": {
+    "dim": 4,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "lift_arm",
+        "joint": "lift_arm_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.35,
+        "lower": 0.0,
+        "upper": 1.1562506279902147,
+        "init": 0.06,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "bucket",
+        "joint": "bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.9,
+        "lower": -1.88,
+        "upper": 0.55,
+        "init": 0.4,
+        "positive": "curl",
+        "negative": "dump"
+      }
+    ]
+  },
+  "state": {
+    "dim": 8,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "unused",
+      "lift_arm_pos",
+      "bucket_pos"
+    ]
+  },
+  "drive": {
+    "type": "skid",
+    "max_speed_mps": 3.3,
+    "max_reverse_speed_mps": 3.3,
+    "max_yaw_rate_radps": 1.0,
+    "track_width_m": 1.45
+  },
+  "joints": [
+    {
+      "name": "lift_arm_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "lift_arm",
+      "lower": 0.0,
+      "upper": 1.1562506279902147,
+      "init": 0.06,
+      "velocity": 0.35
+    },
+    {
+      "name": "bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "lift_arm",
+      "child": "bucket",
+      "lower": -1.88,
+      "upper": 0.55,
+      "init": 0.4,
+      "velocity": 0.9
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "chassis",
+      "child": "lift_cylinders",
+      "lower": -0.34664080240723566,
+      "upper": 0.34664080240723566,
+      "init": -0.29274080240723566,
+      "velocity": 2.0
+    },
+    {
+      "name": "lift_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_arm",
+      "child": "lift_rods",
+      "lower": -0.27148451158787174,
+      "upper": 0.27148451158787174,
+      "init": 0.2253845115878717,
+      "velocity": 2.0
+    },
+    {
+      "name": "tilt_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "lift_arm",
+      "child": "tilt_cylinders",
+      "lower": -0.02725657830525669,
+      "upper": 0.02725657830525669,
+      "init": 0.0063607044404101875,
+      "velocity": 2.0
+    },
+    {
+      "name": "tilt_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "tilt_cylinders",
+      "child": "tilt_rods",
+      "lower": -0.17395653973379688,
+      "upper": 0.17395653973379688,
+      "init": -0.13494955951974788,
+      "velocity": 2.0
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "chassis",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "roll_left",
+      "parent": "chassis",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "chassis",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "roll_right",
+      "parent": "chassis",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "chassis",
+      "xyz": [
+        0.77,
+        0.0,
+        1.1700000000000002
+      ],
+      "rpy": [
+        0.0,
+        0.5,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "chassis",
+      "xyz": [
+        -1.26,
+        0.88,
+        1.4000000000000001
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        0.9
+      ]
+    },
+    {
+      "name": "right",
+      "link": "chassis",
+      "xyz": [
+        -1.26,
+        -0.88,
+        1.4000000000000001
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        -0.9
+      ]
+    }
+  ]
+}

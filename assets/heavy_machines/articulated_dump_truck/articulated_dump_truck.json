@@ -1,0 +1,257 @@
+{
+  "name": "articulated_dump_truck",
+  "abbrev": "ADT",
+  "display_name": "Articulated Dump Truck",
+  "category": "hauling",
+  "reference": "28 t articulated dump truck (CAT 730 / Volvo A30G class)",
+  "description": "6x6 articulated hauler: front tractor with engine hood and centre-mounted cab, centre hinge (\u00b145\u00b0), rear frame on a two-axle tandem bogie carrying a 17.5 m\u00b3 dump body that tips 70\u00b0 about a rear pivot on two hoist cylinders.",
+  "urdf": "articulated_dump_truck.urdf",
+  "root_link": "front_frame",
+  "root_height_m": 0.805,
+  "operating_mass_kg": 23500.0,
+  "model_mass_kg": 23460.0,
+  "envelope_m": [
+    10.4,
+    2.92,
+    3.43
+  ],
+  "model_bbox_m": [
+    10.411,
+    2.968,
+    3.425
+  ],
+  "action": {
+    "dim": 3,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "dump_body",
+        "joint": "dump_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.1,
+        "lower": 0.0,
+        "upper": 1.22,
+        "init": 0.0,
+        "positive": "raise",
+        "negative": "lower"
+      }
+    ]
+  },
+  "state": {
+    "dim": 7,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "articulation_angle",
+      "dump_body_pos"
+    ]
+  },
+  "drive": {
+    "type": "articulated",
+    "max_speed_mps": 14.7,
+    "max_reverse_speed_mps": 4.2,
+    "articulation_joint": "articulation_joint",
+    "front_length_m": 2.15,
+    "rear_length_m": 3.835,
+    "articulation_rate_radps": 0.35,
+    "max_articulation_rad": 0.785
+  },
+  "joints": [
+    {
+      "name": "articulation_joint",
+      "type": "revolute",
+      "role": "articulation",
+      "parent": "front_frame",
+      "child": "rear_frame",
+      "lower": -0.785,
+      "upper": 0.785,
+      "init": 0.0,
+      "velocity": 0.35
+    },
+    {
+      "name": "dump_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "rear_frame",
+      "child": "dump_body",
+      "lower": 0.0,
+      "upper": 1.22,
+      "init": 0.0,
+      "velocity": 0.1
+    },
+    {
+      "name": "left_hoist_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "rear_frame",
+      "child": "left_hoist_barrel",
+      "lower": 0.14187402343141056,
+      "upper": 0.6867724197810464,
+      "init": 0.24187402343141057,
+      "velocity": 0.12827036035652756
+    },
+    {
+      "name": "left_hoist_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "left_hoist_barrel",
+      "child": "left_hoist_rod",
+      "lower": -0.05,
+      "upper": 2.35565075629029,
+      "init": 0.0,
+      "velocity": 0.2889877669090402
+    },
+    {
+      "name": "right_hoist_barrel_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "rear_frame",
+      "child": "right_hoist_barrel",
+      "lower": 0.14187402343141056,
+      "upper": 0.6867724197810464,
+      "init": 0.24187402343141057,
+      "velocity": 0.12827036035652756
+    },
+    {
+      "name": "right_hoist_rod_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "right_hoist_barrel",
+      "child": "right_hoist_rod",
+      "lower": -0.05,
+      "upper": 2.35565075629029,
+      "init": 0.0,
+      "velocity": 0.2889877669090402
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_frame",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_frame",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "mid_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "mid_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "mid_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "rear_frame",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "front_frame",
+      "xyz": [
+        -0.24,
+        0.0,
+        2.15
+      ],
+      "rpy": [
+        0.0,
+        0.22,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "front_frame",
+      "xyz": [
+        -0.17,
+        1.16,
+        2.26
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.6
+      ]
+    },
+    {
+      "name": "right",
+      "link": "front_frame",
+      "xyz": [
+        -0.17,
+        -1.16,
+        2.26
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        -0.6
+      ]
+    }
+  ]
+}

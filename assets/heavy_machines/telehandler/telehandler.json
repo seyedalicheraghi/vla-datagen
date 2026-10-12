@@ -1,0 +1,307 @@
+{
+  "name": "telehandler",
+  "abbrev": "TH",
+  "display_name": "Telehandler",
+  "category": "lifting",
+  "reference": "17 m / 4 t telescopic handler (JCB 540-170 Loadall / CAT TH514D class)",
+  "description": "Rigid-frame 4x4 telescopic handler with a left-hand cab, side engine, rear-pivot four-section telescopic boom (16.7 m lift height, 12.5 m reach), compensated tilting fork carriage with pallet forks, folded front stabilisers and front-wheel Ackermann steering.",
+  "urdf": "telehandler.urdf",
+  "root_link": "chassis",
+  "root_height_m": 0.655,
+  "operating_mass_kg": 12060.0,
+  "model_mass_kg": 12060.0,
+  "envelope_m": [
+    7.56,
+    2.44,
+    2.69
+  ],
+  "model_bbox_m": [
+    7.629,
+    2.48,
+    2.69
+  ],
+  "action": {
+    "dim": 5,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "boom_luff",
+        "joint": "boom_luff_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.14,
+        "lower": -0.1269,
+        "upper": 1.2086,
+        "init": -0.1269,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "boom_telescope",
+        "joint": "boom_telescope_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.3,
+        "lower": 0.0,
+        "upper": 3.712,
+        "init": 0.0,
+        "positive": "extend",
+        "negative": "retract"
+      },
+      {
+        "action_index": 4,
+        "label": "fork_tilt",
+        "joint": "fork_tilt_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.45,
+        "lower": -1.25,
+        "upper": 0.4,
+        "init": 0.05,
+        "positive": "tilt_back",
+        "negative": "tilt_forward"
+      }
+    ]
+  },
+  "state": {
+    "dim": 9,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "boom_luff_pos",
+      "boom_telescope_pos",
+      "fork_tilt_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 8.5,
+    "max_reverse_speed_mps": 8.5,
+    "wheelbase_m": 2.75,
+    "max_steer_rad": 0.65,
+    "steer_rate_radps": 0.25,
+    "fixed_axle_x_m": 0.0,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "boom_luff_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "boom_base",
+      "lower": -0.1269,
+      "upper": 1.2086,
+      "init": -0.1269,
+      "velocity": 0.14
+    },
+    {
+      "name": "boom_telescope_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "boom_base",
+      "child": "boom_mid_1",
+      "lower": 0.0,
+      "upper": 3.712,
+      "init": 0.0,
+      "velocity": 0.3
+    },
+    {
+      "name": "boom_mid_2_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_mid_1",
+      "child": "boom_mid_2",
+      "lower": 0.0,
+      "upper": 3.712,
+      "init": 0.0,
+      "velocity": 0.3
+    },
+    {
+      "name": "boom_fly_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "boom_mid_2",
+      "child": "boom_fly",
+      "lower": 0.0,
+      "upper": 3.712,
+      "init": 0.0,
+      "velocity": 0.3
+    },
+    {
+      "name": "carriage_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom_fly",
+      "child": "carriage_level",
+      "lower": -1.2586,
+      "upper": 0.1769,
+      "init": 0.1269,
+      "velocity": 0.14
+    },
+    {
+      "name": "fork_tilt_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "carriage_level",
+      "child": "carriage",
+      "lower": -1.25,
+      "upper": 0.4,
+      "init": 0.05,
+      "velocity": 0.45
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "chassis",
+      "child": "lift_cylinder",
+      "lower": -0.6595158563409667,
+      "upper": 0.6595158563409667,
+      "init": -0.6395158563409666,
+      "velocity": 0.1840804491018126
+    },
+    {
+      "name": "lift_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom_base",
+      "child": "lift_rod",
+      "lower": -0.04823414365903332,
+      "upper": 0.04823414365903332,
+      "init": 0.028234143659033317,
+      "velocity": 0.055919550898187446
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_left_knuckle",
+      "lower": -0.85,
+      "upper": 0.85,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_right_knuckle",
+      "lower": -0.85,
+      "upper": 0.85,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "chassis",
+      "xyz": [
+        2.19,
+        0.6199999999999999,
+        1.3949999999999998
+      ],
+      "rpy": [
+        0.0,
+        0.18,
+        -0.15
+      ]
+    },
+    {
+      "name": "left",
+      "link": "chassis",
+      "xyz": [
+        2.16,
+        1.0999999999999999,
+        1.845
+      ],
+      "rpy": [
+        0.0,
+        0.35,
+        0.65
+      ]
+    },
+    {
+      "name": "right",
+      "link": "chassis",
+      "xyz": [
+        1.98,
+        -1.0899999999999999,
+        1.2249999999999999
+      ],
+      "rpy": [
+        0.0,
+        0.32,
+        -0.75
+      ]
+    }
+  ]
+}

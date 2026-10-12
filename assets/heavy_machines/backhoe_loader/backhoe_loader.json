@@ -1,0 +1,440 @@
+{
+  "name": "backhoe_loader",
+  "abbrev": "BHL",
+  "display_name": "Backhoe Loader",
+  "category": "excavation",
+  "reference": "8 t backhoe loader (JCB 3CX / CAT 420 class)",
+  "description": "Rigid-frame backhoe loader on big 16.9-28 rear and small 12.5/80-18 front tyres with front-wheel Ackermann steering, a centre cab, a self-levelling front loader with a 1.0 m\u00b3 shovel, a centre-mount rear backhoe (180\u00b0 slew, boom / dipper / 24\" bucket) and two vertical rear stabiliser legs.",
+  "urdf": "backhoe_loader.urdf",
+  "root_link": "chassis",
+  "root_height_m": 0.72,
+  "operating_mass_kg": 8070.0,
+  "model_mass_kg": 8070.0,
+  "envelope_m": [
+    5.62,
+    2.36,
+    3.61
+  ],
+  "model_bbox_m": [
+    6.048,
+    2.36,
+    3.636
+  ],
+  "action": {
+    "dim": 9,
+    "range": [
+      -1.0,
+      1.0
+    ],
+    "channels": [
+      {
+        "action_index": 0,
+        "label": "drive",
+        "positive": "forward",
+        "negative": "reverse"
+      },
+      {
+        "action_index": 1,
+        "label": "turn",
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 2,
+        "label": "loader_arm",
+        "joint": "loader_arm_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 0.3,
+        "lower": -0.04,
+        "upper": 1.423,
+        "init": 0.11,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 3,
+        "label": "loader_bucket",
+        "joint": "loader_bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.15,
+        "lower": -0.95,
+        "upper": 0.75,
+        "init": 0.7,
+        "positive": "curl",
+        "negative": "dump"
+      },
+      {
+        "action_index": 4,
+        "label": "backhoe_swing",
+        "joint": "swing_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": -1.5,
+        "upper": 1.5,
+        "init": 0.0,
+        "positive": "left",
+        "negative": "right"
+      },
+      {
+        "action_index": 5,
+        "label": "backhoe_boom",
+        "joint": "boom_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": -1.15,
+        "upper": 1.48,
+        "init": 1.4,
+        "positive": "raise",
+        "negative": "lower"
+      },
+      {
+        "action_index": 6,
+        "label": "backhoe_stick",
+        "joint": "stick_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.0,
+        "lower": -1.45,
+        "upper": 0.95,
+        "init": -1.45,
+        "positive": "out",
+        "negative": "in"
+      },
+      {
+        "action_index": 7,
+        "label": "backhoe_bucket",
+        "joint": "backhoe_bucket_joint",
+        "type": "revolute",
+        "unit": "rad",
+        "rate_at_full_command": 1.5,
+        "lower": -1.1,
+        "upper": 2.45,
+        "init": 0.2,
+        "positive": "curl",
+        "negative": "dump"
+      },
+      {
+        "action_index": 8,
+        "label": "stabilizers",
+        "joint": "left_stabilizer_joint",
+        "type": "prismatic",
+        "unit": "m",
+        "rate_at_full_command": 0.25,
+        "lower": 0.0,
+        "upper": 0.45,
+        "init": 0.0,
+        "positive": "lower",
+        "negative": "raise"
+      }
+    ]
+  },
+  "state": {
+    "dim": 13,
+    "labels": [
+      "x",
+      "y",
+      "yaw",
+      "speed",
+      "yaw_rate",
+      "steer_angle",
+      "loader_arm_pos",
+      "loader_bucket_pos",
+      "backhoe_swing_pos",
+      "backhoe_boom_pos",
+      "backhoe_stick_pos",
+      "backhoe_bucket_pos",
+      "stabilizers_pos"
+    ]
+  },
+  "drive": {
+    "type": "ackermann",
+    "max_speed_mps": 11.1,
+    "max_reverse_speed_mps": 11.1,
+    "wheelbase_m": 2.17,
+    "max_steer_rad": 0.6,
+    "steer_rate_radps": 0.16,
+    "fixed_axle_x_m": 0.0,
+    "steer_axle": "front"
+  },
+  "joints": [
+    {
+      "name": "loader_arm_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "loader_arm",
+      "lower": -0.04,
+      "upper": 1.423,
+      "init": 0.11,
+      "velocity": 0.3
+    },
+    {
+      "name": "shovel_level_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "loader_arm",
+      "child": "shovel_level",
+      "lower": -0.7515000000000001,
+      "upper": 0.7515000000000001,
+      "init": 0.5815,
+      "velocity": 0.4
+    },
+    {
+      "name": "loader_bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "shovel_level",
+      "child": "loader_bucket",
+      "lower": -0.95,
+      "upper": 0.75,
+      "init": 0.7,
+      "velocity": 1.15
+    },
+    {
+      "name": "lift_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "chassis",
+      "child": "lift_cylinders",
+      "lower": -0.45800967382238816,
+      "upper": 0.45800967382238816,
+      "init": 0.3481922424165669,
+      "velocity": 0.2796348628116424
+    },
+    {
+      "name": "lift_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "loader_arm",
+      "child": "lift_rods",
+      "lower": -1.189509673822388,
+      "upper": 1.189509673822388,
+      "init": 0.9296922424165669,
+      "velocity": 0.5796348628116424
+    },
+    {
+      "name": "swing_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "swing_frame",
+      "lower": -1.5,
+      "upper": 1.5,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "boom_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "swing_frame",
+      "child": "boom",
+      "lower": -1.15,
+      "upper": 1.48,
+      "init": 1.4,
+      "velocity": 1.0
+    },
+    {
+      "name": "stick_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "boom",
+      "child": "stick",
+      "lower": -1.45,
+      "upper": 0.95,
+      "init": -1.45,
+      "velocity": 1.0
+    },
+    {
+      "name": "backhoe_bucket_joint",
+      "type": "revolute",
+      "role": "tool",
+      "parent": "stick",
+      "child": "backhoe_bucket",
+      "lower": -1.1,
+      "upper": 2.45,
+      "init": 0.2,
+      "velocity": 1.5
+    },
+    {
+      "name": "boom_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "swing_frame",
+      "child": "boom_cylinder",
+      "lower": -1.071026871093755,
+      "upper": 1.071026871093755,
+      "init": 0.9870860728523096,
+      "velocity": 0.8992599780180647
+    },
+    {
+      "name": "boom_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "boom_rod",
+      "lower": -0.28397312890624493,
+      "upper": 0.28397312890624493,
+      "init": -0.24791392714769006,
+      "velocity": 0.3007400219819353
+    },
+    {
+      "name": "dipper_cylinder_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "boom",
+      "child": "dipper_cylinder",
+      "lower": -0.10350587252653702,
+      "upper": 0.10350587252653702,
+      "init": -0.08350587252653702,
+      "velocity": 0.16958822710544752
+    },
+    {
+      "name": "dipper_rod_joint",
+      "type": "revolute",
+      "role": "follower",
+      "parent": "stick",
+      "child": "dipper_rod",
+      "lower": -1.136494127473463,
+      "upper": 1.136494127473463,
+      "init": 1.116494127473463,
+      "velocity": 1.0304117728945525
+    },
+    {
+      "name": "left_stabilizer_joint",
+      "type": "prismatic",
+      "role": "tool",
+      "parent": "chassis",
+      "child": "left_stabilizer",
+      "lower": 0.0,
+      "upper": 0.45,
+      "init": 0.0,
+      "velocity": 0.25
+    },
+    {
+      "name": "right_stabilizer_joint",
+      "type": "prismatic",
+      "role": "follower",
+      "parent": "chassis",
+      "child": "right_stabilizer",
+      "lower": 0.0,
+      "upper": 0.45,
+      "init": 0.0,
+      "velocity": 0.25
+    },
+    {
+      "name": "front_left_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_left_knuckle",
+      "lower": -0.8,
+      "upper": 0.8,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "front_right_steer_joint",
+      "type": "revolute",
+      "role": "steer",
+      "parent": "chassis",
+      "child": "front_right_knuckle",
+      "lower": -0.8,
+      "upper": 0.8,
+      "init": 0.0,
+      "velocity": 1.0
+    },
+    {
+      "name": "front_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_left_knuckle",
+      "child": "front_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_left_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_left_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "front_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "front_right_knuckle",
+      "child": "front_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    },
+    {
+      "name": "rear_right_wheel_joint",
+      "type": "continuous",
+      "role": "wheel",
+      "parent": "chassis",
+      "child": "rear_right_wheel",
+      "lower": 0.0,
+      "upper": 0.0,
+      "init": 0.0,
+      "velocity": 60.0
+    }
+  ],
+  "cameras": [
+    {
+      "name": "front",
+      "link": "chassis",
+      "xyz": [
+        1.12,
+        0.0,
+        1.5999999999999999
+      ],
+      "rpy": [
+        0.0,
+        0.3,
+        0.0
+      ]
+    },
+    {
+      "name": "left",
+      "link": "chassis",
+      "xyz": [
+        1.11,
+        0.9299999999999999,
+        1.9200000000000002
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        0.55
+      ]
+    },
+    {
+      "name": "right",
+      "link": "chassis",
+      "xyz": [
+        1.11,
+        -0.9299999999999999,
+        1.9200000000000002
+      ],
+      "rpy": [
+        0.0,
+        0.4,
+        -0.55
+      ]
+    }
+  ]
+}
