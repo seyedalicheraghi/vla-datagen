@@ -52,9 +52,13 @@ Model joints:
                        the basic screed at full stroke.
 
 Cameras: ``front`` = operator eye at the front of the platform, looking into
-the hopper (both wings).  ``left`` / ``right`` = under the rear corners of the
-roof, looking back and down at the screed, the auger end and that side's
-extending unit and end gate (the operator's view while paving).
+the hopper (both wings).  ``left`` = screed camera under the rear edge of the
+roof (left of centre), looking straight back and down over the auger at the
+whole screed and both extending units / end gates.  ``right`` = side camera
+under the right rear corner of the platform, looking back along the tractor
+side at the right screed-lift cylinder, the tow-arm end, the screed end and
+the right extending unit — from the side, so the screed lift (a vertical
+motion the roof camera sees almost end-on) shows clearly.
 
 Layout as on the real machine: push rollers and hopper at the front, the
 slat conveyors running back through the tractor, engine compartment behind
@@ -449,10 +453,17 @@ def build() -> MachineSpec:
         cameras=[
             # operator eye at the front of the platform, looking down into the hopper
             Camera("front", "tractor", (0.0, 0.0, 2.95 - Z0), (0.0, 0.65, 0.0)),
-            # under the rear roof corners (behind and outboard of the roof posts), looking
-            # back and down at the screed, the auger end and that side's extending unit
-            Camera("left", "tractor", (-2.20, 1.25, 3.45 - Z0), (0.0, 1.00, 2.70)),
-            Camera("right", "tractor", (-2.20, -1.25, 3.45 - Z0), (0.0, 1.00, -2.70)),
+            # screed camera under the rear lip of the roof, left of centre, looking straight
+            # back and down over the auger at the whole screed: both extending units and
+            # end gates, the screed top and the lift-cylinder rods (seen from above)
+            Camera("left", "tractor", (X_PLAT_R - 0.13, 0.60, 3.45 - Z0), (0.0, 0.95, math.pi)),
+            # side camera on a bracket under the right rear corner of the platform (0.15 m
+            # outboard of its edge, just ahead of the lift-cylinder bracket), looking back
+            # along the tractor side: right lift cylinder from the side, tow-arm end, screed
+            # end and the right extending unit / end gate.  The screed lift is a vertical
+            # motion, which the roof camera sees nearly end-on.
+            Camera("right", "tractor", (X_REAR + 0.15, -(PLAT_Y + 0.15), Z_BODY - 0.17 - Z0),
+                   (0.0, 0.50, -3.05)),
         ],
         envelope=(6.45, 2.55, 3.75),
         operating_mass=19100.0,

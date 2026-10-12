@@ -69,8 +69,17 @@ blade at or below grade (even with the lowered hood only 1.4 % of the image at
 grade, 0.3 % at full digging depth).  From the roof it sees the whole blade top
 edge and both corners in every pose (pinhole render with the env intrinsics:
 blade 6.0 % of the image in the init pose, 4.1 % at grade, 1.8 % at full
-digging depth, tilt ±0.2 clearly visible).  "left" / "right" sit on the front corners of the roof
-and look out over the blade ends (blade 4.7 % at grade, 2.4 % at full depth).
+digging depth, tilt ±0.2 clearly visible).  "left" sits on the front left corner of the
+roof and looks out over the left blade end (blade 4.7 % at grade, 2.4 % at full depth;
+blade_lift and blade_tilt are seen by both front and left).  "right" is the rear-view /
+ripper work camera that D6 / D65-class dozers carry: on a bracket at the rear right
+corner of the ROPS roof (0.08 m behind its rear edge, 3.14 m above ground), looking
+straight back (yawed 3.5° in toward the centre-line shank) and 0.80 rad down.  It sees
+the ripper beam, shank and parallelogram over the whole stroke (≈ 60 px of motion at
+224 px; at full depth the beam and the shank down to the ground stay above the fuel-tank
+edge, which hides the ground closer than ≈ 0.8 m behind the tank), the ground behind the
+machine beside the right track, and a strip of horizon.  Without it no camera saw the
+ripper at all.
 
 Init pose = travel/transport pose: blade raised (lowest point 0.38 m above
 ground), tilt level, ripper fully raised.  Model envelope in that pose
@@ -663,11 +672,13 @@ def build() -> MachineSpec:
             # front edge of the cab roof on the centre line, looking over the sloped hood:
             # the blade top edge and both corners stay in view down to full digging depth
             Camera("front", "tractor", (cx1 + 0.14, 0.0, ROOF_TOP + 0.06 - Z0), (0.0, 0.55, 0.0)),
-            # front corners of the cab roof, looking out over the blade ends
+            # front left corner of the cab roof, looking out over the left blade end
             Camera("left", "tractor", (cam_x + 0.05, CAB_Y + 0.08, ROOF_TOP - 0.05 - Z0),
                    (0.0, 0.45, 0.40)),
-            Camera("right", "tractor", (cam_x + 0.05, -CAB_Y - 0.08, ROOF_TOP - 0.05 - Z0),
-                   (0.0, 0.45, -0.40)),
+            # rear-view / ripper camera on the rear right corner of the ROPS roof, looking
+            # back and down at the single-shank ripper (yawed slightly in toward the shank)
+            Camera("right", "tractor", (cx0 - 0.15, -CAB_Y + 0.06, ROOF_TOP - 0.06 - Z0),
+                   (0.0, 0.80, math.pi - 0.06)),
         ],
         envelope=(6.60, 3.42, 3.20),
         operating_mass=20500.0,

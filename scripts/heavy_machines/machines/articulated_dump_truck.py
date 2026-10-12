@@ -52,8 +52,11 @@ TANDEM_X = sum(BOGIE_X) / 2          # -3.835
 BUMPER_X = 1.50                      # front of the bumper / grille
 CAB = (-1.95, -0.30, 0.90, 1.15, 2.45)   # cab shell: rear x, front x, half width, floor z, roof z
 MIRROR = (-0.17, 1.16, 1.87)         # left mirror head centre (right one mirrored)
-MIRROR_ARM_Z = MIRROR[2] + 0.32      # mirror-arm end = side-camera mount; the head hangs on a
+MIRROR_ARM_Z = MIRROR[2] + 0.32      # mirror-arm end = left-camera mount; the head hangs on a
                                      # short drop below it, out of the camera frustum
+# Right camera = rear-view / body-watch camera on the cab roof's rear right corner (3.39 m AGL,
+# 2 cm ahead of the roof's rear edge, above the canopy lip), looking back along the body.
+REAR_CAM = (CAB[0] - 0.05, -(CAB[2] - 0.04), CAB[4] + 0.13)
 
 # --- Dump body ---------------------------------------------------------------------
 PIVOT = (-5.55, 0.745)               # body pivot pin (x rel. hinge, z rel. axle line; 1.55 m AGL)
@@ -155,7 +158,7 @@ def build() -> MachineSpec:
         *[box(0.07, 0.04, lz - 0.08, at=(x, s * (y1 + 0.02), cz), mat="accent", collision=False)
           for x in (x1 - 0.04, x0 + 0.04, cx - 0.10) for s in (1.0, -1.0)],
         # roof work lights; mirror arms from the front pillars, mirror heads hanging below
-        # the arm ends on short drops (the side cameras sit on the arm ends)
+        # the arm ends on short drops (the left camera sits on the left arm end)
         *[box(0.08, 0.18, 0.09, at=(x1 + 0.03, s * 0.55, z1 - 0.05), mat="white", collision=False)
           for s in (1.0, -1.0)],
         *[box(math.hypot(*arm), 0.03, 0.03, at=(x1 - 0.02 + arm[0] / 2, s * (y1 + 0.03 + arm[1] / 2),
@@ -340,18 +343,21 @@ def build() -> MachineSpec:
             # operator eye height (2.95 m AGL) on the centre line, just ahead of the
             # windscreen (the glass panes are opaque boxes), looking down the hood
             Camera("front", "front_frame", (-0.24, 0.0, 2.15), (0.0, 0.22, 0.0)),
-            # on the mirror-arm ends (3.07 m AGL), looking outward-forward; the mirror heads
-            # hang 0.15 m lower, out of the frustum
+            # on the left mirror-arm end (3.07 m AGL), looking outward-forward; the mirror head
+            # hangs 0.15 m lower, out of the frustum
             Camera("left", "front_frame", (MIRROR[0], MIRROR[1], MIRROR_ARM_Z + 0.07), (0.0, 0.30, 0.60)),
-            Camera("right", "front_frame", (MIRROR[0], -MIRROR[1], MIRROR_ARM_Z + 0.07),
-                   (0.0, 0.30, -0.60)),
+            # rear-view camera on the cab roof's rear right corner, looking back (20° outboard,
+            # 17° down) over the canopy along the body's right side: the body tips in view
+            # (headboard rising, hoist cylinders, bogie), with the ground right of the truck.
+            # The roof plate stays inside the 0.1 m near clip.
+            Camera("right", "front_frame", REAR_CAM, (0.0, 0.30, -2.80)),
         ],
         envelope=(10.40, 2.92, 3.43),
         operating_mass=23500.0,
         notes=("Hoist cylinders are cosmetic followers of dump_joint: barrel pinned on the rear "
                "frame + sliding rod, always straight; because follower angles are linear in q "
                "the rod eye slides up to 0.6 m along a bracket under the body while tipping. "
-               "Cameras keep the dataset-wide layout (front over the hood, left/right "
-               "outward-forward from the mirrors, as on the other haulers), so the dump body "
-               "is never in an image: raise/lower shows up only in the state vector."),
+               "Cameras: front over the hood (operator view), left outward-forward from the "
+               "left mirror arm, right is a rear-view camera on the cab roof's rear right "
+               "corner looking back along the body, so raise/lower is visible in rgb_right."),
     )
