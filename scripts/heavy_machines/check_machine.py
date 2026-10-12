@@ -57,12 +57,13 @@ def main() -> int:
             urdf, meta = write_assets(spec)
             print(f"  wrote   {os.path.relpath(urdf)} , {os.path.relpath(meta)}")
         if args.render:
-            from heavy_machines.render import render_poses, render_tool_sweeps
+            from heavy_machines.render import render_camera_views, render_poses, render_tool_sweeps
             os.makedirs(args.render, exist_ok=True)
             print("  render  " + render_poses(spec, os.path.join(args.render, f"{spec.name}_poses.png")))
             sweep = render_tool_sweeps(spec, os.path.join(args.render, f"{spec.name}_sweeps.png"))
             if sweep:
                 print("  render  " + sweep)
+            print("  render  " + render_camera_views(spec, os.path.join(args.render, f"{spec.name}_cameras.png")))
     total = len(specs) + (0 if args.machines else len(registry.load_errors()))
     print(f"\n{total - failed}/{total} machines OK")
     return 1 if failed else 0

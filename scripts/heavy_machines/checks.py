@@ -7,6 +7,7 @@ worth a look but can be deliberate.
 
 from __future__ import annotations
 
+import itertools
 import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -578,17 +579,22 @@ def _camera_checks(spec: MachineSpec) -> list[tuple[str, str]]:
         sub = K.subtree_links(spec, j.child)
         if cam_links & set(sub):
             continue                                  # cameras ride on this tool (e.g. swing)
-        qs = ([j.init - 0.5, j.init, j.init + 0.5] if j.type == "continuous"
-              else [j.lower, j.init, j.upper])
+        lo_q, hi_q = (j.init - 0.5, j.init + 0.5) if j.type == "continuous" else (j.lower, j.upper)
+        qs = [lo_q + (hi_q - lo_q) * i / 6 for i in range(7)]
         pts_by_q = []
         for q in qs:
             ltf = K.link_transforms(spec, {j.name: q})
-            pts_by_q.append([K.shape_tf(ltf[n], s).t for n in sub for s in spec.link(n).shapes if s.visual])
+            pts = []
+            for n in sub:
+                for s in spec.link(n).shapes:
+                    if s.visual:                      # centre + hull points (long booms!)
+                        pts.append(K.shape_tf(ltf[n], s).t)
+                        pts.extend(K.shape_points(ltf[n], s, 8))
+            pts_by_q.append(pts)
         best = 0.0
         for c in cams:
             ct = cam_tfs[c.name]
-            for a_pts, b_pts in ((pts_by_q[0], pts_by_q[1]), (pts_by_q[1], pts_by_q[2]),
-                                 (pts_by_q[0], pts_by_q[2])):
+            for a_pts, b_pts in itertools.combinations(pts_by_q, 2):
                 for pa, pb in zip(a_pts, b_pts):
                     ua, ub = _project(ct, pa), _project(ct, pb)
                     if _in_frame(ua) and _in_frame(ub):

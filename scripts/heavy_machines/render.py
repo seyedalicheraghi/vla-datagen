@@ -225,3 +225,77 @@ def render_tool_sweeps(spec: MachineSpec, path: str) -> str | None:
     fig.savefig(path, dpi=70)
     plt.close(fig)
     return path
+
+
+# ---------------------------------------------------------------------------
+# Approximate camera images (pinhole, painter's algorithm, no lighting)
+# ---------------------------------------------------------------------------
+
+_CAM_PX = 224
+_CAM_FOCAL = _CAM_PX * 10.0 / 20.955          # matches machine_env (10 mm lens, 20.955 mm aperture)
+
+
+def _camera_faces(spec: MachineSpec, tfs, cam_tf, h: float):
+    """Projected polygons (depth, pts2d, rgb) for one camera, ground tiles included."""
+    Rt = K.transpose(cam_tf.R)
+
+    def to_cam(p):
+        return K.mat_vec(Rt, K.vsub(p, cam_tf.t))
+
+    out = []
+
+    def add(poly3, rgb):
+        cps = [to_cam(p) for p in poly3]
+        if any(c[0] < 0.12 for c in cps):            # crude near-plane rejection
+            return
+        pts = [(_CAM_PX / 2 - _CAM_FOCAL * c[1] / c[0], _CAM_PX / 2 - _CAM_FOCAL * c[2] / c[0]) for c in cps]
+        if all(x < -200 or x > _CAM_PX + 200 for x, _ in pts) or all(y < -200 or y > _CAM_PX + 200 for _, y in pts):
+            return
+        out.append((sum(c[0] for c in cps) / len(cps), pts, rgb))
+
+    # ground: tiles around the machine (root frame, z = -h)
+    tile = 3.0
+    for i in range(-12, 12):
+        for k in range(-12, 12):
+            x0, y0 = i * tile, k * tile
+            shade = 0.40 if (i + k) % 2 else 0.36
+            add([(x0, y0, -h), (x0 + tile, y0, -h), (x0 + tile, y0 + tile, -h), (x0, y0 + tile, -h)],
+                (shade + 0.06, shade, shade - 0.08))
+    for verts, rgba in _faces_3d(spec, tfs):
+        add(verts, rgba[:3])
+    return out
+
+
+def render_camera_views(spec: MachineSpec, path: str, poses=None) -> str:
+    """Rows = poses, columns = the front / left / right cameras (approximate)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon
+
+    poses = poses or default_poses(spec)[:3]
+    h = K.root_height(spec)
+    cams = sorted(spec.cameras, key=lambda c: ("front", "left", "right").index(c.name))
+    fig, axes = plt.subplots(len(poses), len(cams), figsize=(3.2 * len(cams), 3.3 * len(poses)),
+                             squeeze=False)
+    for row, (title, q) in enumerate(poses):
+        tfs = K.link_transforms(spec, q)
+        for col, cam in enumerate(cams):
+            ax = axes[row][col]
+            ax.set_facecolor((0.70, 0.80, 0.92))
+            cam_tf = tfs[cam.link] @ K.Tf.from_xyz_rpy(cam.xyz, cam.rpy)
+            for _, pts, rgb in sorted(_camera_faces(spec, tfs, cam_tf, h), key=lambda f: -f[0]):
+                ax.add_patch(Polygon(pts, closed=True, facecolor=rgb, edgecolor=(0, 0, 0, 0.15),
+                                     linewidth=0.2))
+            ax.set_xlim(0, _CAM_PX)
+            ax.set_ylim(_CAM_PX, 0)
+            ax.set_aspect("equal")
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(f"{cam.name} — {title}", fontsize=7)
+    fig.suptitle(f"{spec.display_name}: approximate camera images (224 px, no lighting/occlusion culling)",
+                 fontsize=8)
+    fig.tight_layout(rect=(0, 0, 1, 0.96))
+    fig.savefig(path, dpi=80)
+    plt.close(fig)
+    return path
