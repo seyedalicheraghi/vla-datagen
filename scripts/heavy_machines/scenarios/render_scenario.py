@@ -6,9 +6,11 @@
 
 Output: <out>/<camera>/frame_NNNNN.png (with the camera look), <out>/<camera>_raw/ (with --save_raw),
 <out>/<scenario>_<camera>.mp4 (ffmpeg or imageio-ffmpeg if available, BT.709-tagged) and
-<out>/textures/ (baked maps).  Exit code 0 only if every frame and video was written.
+<out>/textures/ (baked maps, cached: a re-render with the same scenario and options skips the bake).
+Exit code 0 only if every frame and video was written.
 
-The scene is authored by ``usd_scene.build_scene`` (pure pxr — validated offline by
+Textures are baked by ``bake.py`` in a separate process *before* Isaac Sim starts (parallel, cached;
+worker processes inside Kit are not safe).  The scene is authored by ``usd_scene.build_scene`` (pure pxr — validated offline by
 test/test_usd_scene.py): terrain split into seamless parts with baked colour / normal / roughness maps,
 boulders and gravel instanced from irregular rock meshes, and render twins of the machines (bevelled
 meshes with dusty-paint / rubber / steel / glass PBR texture sets) posed every frame from forward
@@ -19,6 +21,7 @@ camera look (depth haze, tone curve, lens, grain) applied to every recorded fram
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import glob
 import math
 import os
@@ -30,6 +33,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 
 from isaaclab.app import AppLauncher  # noqa: E402
 
+from heavy_machines.scenarios import bake  # noqa: E402  (numpy + Pillow only)
+
 parser = argparse.ArgumentParser(description="Render a heavy-machine scenario to video.")
 parser.add_argument("--scenario", default="adt_approach_hex")
 parser.add_argument("--out", default="heavy_machine_videos/{scenario}")
@@ -39,17 +44,35 @@ parser.add_argument("--renderer", choices=["pathtraced", "rtx"], default="pathtr
 parser.add_argument("--spp", type=int, default=32, help="path-tracing samples per render call")
 parser.add_argument("--subframes", type=int, default=4, help="render calls accumulated per video frame")
 parser.add_argument("--warmup", type=int, default=40, help="rendered frames before recording")
-parser.add_argument("--terrain_step", type=float, default=0.15, help="detailed terrain mesh spacing (m)")
-parser.add_argument("--texture_ppm", type=float, default=24.0, help="terrain colour px/m (detailed area)")
-parser.add_argument("--texture_ppm_near", type=float, default=48.0, help="terrain colour px/m along the camera path")
-parser.add_argument("--boulders", type=int, default=160)
-parser.add_argument("--gravel_per_m2", type=float, default=1.2)
+parser.add_argument("--bake_workers", type=int, default=max(1, (os.cpu_count() or 2) - 1),
+                    help="processes for the texture bake (runs before Isaac Sim starts)")
+bake.add_cli_options(parser)
 parser.add_argument("--look", choices=["camera", "none"], default="camera", help="post-processed camera look")
 parser.add_argument("--save_raw", action="store_true", help="also keep the frames before the camera look")
 parser.add_argument("--no_sky_hdr", action="store_true", help="plain sky colour instead of the Nucleus HDR")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.enable_cameras = True
+
+OUT = os.path.abspath(os.path.expanduser(args_cli.out.format(scenario=args_cli.scenario)))
+TEX_DIR = os.path.join(OUT, "textures")
+OPTS = bake.options_from_args(args_cli)
+
+
+def run_bake() -> None:
+    """Bake (or reuse) the textures in a plain Python process before Kit starts."""
+    cmd = [sys.executable, os.path.abspath(bake.__file__), "--scenario", args_cli.scenario, "--tex_dir", TEX_DIR,
+           "--workers", str(args_cli.bake_workers)]
+    for f in dataclasses.fields(bake.SceneOptions):
+        if hasattr(args_cli, f.name):
+            cmd += [f"--{f.name}", str(getattr(args_cli, f.name))]
+    print("[scenario] baking textures:", " ".join(cmd), flush=True)
+    if subprocess.run(cmd, check=False).returncode != 0:
+        print("[scenario] texture bake FAILED", flush=True)
+        sys.exit(3)
+
+
+run_bake()
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -66,7 +89,7 @@ from heavy_machines import kinematics as K  # noqa: E402
 from heavy_machines.scenarios import camera_look  # noqa: E402
 from heavy_machines.scenarios.preview import load  # noqa: E402
 from heavy_machines.scenarios.scenario import Scenario, sun_direction  # noqa: E402
-from heavy_machines.scenarios.usd_scene import SceneOptions, build_scene, pose_machines  # noqa: E402
+from heavy_machines.scenarios.usd_scene import build_scene, pose_machines  # noqa: E402
 
 
 def _rotation_taking(a, b):
@@ -121,8 +144,7 @@ def write_video(frame_dir: str, fps: int, path: str) -> bool:
 
 def main():
     sc = load(args_cli.scenario)
-    out = os.path.abspath(os.path.expanduser(args_cli.out.format(scenario=sc.name)))
-    tex_dir = os.path.join(out, "textures")
+    out = OUT
     rigs = [c for c in sc.cameras if not args_cli.cameras or c.name in args_cli.cameras]
     if not rigs:
         print(f"[scenario] no camera matches {args_cli.cameras}; available: {[c.name for c in sc.cameras]}",
@@ -141,15 +163,14 @@ def main():
                            ("/rtx/pathtracing/totalSpp", args_cli.spp * max(1, args_cli.subframes)),
                            ("/rtx/pathtracing/optixDenoiser/enabled", True),
                            ("/rtx/pathtracing/maxBounces", 6)):
-            try:
-                sim.set_setting(key, value)
-            except Exception as exc:  # noqa: BLE001
-                print(f"[scenario] could not set {key}: {exc}", flush=True)
+            # set_setting never raises for an unknown key — it silently creates it, so check first
+            if sim.get_setting(key) is None:
+                print(f"[scenario] WARNING: {key} is not a registered renderer setting in this Isaac Sim "
+                      "version; it may have no effect", flush=True)
+            sim.set_setting(key, value)
 
-    opts = SceneOptions(terrain_step=args_cli.terrain_step, texture_ppm=args_cli.texture_ppm,
-                        texture_ppm_near=args_cli.texture_ppm_near, boulders=args_cli.boulders,
-                        gravel_per_m2=args_cli.gravel_per_m2)
-    link_ops = build_scene(sim.stage, sc, tex_dir, opts, log=lambda m: print(m, flush=True))
+    # finds the cache written by run_bake(); bakes in-process only if it is missing
+    link_ops = build_scene(sim.stage, sc, TEX_DIR, OPTS, log=lambda m: print(m, flush=True))
     build_lights(sc)
 
     sim_utils.create_prim("/World/Cameras", "Xform")

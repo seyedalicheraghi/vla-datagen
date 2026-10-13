@@ -135,6 +135,12 @@ python scripts/heavy_machines/scenarios/preview.py adt_approach_hex --out /tmp/p
 python scripts/heavy_machines/test/test_scenarios.py
 ```
 
+The first render bakes the terrain, rock and machine textures (`scenarios/bake.py`, several
+minutes on the CPU, run in parallel processes before Isaac Sim starts). They are cached in
+`heavy_machine_videos/<scenario>/textures/`, and re-renders with the same scenario and options
+reuse them. You can also bake ahead of time with
+`python scripts/heavy_machines/scenarios/bake.py --tex_dir heavy_machine_videos/adt_approach_hex/textures`.
+
 A scenario is pure Python: a procedural quarry terrain (`terrain.py`), machines whose root
 pose and joints are functions of time, and camera rigs attached to machine links
 (`scenario.py`). The Isaac runner only assembles and records it, so the same scenario can be
