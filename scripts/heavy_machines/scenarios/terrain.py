@@ -139,11 +139,21 @@ class QuarryTerrain:
         start = smoothstep(self.gate_x - 30.0, self.gate_x - 20.0, x)   # lane fades in from far behind
         return left * right * np.maximum(start, 0.0)
 
+    def bench_toe(self, x):
+        """Toe line of the loading bench: a blast-cut face is never ruler-straight."""
+        return (self.lane_left_y + 0.22 * value_noise(x, np.zeros_like(x), 7.0, self.seed + 31)
+                + 0.10 * value_noise(x, np.zeros_like(x), 1.9, self.seed + 32) + 0.12)
+
     def bench(self, x, y):
         nose = smootherstep(self.bench_start_x - 3.5, self.bench_start_x, x)
         tail = 1.0 - smootherstep(self.bench_end_x, self.bench_end_x + 6.0, x)
-        face = smootherstep(self.lane_left_y, self.lane_left_y + self.bench_face_run, y)
-        return self.bench_height * face * nose * tail
+        run = self.bench_face_run * (1.0 + 0.25 * value_noise(x, np.full_like(x, 3.0), 4.0, self.seed + 33))
+        toe = self.bench_toe(x)
+        face = smootherstep(toe, toe + run, y)
+        # gullies and blocky texture on the face itself (zero at toe and crest)
+        mid = 4.0 * face * (1.0 - face)
+        gullies = 0.10 * fbm(x, y * 0.4, 0.9, 3, self.seed + 34) * mid
+        return self.bench_height * face * nose * tail + gullies * nose * tail
 
     def berms(self, x, y):
         g = self.gate_x
@@ -161,7 +171,22 @@ class QuarryTerrain:
         along_on = smoothstep(self.right_berm[0] - 2.0, self.right_berm[0], x) * \
             (1.0 - smoothstep(self.right_berm_end_x, self.right_berm_end_x + 4.0, x))
         rb = self.right_berm_height * (1.0 - smoothstep(0.0, 1.8, across)) ** 1.15 * along_on
-        return np.maximum(h, rb)
+        h = np.maximum(h, rb)
+        # dozed berms are lumpy: height varies along them, clods on the surface
+        lumpy = 1.0 + 0.10 * value_noise(x, y, 3.0, self.seed + 41) + 0.06 * fbm(x, y, 0.7, 2, self.seed + 42)
+        return h * lumpy
+
+    def windrows(self, x, y):
+        """Ridges of loose graded material along both lane edges."""
+        along = 0.65 + 0.35 * value_noise(x, np.full_like(x, 5.0), 2.5, self.seed + 51)
+        left_c = self.bench_toe(x) - 0.55
+        right_c = self.right_berm_center(x) + 1.75
+        start = smoothstep(self.gate_x - 20.0, self.gate_x - 12.0, x)
+        prof = lambda d: (1.0 - smoothstep(0.0, 0.8, np.abs(d))) ** 1.4
+        w = 0.28 * (prof(y - left_c) * smoothstep(self.bench_start_x - 6.0, self.bench_start_x, x)
+                    + prof(y - right_c) * smoothstep(self.right_berm[0], self.right_berm[0] + 3.0, x))
+        clods = 1.0 + 0.35 * fbm(x, y, 0.35, 2, self.seed + 52)
+        return w * along * clods * start
 
     def pit_walls(self, x, y):
         cx, cy = self.pit_center
@@ -190,7 +215,11 @@ class QuarryTerrain:
         y = np.asarray(y, dtype=np.float64)
         lane = self.lane_mask(x, y)
         floor = 0.10 * fbm(x, y, 18.0, 3, self.seed) + 0.03 * fbm(x, y, 2.5, 2, self.seed + 3)
-        floor = floor * (1.0 - lane) + 0.004 * fbm(x, y, 1.5, 2, self.seed + 5) * lane
+        # compacted lane: tiny unevenness and a drainage crown (3 cm lower at the edges)
+        right_edge = self.right_berm_center(x) + 1.3
+        mid, half = 0.5 * (self.lane_left_y + right_edge), 0.5 * (self.lane_left_y - right_edge)
+        crown = -0.03 * np.clip((y - mid) / half, -1.0, 1.0) ** 2
+        floor = floor * (1.0 - lane) + (0.004 * fbm(x, y, 1.5, 2, self.seed + 5) + crown) * lane
         ruts = np.zeros_like(x)
         for ty in self.tracks_y:
             ruts = ruts + 0.035 * np.exp(-((y - ty) / 0.28) ** 2)
@@ -200,7 +229,7 @@ class QuarryTerrain:
         pad = self.pad_mask(x, y)                 # level pads for parked machines: no undulation
         floor = floor * (1.0 - pad)
         bench_top_noise = bench_top_noise * (1.0 - pad)
-        h = floor + bench + bench_top_noise
+        h = floor + bench + bench_top_noise + self.windrows(x, y) * (1.0 - pad)
         h = np.maximum(h, self.berms(x, y) + floor * 0.5)
         return h + self.pit_walls(x, y)
 
@@ -309,6 +338,16 @@ def bake_albedo(terrain: QuarryTerrain, rect, px_per_m: float, seed: int = 0, fa
     face_col = (FACE if not far else WALL) * (1.0 + strata[..., None])
     col = col * (1 - face_w[..., None]) + face_col * face_w[..., None]
     col = col * (1.0 - 0.04 * top[..., None])
+
+    # large-scale patches: darker/browner compacted or damp ground, paler dusty drifts
+    if not far:
+        patches = fbm(X, Y, 14.0, 3, seed + 31)
+        damp = smoothstep(0.25, 0.6, patches)[..., None] * 0.12
+        dusty = smoothstep(0.2, 0.55, -patches)[..., None] * 0.08
+        col = col * (1.0 - damp) + col * np.array([0.82, 0.78, 0.74]) * damp
+        col = col * (1.0 - dusty) + np.array([0.86, 0.80, 0.68]) * dusty
+        wr = np.clip(terrain.windrows(X, Y) / 0.25, 0, 1)[..., None]
+        col = col * (1.0 - 0.10 * wr) + np.array([0.70, 0.62, 0.50]) * 0.10 * wr
 
     # multi-scale brightness variation (patchiness, then grain)
     if far:
