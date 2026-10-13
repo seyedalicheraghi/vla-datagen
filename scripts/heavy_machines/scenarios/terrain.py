@@ -73,6 +73,14 @@ def fbm(x, y, scale: float, octaves: int = 4, seed: int = 0, gain: float = 0.5):
 # Terrain description
 # ---------------------------------------------------------------------------
 
+def berm_profile(t, t0: float = 0.18):
+    """Dumped-berm cross-section: rounded crest for |t| < t0, straight flanks to the toe at t = 1."""
+    t = np.clip(np.abs(t), 0.0, 1.0)
+    a = 1.0 / (t0 * (1.0 - t0 / 2.0))
+    m = a * t0
+    return np.where(t < t0, 1.0 - 0.5 * a * t * t, m * (1.0 - t))
+
+
 @dataclass
 class Berm:
     """Straight earth berm from (x0, y0) to (x1, y1) with rounded ends."""
@@ -80,8 +88,8 @@ class Berm:
     y0: float
     x1: float
     y1: float
-    height: float = 1.2
-    base_width: float = 3.6
+    height: float = 1.0
+    base_width: float = 3.0
 
     def height_at(self, x, y):
         dx, dy = self.x1 - self.x0, self.y1 - self.y0
@@ -94,7 +102,7 @@ class Berm:
         # distance outside the segment along its axis → rounded ends
         beyond = np.maximum(np.maximum(-along, along - length), 0.0)
         d = np.sqrt(across ** 2 + beyond ** 2)
-        return self.height * (1.0 - smoothstep(0.0, half, d)) ** 1.15
+        return self.height * berm_profile(d / half)
 
 
 @dataclass
@@ -103,16 +111,16 @@ class QuarryTerrain:
     # haul lane (z = 0, compacted) — left edge is the bench toe
     lane_left_y: float = 5.0
     # right safety berm along the lane: its centre line moves from y0 to y1 between x0 and x1
-    right_berm: tuple[float, float, float, float] = (-12.0, -9.0, 4.0, -5.8)   # x0, y0, x1, y1
+    right_berm: tuple[float, float, float, float] = (-9.5, -9.0, 4.0, -5.8)    # x0, y0, x1, y1
     right_berm_end_x: float = 60.0
-    right_berm_height: float = 1.25
+    right_berm_height: float = 1.0           # safety berms ≈ wheel-centre height of the largest truck
     # gate of two berms across the lane
-    gate_x: float = -14.0
-    gate_gap: float = 9.0
+    gate_x: float = -11.0
+    gate_gap: float = 7.5
     gate_len: float = 9.5
-    gate_height: float = 1.3
+    gate_height: float = 1.0
     # loading bench on the left
-    bench_start_x: float = -8.0
+    bench_start_x: float = -3.0
     bench_end_x: float = 75.0
     bench_height: float = 2.5
     bench_face_run: float = 2.2          # horizontal run of the steep face
@@ -170,7 +178,7 @@ class QuarryTerrain:
         across = np.abs(y - yc)
         along_on = smoothstep(self.right_berm[0] - 2.0, self.right_berm[0], x) * \
             (1.0 - smoothstep(self.right_berm_end_x, self.right_berm_end_x + 4.0, x))
-        rb = self.right_berm_height * (1.0 - smoothstep(0.0, 1.8, across)) ** 1.15 * along_on
+        rb = self.right_berm_height * berm_profile(across / 1.5) * along_on
         h = np.maximum(h, rb)
         # dozed berms are lumpy: height varies along them, clods on the surface
         lumpy = 1.0 + 0.10 * value_noise(x, y, 3.0, self.seed + 41) + 0.06 * fbm(x, y, 0.7, 2, self.seed + 42)
@@ -296,6 +304,55 @@ def grid_mesh(terrain: QuarryTerrain, rect, step: float, sink_inside=None, sink:
     return Mesh(pts, tris, N.reshape(-1, 3).astype(np.float32), uv, tuple(rect))
 
 
+def graded_axis(lo: float, hi: float, fine: float = 0.25, growth: float = 1.2, cap: float = 3.0,
+                limit: float = 900.0) -> np.ndarray:
+    """Spacing ``fine`` on [lo, hi]; outside it the spacing grows by ``growth`` per cell up to ``cap``."""
+    core = np.linspace(lo, hi, int(round((hi - lo) / fine)) + 1)
+
+    def tail(p: float, sign: float) -> list[float]:
+        out, step = [], fine
+        while abs(p) < limit:
+            step = min(step * growth, cap)
+            p = float(np.clip(p + sign * step, -limit, limit))
+            out.append(p)
+        return out
+
+    return np.array(tail(lo, -1.0)[::-1] + core.tolist() + tail(hi, +1.0))
+
+
+def _tensor_mesh(terrain, xs, ys, uv_rect, cells) -> Mesh:
+    X, Y = np.meshgrid(xs, ys, indexing="xy")
+    e = 0.5 * np.minimum(np.gradient(xs)[None, :], np.gradient(ys)[:, None])
+    Z = terrain.height(X, Y)
+    gx = (terrain.height(X + e, Y) - terrain.height(X - e, Y)) / (2 * e)
+    gy = (terrain.height(X, Y + e) - terrain.height(X, Y - e)) / (2 * e)
+    N = np.stack([-gx, -gy, np.ones_like(gx)], -1)
+    N /= np.linalg.norm(N, axis=-1, keepdims=True)
+    u0, u1, v0, v1 = uv_rect
+    uv = np.stack([(X - u0) / (u1 - u0), (Y - v0) / (v1 - v0)], -1)
+    ny, nx = X.shape
+    idx = np.arange(nx * ny).reshape(ny, nx)
+    a, b, c, d = (idx[:-1, :-1][cells], idx[:-1, 1:][cells], idx[1:, 1:][cells], idx[1:, :-1][cells])
+    tris = np.concatenate([np.stack([a, b, c], 1), np.stack([a, c, d], 1)])
+    used = np.unique(tris)
+    remap = np.full(nx * ny, -1, np.int64)
+    remap[used] = np.arange(len(used))
+    return Mesh(np.stack([X, Y, Z], -1).reshape(-1, 3)[used].astype(np.float32), remap[tris].astype(np.int32),
+                N.reshape(-1, 3)[used].astype(np.float32), uv.reshape(-1, 2)[used].astype(np.float32),
+                tuple(uv_rect))
+
+
+def split_terrain_meshes(terrain, local_rect, far_rect, fine: float = 0.25, cap: float = 3.0) -> tuple[Mesh, Mesh]:
+    """One graded grid cut at ``local_rect`` into (detailed, far) meshes that share their border
+    vertices exactly — no overlap, z-fighting or cracks.  UVs map to local_rect / far_rect."""
+    lx0, lx1, ly0, ly1 = local_rect
+    xs = graded_axis(lx0, lx1, fine, cap=cap, limit=max(abs(far_rect[0]), abs(far_rect[1])))
+    ys = graded_axis(ly0, ly1, fine, cap=cap, limit=max(abs(far_rect[2]), abs(far_rect[3])))
+    cx, cy = 0.5 * (xs[:-1] + xs[1:]), 0.5 * (ys[:-1] + ys[1:])
+    inside = ((cy[:, None] > ly0) & (cy[:, None] < ly1)) & ((cx[None, :] > lx0) & (cx[None, :] < lx1))
+    return (_tensor_mesh(terrain, xs, ys, local_rect, inside), _tensor_mesh(terrain, xs, ys, far_rect, ~inside))
+
+
 # ---------------------------------------------------------------------------
 # Textures
 # ---------------------------------------------------------------------------
@@ -332,11 +389,17 @@ def bake_albedo(terrain: QuarryTerrain, rect, px_per_m: float, seed: int = 0, fa
             band = np.exp(-((Y - ty - wiggle) / 0.30) ** 2) * lane * strength
             col = col * (1 - band[..., None]) + (TRACK * (0.92 + 0.08 * tread[..., None])) * band[..., None]
 
-    # earth faces and distant walls
+    # cut faces (bench, pit walls) vs dumped fill (berms, windrows)
     face_w = np.clip(slope * 1.3, 0, 1)
-    strata = 0.06 * np.sin(Z * 2 * math.pi / (0.7 if not far else 3.0) + value_noise(X, Y, 4.0, seed + 2) * 2.0)
-    face_col = (FACE if not far else WALL) * (1.0 + strata[..., None])
-    col = col * (1 - face_w[..., None]) + face_col * face_w[..., None]
+    berm_w = smoothstep(0.02, 0.12, terrain.berms(X, Y))
+    cut_w = face_w * (1.0 - berm_w)
+    strata = 0.05 * np.sin(Z * 2 * math.pi / (0.7 if not far else 3.0) + value_noise(X, Y, 4.0, seed + 2) * 2.0)
+    streak = np.zeros_like(X) if far else 0.10 * fbm(X * 5.0, Y * 0.7, 1.0, 3, seed + 8)   # vertical scree streaks
+    face_col = (FACE if not far else WALL) * (1.0 + strata[..., None] + streak[..., None])
+    col = col * (1 - cut_w[..., None]) + face_col * cut_w[..., None]
+    berm_col = np.array([0.74, 0.64, 0.50]) * (0.92 + 0.12 * (0.5 + 0.5 * fbm(X, Y, 0.5, 3, seed + 7)))[..., None]
+    bw = (face_w * berm_w)[..., None]
+    col = col * (1 - bw) + berm_col * bw
     col = col * (1.0 - 0.04 * top[..., None])
 
     # large-scale patches: darker/browner compacted or damp ground, paler dusty drifts
@@ -356,6 +419,9 @@ def bake_albedo(terrain: QuarryTerrain, rect, px_per_m: float, seed: int = 0, fa
         var = 0.06 * fbm(X, Y, 7.0, 3, seed + 21) + 0.035 * fbm(X, Y, 0.6, 2, seed + 22)
         var = var + 0.03 * rng.standard_normal(X.shape)          # sand grain
     col = col * (1.0 + var[..., None])
+    if far:   # baked aerial perspective for the distant pit walls
+        haze = 0.55 * smoothstep(150.0, 900.0, np.hypot(X, Y))[..., None]
+        col = col * (1.0 - haze) + np.array([0.80, 0.82, 0.84]) * haze
     hue = 0.025 * fbm(X, Y, 12.0, 2, seed + 23)
     col[..., 0] *= 1.0 + hue
     col[..., 2] *= 1.0 - hue

@@ -116,6 +116,47 @@ class TestAdtApproachHex(unittest.TestCase):
             sizes.append(f / c[0])
         self.assertTrue(sizes[0] < sizes[1] < sizes[2], "excavator grows as the truck approaches")
 
+    def test_whole_excavator_in_frame(self):
+        """The raised arm must not be cropped at any point of the approach."""
+        cam = next(c for c in self.sc.cameras if c.name == "front")
+        f = cam.width * cam.focal_length / cam.horizontal_aperture
+        pts = self._world_points(self.hex, 0.0, collision=False)
+        for t in (0.0, 3.0, 5.0, 6.0, 8.5, self.sc.duration):
+            ctf = self.sc.camera_tf(cam, t)
+            pc = (pts - np.array(ctf.t)) @ np.array(self.K.transpose(ctf.R)).T
+            self.assertTrue((pc[:, 0] > 0.5).all(), f"excavator behind the camera at t={t}")
+            u = cam.width / 2 - f * pc[:, 1] / pc[:, 0]
+            v = cam.height / 2 - f * pc[:, 2] / pc[:, 0]
+            self.assertGreater(v.min(), 10, f"arm cropped at the top at t={t} (v_min={v.min():.0f})")
+            self.assertGreater(u.min(), 0, f"excavator cropped at the left at t={t}")
+
+    def test_event_order_and_narrowing(self):
+        t = self.sc.terrain
+        gate_back = t.gate_x + 1.5                       # half base of the gate berms
+        bench_nose = t.bench_start_x - 3.5
+        self.assertGreater(bench_nose - gate_back, 2.0, "gate and bench read as two features")
+        self.assertGreaterEqual(t.right_berm[0], t.gate_x, "the lane berm starts after the gate")
+        width = lambda x: t.lane_left_y - (t.right_berm_center(x) + 1.5)
+        self.assertLess(width(t.right_berm[2]) / width(t.gate_x + 1.0), 0.75, "lane visibly narrows")
+        # the truck's right tyres keep at least 1 m from the right berm toe at the stop
+        self.assertGreater(-1.48 - (t.right_berm_center(0.0) + 1.5), 1.0)
+
+    def test_split_terrain_seamless(self):
+        from heavy_machines.scenarios.terrain import split_terrain_meshes
+        rect, far = (-20.0, 20.0, -10.0, 15.0), (-200.0, 200.0, -200.0, 200.0)
+        near_m, far_m = split_terrain_meshes(self.sc.terrain, rect, far, fine=0.5, cap=10.0)
+        near_m.validate()
+        far_m.validate()
+        on_border = lambda p: (np.isclose(p[:, 0], rect[0]) | np.isclose(p[:, 0], rect[1])
+                               | np.isclose(p[:, 1], rect[2]) | np.isclose(p[:, 1], rect[3]))
+        a = {tuple(np.round(p, 5)) for p in near_m.points[on_border(near_m.points)]}
+        b = {tuple(np.round(p, 5)) for p in far_m.points[on_border(far_m.points)]
+             if rect[0] - 1e-6 <= p[0] <= rect[1] + 1e-6 and rect[2] - 1e-6 <= p[1] <= rect[3] + 1e-6}
+        self.assertEqual(a, b, "both meshes share exactly the same border vertices")
+        cen = far_m.points[far_m.triangles].mean(axis=1)
+        inside = (cen[:, 0] > rect[0]) & (cen[:, 0] < rect[1]) & (cen[:, 1] > rect[2]) & (cen[:, 1] < rect[3])
+        self.assertFalse(inside.any(), "no far triangles under the detailed area")
+
     def test_camera_height(self):
         cam = next(c for c in self.sc.cameras if c.name == "front")
         for t in (0.0, self.sc.duration):

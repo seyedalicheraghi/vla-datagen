@@ -32,11 +32,14 @@ LAYOUT = {
     # excavator parked on the loading bench, ahead-left of the stop point
     "hex_xy": (13.0, 9.0),
     "hex_yaw": 0.0,                  # tracks parallel to the lane
-    "hex_joints": {"swing_joint": -2.0, "boom_joint": 0.75, "stick_joint": -0.40, "bucket_joint": 1.20},
-    # forward video camera on the ADT: front of the cab roof, 4.0 m above the ground
+    # upper structure swung toward the lane, boom raised: the whole arm stays in frame to the stop
+    "hex_joints": {"swing_joint": -1.0, "boom_joint": 0.50, "stick_joint": -0.40, "bucket_joint": 1.20},
+    # forward video camera on a ~0.75 m sensor mast above the ADT cab roof (roof 3.26 m, beacon
+    # 3.43 m) — 4.0 m above the ground; the mast itself is behind the camera and not modelled.
+    # 'Slightly left': the excavator bears ~15° left at the start and ~34° at the stop (HFOV ±46°).
     "cam_height_agl": 4.0,
     "cam_x": -0.20,
-    "cam_pitch": 0.20,               # 11.5° down
+    "cam_pitch": 0.14,               # 8° down
 }
 
 DURATION, FPS = 10.0, 30

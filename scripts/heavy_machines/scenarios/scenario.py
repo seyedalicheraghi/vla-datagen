@@ -73,7 +73,7 @@ class Scenario:
     actors: list[Actor]
     cameras: list[CameraRig]
     lighting: Lighting = field(default_factory=Lighting)
-    local_rect: tuple[float, float, float, float] = (-45.0, 45.0, -30.0, 35.0)   # detailed terrain
+    local_rect: tuple[float, float, float, float] = (-45.0, 85.0, -30.0, 35.0)   # detailed terrain
     far_rect: tuple[float, float, float, float] = (-900.0, 900.0, -900.0, 900.0)
     rocks: int = 160
     keep_clear: list[tuple[float, float, float, float]] = field(default_factory=list)
