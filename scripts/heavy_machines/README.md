@@ -119,6 +119,28 @@ rviz2
 #   Add → TF, Add → Image (/camera/front/image_raw)
 ```
 
+## Scenarios: scripted multi-machine scenes rendered to video
+
+`scenarios/` recreates specific shots — e.g. `adt_approach_hex`: a forward camera 4 m up on an
+articulated dump truck that drives through a gap in two berms, along a loading bench, and stops
+beside a parked excavator (1280×720, 30 fps, 10 s).
+
+```bash
+# Isaac Sim (on your workstation): PNG frames + mp4 per camera in heavy_machine_videos/<scenario>/
+./isaaclab.sh -p scripts/heavy_machines/scenarios/render_scenario.py --scenario adt_approach_hex --headless
+./isaaclab.sh -p scripts/heavy_machines/scenarios/render_scenario.py --renderer rtx --cameras front   # faster
+
+# Offline (no Isaac): layout/framing preview and the scenario tests
+python scripts/heavy_machines/scenarios/preview.py adt_approach_hex --out /tmp/prev.png
+python scripts/heavy_machines/test/test_scenarios.py
+```
+
+A scenario is pure Python: a procedural quarry terrain (`terrain.py`), machines whose root
+pose and joints are functions of time, and camera rigs attached to machine links
+(`scenario.py`). The Isaac runner only assembles and records it, so the same scenario can be
+previewed and tested offline. Layout numbers live in one `LAYOUT` dict per scenario so the
+framing can be matched to reference footage.
+
 ## Checking and previewing machines without Isaac Sim
 
 ```bash
