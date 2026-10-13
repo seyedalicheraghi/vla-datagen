@@ -197,15 +197,22 @@ class QuarryTerrain:
         return w * along * clods * start
 
     def pit_walls(self, x, y):
+        """Stepped open-pit walls: benches of uneven height and width whose crests wander in plan,
+        with the odd slumped section, plus low hills beyond the rim."""
         cx, cy = self.pit_center
         rx, ry = self.pit_radii
         r = np.sqrt(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2)       # 1 at the pit edge
         dist = (r - 1.0) * min(rx, ry)                                 # ≈ metres beyond the edge
+        dist = dist + 9.0 * fbm(x, y, 140.0, 3, self.seed + 61)        # crests wander in plan
         h = np.zeros_like(dist)
+        start = np.zeros_like(dist)
         for k in range(self.pit_benches):
-            start = k * self.pit_bench_spacing
-            h = h + self.pit_bench_height * smootherstep(start, start + 9.0, dist)
-        rim = self.pit_benches * self.pit_bench_spacing
+            height = self.pit_bench_height * (1.0 + 0.25 * value_noise(x, y, 220.0, self.seed + 70 + k))
+            face = 9.0 * (1.0 + 0.35 * value_noise(x, y, 90.0, self.seed + 80 + k))
+            slump = 1.0 + 0.6 * np.clip(fbm(x, y, 60.0, 2, self.seed + 90 + k) - 0.35, 0.0, None)
+            h = h + height * smootherstep(start, start + face * slump, dist)
+            start = start + self.pit_bench_spacing * (1.0 + 0.3 * value_noise(x, y, 160.0, self.seed + 100 + k))
+        rim = start
         hills = 18.0 * smoothstep(rim, rim + 200.0, dist) * (0.6 + 0.4 * fbm(x, y, 260.0, 3, self.seed + 9))
         return h + hills
 
