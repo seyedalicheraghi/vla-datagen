@@ -150,24 +150,29 @@ class Assets:
 # Rendering
 # ---------------------------------------------------------------------------
 
-def _march_terrain(A: Assets, O, D, t_max=2500.0):
-    """Per-ray first hit with the heightfield. Returns t (inf on miss)."""
+def _march_terrain(A: Assets, O, D, t_max=3000.0):
+    """Per-ray first hit with the heightfield. Returns t (inf on miss).
+
+    Steps scale with the ray's height above the terrain (a conservative fraction, since faces are
+    steep) and with distance, so rays reach the pit walls hundreds of metres away in a few hundred
+    steps; the crossing is then refined by bisection."""
     n = len(D)
     t = np.full(n, 0.3, dtype=np.float32)
     hit_t = np.full(n, np.inf, dtype=np.float32)
     active = np.ones(n, dtype=bool)
     prev_t = t.copy()
-    for _ in range(260):
+    for _ in range(900):
         idx = np.nonzero(active)[0]
         if len(idx) == 0:
             break
         tt = t[idx]
         P = O[idx] + D[idx] * tt[:, None]
-        below = P[:, 2] <= A.height(P[:, 0], P[:, 1])
+        gap = P[:, 2] - A.height(P[:, 0], P[:, 1])
+        below = gap <= 0
         if below.any():
             hi_, lo_ = tt[below], prev_t[idx][below]
             sub = idx[below]
-            for _ in range(7):                                    # bisection refine
+            for _ in range(8):                                    # bisection refine
                 mid = 0.5 * (hi_ + lo_)
                 Pm = O[sub] + D[sub] * mid[:, None]
                 b = Pm[:, 2] <= A.height(Pm[:, 0], Pm[:, 1])
@@ -177,7 +182,8 @@ def _march_terrain(A: Assets, O, D, t_max=2500.0):
             active[sub] = False
         go = idx[~below]
         prev_t[go] = t[go]
-        t[go] = t[go] + np.maximum(0.04, 0.012 * t[go])
+        step = np.maximum(np.maximum(0.04, 0.004 * t[go]), 0.3 * gap[~below])
+        t[go] = t[go] + np.minimum(step, np.maximum(0.04, 0.03 * t[go]))
         active[go] &= t[go] < t_max
     return hit_t
 
