@@ -125,8 +125,8 @@ class QuarryTerrain:
     bench_height: float = 2.5
     bench_face_run: float = 2.2          # horizontal run of the steep face
     # pit
-    pit_center: tuple[float, float] = (60.0, -40.0)
-    pit_radii: tuple[float, float] = (300.0, 230.0)
+    pit_center: tuple[float, float] = (40.0, -30.0)
+    pit_radii: tuple[float, float] = (230.0, 175.0)
     pit_bench_height: float = 12.0
     pit_bench_spacing: float = 34.0
     pit_benches: int = 5
@@ -375,7 +375,7 @@ SAND = np.array([0.80, 0.71, 0.55])          # light sandy pit floor
 LANE = np.array([0.76, 0.71, 0.62])          # compacted, greyer haul lane
 TRACK = np.array([0.62, 0.58, 0.52])         # tyre tracks
 FACE = np.array([0.69, 0.55, 0.40])          # freshly cut earth faces (warmer, darker)
-WALL = np.array([0.66, 0.58, 0.50])          # distant pit walls
+WALL = np.array([0.55, 0.47, 0.39])          # distant pit walls: darker, warmer rock
 PEBBLE_DARK = np.array([0.45, 0.42, 0.38])
 PEBBLE_LIGHT = np.array([0.88, 0.84, 0.76])
 
@@ -407,7 +407,8 @@ def bake_albedo(terrain: QuarryTerrain, rect, px_per_m: float, seed: int = 0, fa
     face_w = np.clip(slope * 1.3, 0, 1)
     berm_w = smoothstep(0.02, 0.12, terrain.berms(X, Y))
     cut_w = face_w * (1.0 - berm_w)
-    strata = 0.05 * np.sin(Z * 2 * math.pi / (0.7 if not far else 3.0) + value_noise(X, Y, 4.0, seed + 2) * 2.0)
+    strata = (0.05 if not far else 0.12) * np.sin(Z * 2 * math.pi / (0.7 if not far else 3.0)
+                                                  + value_noise(X, Y, 4.0, seed + 2) * 2.0)
     streak = np.zeros_like(X) if far else 0.10 * fbm(X * 5.0, Y * 0.7, 1.0, 3, seed + 8)   # vertical scree streaks
     face_col = (FACE if not far else WALL) * (1.0 + strata[..., None] + streak[..., None])
     col = col * (1 - cut_w[..., None]) + face_col * cut_w[..., None]
@@ -433,8 +434,10 @@ def bake_albedo(terrain: QuarryTerrain, rect, px_per_m: float, seed: int = 0, fa
         var = 0.06 * fbm(X, Y, 7.0, 3, seed + 21) + 0.035 * fbm(X, Y, 0.6, 2, seed + 22)
         var = var + 0.03 * rng.standard_normal(X.shape)          # sand grain
     col = col * (1.0 + var[..., None])
-    if far:   # baked aerial perspective for the distant pit walls
-        haze = 0.55 * smoothstep(150.0, 900.0, np.hypot(X, Y))[..., None]
+    if far:   # light baked aerial perspective (the camera look adds depth haze on top)
+        bench_tops = (1.0 - face_w) * smoothstep(3.0, 8.0, Z)          # dusty ledges between wall faces
+        col = col * (1.0 - 0.15 * bench_tops[..., None]) + np.array([0.80, 0.73, 0.60]) * 0.15 * bench_tops[..., None]
+        haze = 0.30 * smoothstep(250.0, 900.0, np.hypot(X, Y))[..., None]
         col = col * (1.0 - haze) + np.array([0.80, 0.82, 0.84]) * haze
     hue = 0.025 * fbm(X, Y, 12.0, 2, seed + 23)
     col[..., 0] *= 1.0 + hue
