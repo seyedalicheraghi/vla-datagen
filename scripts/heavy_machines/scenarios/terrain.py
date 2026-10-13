@@ -342,15 +342,29 @@ def _tensor_mesh(terrain, xs, ys, uv_rect, cells) -> Mesh:
                 tuple(uv_rect))
 
 
-def split_terrain_meshes(terrain, local_rect, far_rect, fine: float = 0.25, cap: float = 3.0) -> tuple[Mesh, Mesh]:
-    """One graded grid cut at ``local_rect`` into (detailed, far) meshes that share their border
-    vertices exactly — no overlap, z-fighting or cracks.  UVs map to local_rect / far_rect."""
+def split_terrain_meshes(terrain, local_rect, far_rect, fine: float = 0.25, cap: float = 3.0,
+                         inner_rect=None) -> tuple[Mesh, ...]:
+    """One graded grid cut at ``local_rect`` (and optionally ``inner_rect`` inside it) into meshes that
+    share their border vertices exactly — no overlap, z-fighting or cracks.
+
+    Returns ``(local, far)`` or, with ``inner_rect``, ``(inner, local, far)``; each part's UVs map to its
+    own rect, so each can carry its own texture resolution (e.g. a dense strip along the camera path)."""
     lx0, lx1, ly0, ly1 = local_rect
     xs = graded_axis(lx0, lx1, fine, cap=cap, limit=max(abs(far_rect[0]), abs(far_rect[1])))
     ys = graded_axis(ly0, ly1, fine, cap=cap, limit=max(abs(far_rect[2]), abs(far_rect[3])))
     cx, cy = 0.5 * (xs[:-1] + xs[1:]), 0.5 * (ys[:-1] + ys[1:])
-    inside = ((cy[:, None] > ly0) & (cy[:, None] < ly1)) & ((cx[None, :] > lx0) & (cx[None, :] < lx1))
-    return (_tensor_mesh(terrain, xs, ys, local_rect, inside), _tensor_mesh(terrain, xs, ys, far_rect, ~inside))
+
+    def cells_in(rect):
+        x0, x1, y0, y1 = rect
+        return ((cy[:, None] > y0) & (cy[:, None] < y1)) & ((cx[None, :] > x0) & (cx[None, :] < x1))
+
+    local = cells_in(local_rect)
+    if inner_rect is None:
+        return (_tensor_mesh(terrain, xs, ys, local_rect, local), _tensor_mesh(terrain, xs, ys, far_rect, ~local))
+    inner = cells_in(inner_rect) & local
+    return (_tensor_mesh(terrain, xs, ys, inner_rect, inner),
+            _tensor_mesh(terrain, xs, ys, local_rect, local & ~inner),
+            _tensor_mesh(terrain, xs, ys, far_rect, ~local))
 
 
 # ---------------------------------------------------------------------------

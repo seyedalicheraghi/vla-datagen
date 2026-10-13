@@ -86,4 +86,6 @@ def build() -> Scenario:
         # midday sun from behind-right: the bench wall facing the lane is lit, shadows fall ahead-left
         lighting=Lighting(sun_azimuth_deg=-120.0, sun_elevation_deg=64.0),
         keep_clear=[(hx - 5.0, hx + 9.0, hy - 4.0, hy + 4.0)],
+        # the ground the forward camera sees up close: lane, windrows, berm and bench toe
+        near_rect=(-26.0, 30.0, -11.0, 12.0),
     )
