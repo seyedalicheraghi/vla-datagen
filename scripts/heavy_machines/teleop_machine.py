@@ -20,6 +20,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from heavy_machines import registry  # noqa: E402  (pure Python, safe before AppLauncher)
 
 parser = argparse.ArgumentParser(description="Heavy machine keyboard teleoperation.")

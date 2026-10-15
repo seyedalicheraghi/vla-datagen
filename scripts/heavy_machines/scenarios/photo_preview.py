@@ -471,6 +471,8 @@ def _mesh_shadow(A: Assets, sc: Scenario, t: float, P: np.ndarray, L: np.ndarray
 
 
 def main():
+    from heavy_machines import safe_console
+    safe_console()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("scenario")
     p.add_argument("--camera", default="front")

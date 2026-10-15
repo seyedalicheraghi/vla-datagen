@@ -203,9 +203,9 @@ def write_assets(spec: MachineSpec, root: str = ASSET_ROOT) -> tuple[str, str]:
                        (json_path, json.dumps(metadata(spec), indent=2) + "\n")):
         old = None
         if os.path.exists(path):
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 old = f.read()
         if old != text:
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:   # same bytes on Windows and Linux
                 f.write(text)
     return urdf_path, json_path

@@ -17,9 +17,20 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from heavy_machines import registry  # noqa: E402
 from heavy_machines.checks import validate  # noqa: E402
 from heavy_machines.urdf_builder import write_assets  # noqa: E402
+
+
+def _rel(path: str) -> str:
+    try:
+        return os.path.relpath(path)
+    except ValueError:                              # Windows: path and cwd on different drives
+        return path
 
 
 def main() -> int:
@@ -34,7 +45,7 @@ def main() -> int:
 
     if args.readme:
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "README.md")
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             text = f.read()
         head, rest = text.split("<!-- MACHINE_TABLE_START -->", 1)
         _, tail = rest.split("<!-- MACHINE_TABLE_END -->", 1)
@@ -44,7 +55,7 @@ def main() -> int:
             rows.append(f"| {s.display_name} (`{s.name}`) | {s.abbrev} | {s.category} | {s.reference} | "
                         f"{s.drive.type} | {', '.join(t.label for t in s.tools) or '—'} | "
                         f"{s.operating_mass / 1000:.1f} t |")
-        with open(path, "w") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(head + "<!-- MACHINE_TABLE_START -->\n" + "\n".join(rows) + "\n<!-- MACHINE_TABLE_END -->" + tail)
         print(f"updated {path} ({len(rows) - 2} machines)")
         return 0
@@ -74,7 +85,7 @@ def main() -> int:
         failed += not rep.ok
         if not args.no_write and rep.ok:
             urdf, meta = write_assets(spec)
-            print(f"  wrote   {os.path.relpath(urdf)} , {os.path.relpath(meta)}")
+            print(f"  wrote   {_rel(urdf)} , {_rel(meta)}")
         if args.render:
             from heavy_machines.render import render_camera_views, render_poses, render_tool_sweeps
             os.makedirs(args.render, exist_ok=True)

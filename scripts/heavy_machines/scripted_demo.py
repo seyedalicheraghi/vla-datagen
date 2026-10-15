@@ -24,6 +24,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from isaaclab.app import AppLauncher  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Scripted heavy-machine demo.")
@@ -93,7 +97,7 @@ def main():
     control_hz = round(1.0 / env.step_dt)
     script = build_script(spec)
     total = sum(int(s * control_hz) for _, _, s in script)
-    print(f"[demo] {spec.display_name}: {len(script)} phases, {total} steps → {out_dir}", flush=True)
+    print(f"[demo] {spec.display_name}: {len(script)} phases, {total} steps -> {out_dir}", flush=True)
 
     with open(os.path.join(out_dir, "state.csv"), "w", newline="") as f:
         w = csv.writer(f)

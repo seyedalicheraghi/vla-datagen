@@ -143,10 +143,10 @@ def save_scatter(sc_rocks: Scatter, path: str) -> str:
 
 
 def load_scatter(path: str) -> Scatter:
-    d = np.load(path)
-    nb, npr, ps, pd = (int(v) for v in d["meta"])
-    return Scatter(d["positions"], d["scales"], d["yaws"], d["proto"], n_boulders=nb, n_protos=npr,
-                   proto_seed=ps, shade=d["shade"], proto_detail=pd)
+    with np.load(path) as d:                       # closed at once: Windows cannot overwrite open files
+        nb, npr, ps, pd = (int(v) for v in d["meta"])
+        return Scatter(d["positions"], d["scales"], d["yaws"], d["proto"], n_boulders=nb, n_protos=npr,
+                       proto_seed=ps, shade=d["shade"], proto_detail=pd)
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +160,7 @@ def bake_assets(sc, tex_dir: str, o: SceneOptions | None = None, workers: int = 
     key = cache_key(sc, o)
     manifest_path = os.path.join(tex_dir, "manifest.json")
     if os.path.exists(manifest_path):
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="utf-8") as f:
             man = json.load(f)
         paths = [p for files in man.get("files", {}).values() for k, p in files.items() if isinstance(p, str)]
         if man.get("key") == key and os.path.exists(man.get("rocks", "")) and all(os.path.exists(p) for p in paths):
@@ -178,7 +178,10 @@ def bake_assets(sc, tex_dir: str, o: SceneOptions | None = None, workers: int = 
     jobs.append((_job_far, (sc.terrain, sc.far_rect, o, tex_dir)))
     jobs += [(_job_rock, (o, tex_dir, b, t)) for b, t in enumerate(ROCK_TINTS)]
     jobs += [(_job_machine, (o, tex_dir) + j) for j in machine_material_jobs(sc)]
-    log(f"[bake] {len(jobs)} jobs on {max(1, workers)} worker(s) ...")
+    workers = max(1, min(workers, len(jobs)))
+    if sys.platform == "win32":
+        workers = min(workers, 61)                 # ProcessPoolExecutor's limit on Windows
+    log(f"[bake] {len(jobs)} jobs on {workers} worker(s) ...")
 
     files: dict[str, dict] = {}
     if workers > 1:
@@ -195,9 +198,9 @@ def bake_assets(sc, tex_dir: str, o: SceneOptions | None = None, workers: int = 
             log(f"[bake]   {msg}  ({time.time() - t0:.0f} s)")
 
     man = {"key": key, "scenario": sc.name, "rocks": rocks_npz, "files": files}
-    with open(manifest_path, "w") as f:
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump(man, f, indent=1)
-    log(f"[bake] done in {time.time() - t0:.0f} s → {tex_dir}")
+    log(f"[bake] done in {time.time() - t0:.0f} s -> {tex_dir}")
     return man
 
 
@@ -217,6 +220,8 @@ def options_from_args(a) -> SceneOptions:
 
 
 def main():
+    from heavy_machines import safe_console
+    safe_console()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--scenario", default="adt_approach_hex")
     p.add_argument("--tex_dir", required=True)

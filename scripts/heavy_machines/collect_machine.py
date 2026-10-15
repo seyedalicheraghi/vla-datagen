@@ -30,6 +30,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from isaaclab.app import AppLauncher  # noqa: E402
 
 _BOOL = lambda s: s.lower() not in ("false", "0", "no", "off")  # noqa: E731
@@ -180,8 +184,8 @@ def main():
 
     ts = typestore() if args_cli.ros else None
     if args_cli.ros:
-        (out_dir / "qos_overrides.yaml").write_text(qos_overrides_yaml())
-        (out_dir / f"{spec.name}.urdf").write_text(build_urdf(spec))
+        (out_dir / "qos_overrides.yaml").write_text(qos_overrides_yaml(), encoding="utf-8", newline="\n")
+        (out_dir / f"{spec.name}.urdf").write_text(build_urdf(spec), encoding="utf-8", newline="\n")
 
     summary = out_dir / "summary.jsonl"
     summary.unlink(missing_ok=True)
@@ -203,12 +207,12 @@ def main():
                 lerobot.save_episode()
             else:
                 lerobot.clear_episode_buffer()
-        with open(summary, "a") as f:
+        with open(summary, "a", encoding="utf-8") as f:
             f.write(json.dumps(res) + "\n")
         print(f"[EP {ep}] {res['steps']} steps success={res['success']}  {res['prompt']}", flush=True)
 
     finalize_lerobot()
-    print(f"[done] {args_cli.num_episodes} episodes → {out_dir}", flush=True)
+    print(f"[done] {args_cli.num_episodes} episodes -> {out_dir}", flush=True)
     # Isaac Sim's close() can hang on background threads; data is already flushed.
     os._exit(0)
 

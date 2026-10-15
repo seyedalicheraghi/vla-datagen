@@ -9,6 +9,7 @@ transforms for time ``t``.  Lights, cameras and rendering are added by ``render_
 from __future__ import annotations
 
 import math
+import os
 
 import numpy as np
 from pxr import Gf, Sdf, UsdGeom, UsdShade, Vt
@@ -31,7 +32,7 @@ def xform(stage, path: str) -> UsdGeom.Xform:
 def _texture(stage, path: str, file: str, st_out, raw: bool, wrap: str):
     tex = UsdShade.Shader.Define(stage, path)
     tex.CreateIdAttr("UsdUVTexture")
-    tex.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(file)
+    tex.CreateInput("file", Sdf.ValueTypeNames.Asset).Set(file.replace(os.sep, "/"))   # F:/... on Windows
     tex.CreateInput("sourceColorSpace", Sdf.ValueTypeNames.Token).Set("raw" if raw else "sRGB")
     tex.CreateInput("wrapS", Sdf.ValueTypeNames.Token).Set(wrap)
     tex.CreateInput("wrapT", Sdf.ValueTypeNames.Token).Set(wrap)

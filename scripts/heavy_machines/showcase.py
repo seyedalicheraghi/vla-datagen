@@ -16,6 +16,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from isaaclab.app import AppLauncher  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Heavy machine line-up.")

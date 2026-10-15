@@ -199,6 +199,8 @@ def render_top(sc: Scenario, path: str) -> str:
 
 
 def main():
+    from heavy_machines import safe_console
+    safe_console()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("scenario")
     p.add_argument("--camera", default="front")

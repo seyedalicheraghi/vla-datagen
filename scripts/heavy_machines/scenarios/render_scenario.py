@@ -31,6 +31,10 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
+from heavy_machines import safe_console  # noqa: E402
+
+safe_console()
+
 from isaaclab.app import AppLauncher  # noqa: E402
 
 from heavy_machines.scenarios import bake  # noqa: E402  (numpy + Pillow only)
@@ -135,10 +139,13 @@ def write_video(frame_dir: str, fps: int, path: str) -> bool:
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709",
            "-c:v", "libx264", "-crf", "16", path]
     if ffmpeg is None:
-        print("[scenario] ffmpeg not found — encode with:\n  " + " ".join(cmd), flush=True)
+        # quoted so the line can be pasted into bash, cmd or PowerShell (the -vf filter contains a comma)
+        print("[scenario] ffmpeg not found - install it (or: pip install imageio-ffmpeg), or encode with:\n  ffmpeg "
+              + " ".join(f'"{a}"' for a in cmd[1:]), flush=True)
         return False
     ok = subprocess.run(cmd, check=False).returncode == 0
-    print(f"[scenario] wrote {path}" if ok else f"[scenario] ffmpeg FAILED for {path}", flush=True)
+    print(f"[scenario] wrote {path}" if ok else
+          f"[scenario] ffmpeg FAILED for {path} (is an older copy open in a video player?)", flush=True)
     return ok
 
 
@@ -224,7 +231,10 @@ def main():
         for d in (dirs[rig.name], dirs[rig.name] + "_raw"):
             os.makedirs(d, exist_ok=True)
             for old in glob.glob(os.path.join(d, "frame_*.png")):   # no stale frames from older runs
-                os.remove(old)
+                try:
+                    os.remove(old)
+                except OSError as exc:                  # Windows: open in an image viewer
+                    print(f"[scenario] could not remove {old}: {exc}", flush=True)
         if args_cli.look == "camera":
             # a fixed horizon line keeps the sky glow from flickering when machines cross it
             f_px = rig.width * rig.focal_length / rig.horizontal_aperture
@@ -232,7 +242,7 @@ def main():
             looks[rig.name] = camera_look.LookParams(horizon_row=row, horizon_tilt=tilt)
             camera_look.warm_up(rig.height, rig.width, looks[rig.name])
 
-    print(f"[scenario] recording {sc.n_frames} frames at {sc.fps} fps ({args_cli.renderer}) → {out}", flush=True)
+    print(f"[scenario] recording {sc.n_frames} frames at {sc.fps} fps ({args_cli.renderer}) -> {out}", flush=True)
     completed = True
     for k in range(sc.n_frames):
         if not simulation_app.is_running():
