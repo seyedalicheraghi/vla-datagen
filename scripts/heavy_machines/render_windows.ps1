@@ -30,6 +30,7 @@ if (-not (Test-Path $py)) {
 $branch = (git rev-parse --abbrev-ref HEAD 2>$null)
 if ($LASTEXITCODE -eq 0) {
     Say "updating branch $branch ..."
+    $env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "never"     # never wait on a credential prompt
     git pull --ff-only --quiet
     if ($LASTEXITCODE -ne 0) { Say "git pull skipped (offline, no upstream or local changes) - using the code on disk" }
 }
