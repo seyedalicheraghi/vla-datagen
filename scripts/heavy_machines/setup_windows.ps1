@@ -1,108 +1,112 @@
-# One-time Windows setup: put the repo on the heavy-machines branch, then start the first render.
-# Safe to run again at any time, from any repo state. Every step is printed, checked and logged to
-#   <repo>\heavy_machine_videos\setup_windows.log
+# Windows setup and update for the heavy-machine scenarios - no git needed.
 #
-#   1. local edits of tracked files are saved with "git stash" (untracked files such as .venv stay as they are)
-#   2. the branch is fetched over HTTPS into the remote "vla" (no SSH key needed)
-#   3. untracked files that would block the checkout are moved to <repo>\_moved_aside_<time>\ (never deleted)
-#   4. the branch is checked out and the launcher is verified on disk
-#   5. scripts\heavy_machines\render_windows.ps1 runs (same as render_windows.bat)
+# Downloads the latest scripts\heavy_machines and assets\heavy_machines from GitHub (branch
+# claude/review-last-request-I6mXJ) into the Isaac Lab folder, then starts the render. Nothing else in
+# the folder changes: no git commands, no stash, no checkout. An up-to-date copy is not downloaded again.
 #
-# Windows PowerShell 5.1 syntax, plain ASCII.
-param([string]$Repo = "F:\Projects\IsaacLab")
+#   powershell -NoProfile -ExecutionPolicy Bypass -File setup_windows.ps1 [-Repo F:\Projects\IsaacLab] [-NoRender]
+#
+# Log: %TEMP%\heavy_machines_setup.log (kept open for the whole run, so other programs that briefly lock
+# new files cannot block it). Windows PowerShell 5.1 syntax, plain ASCII.
+param([string]$Repo = "F:\Projects\IsaacLab", [switch]$NoRender)
 
 $ErrorActionPreference = "Continue"
-$url = "https://github.com/seyedalicheraghi/vla-datagen.git"
-$branch = "claude/review-last-request-I6mXJ"
-$env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "never"     # never wait on a credential prompt
+$ProgressPreference = "SilentlyContinue"      # Windows PowerShell 5.1 downloads crawl with a progress bar
+$owner = "seyedalicheraghi"; $name = "vla-datagen"; $branch = "claude/review-last-request-I6mXJ"
+$folders = @("scripts/heavy_machines/", "assets/heavy_machines/")
 
-if (-not (Test-Path (Join-Path $Repo ".git"))) {
-    Write-Host "[setup] $Repo is not a git repository - run with -Repo <path to your IsaacLab clone>"
-    exit 1
-}
-Set-Location $Repo
-$logDir = Join-Path $Repo "heavy_machine_videos"
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
-$log = Join-Path $logDir "setup_windows.log"
-Set-Content -Path $log -Value "setup_windows.ps1 $(Get-Date -Format s)" -Encoding UTF8
+$tmp = [System.IO.Path]::GetTempPath()
+$logPath = Join-Path $tmp "heavy_machines_setup.log"
+$logStream = New-Object System.IO.FileStream($logPath, [System.IO.FileMode]::Create,
+    [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+$log = New-Object System.IO.StreamWriter($logStream)
+$log.AutoFlush = $true
 
 function Say([string]$msg) {
     Write-Host "[setup] $msg" -ForegroundColor Cyan
-    Add-Content -Path $log -Value "[setup] $msg" -Encoding UTF8
+    $log.WriteLine("[setup] $msg")
 }
 
 function Stop-Setup([string]$msg) {
     Say "STOPPED: $msg"
-    Say "Nothing was deleted. Send Claude this file: $log"
+    Say "Nothing was deleted. Log: $logPath"
+    $log.Close()
     exit 1
 }
 
-function RunGit {
-    # run git with the given arguments; show and log its output; return its exit code
-    Add-Content -Path $log -Value "> git $args" -Encoding UTF8
-    $out = & git @args 2>&1 | ForEach-Object { "$_" }
-    $code = $LASTEXITCODE
-    foreach ($line in $out) {
-        Write-Host "    $line"
-        Add-Content -Path $log -Value "    $line" -Encoding UTF8
-    }
-    Add-Content -Path $log -Value "    (exit code $code)" -Encoding UTF8
-    return $code
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { $null = $_ }
+
+if (-not (Test-Path -LiteralPath $Repo)) { Stop-Setup "folder $Repo not found - run with -Repo <your IsaacLab folder>" }
+$Repo = (Resolve-Path -LiteralPath $Repo).Path
+$hmDir = Join-Path (Join-Path $Repo "scripts") "heavy_machines"
+$launcher = Join-Path $hmDir "render_windows.ps1"
+$stampPath = Join-Path $hmDir ".installed_commit"
+Say "Isaac Lab folder: $Repo | PowerShell $($PSVersionTable.PSVersion)"
+
+# 1. which version is on GitHub, and is it already here?
+$sha = $null
+try {
+    $resp = Invoke-WebRequest -UseBasicParsing -TimeoutSec 30 -Headers @{ "User-Agent" = "heavy-machines-setup" } `
+        -Uri "https://api.github.com/repos/$owner/$name/commits/$branch"
+    $sha = ($resp.Content | ConvertFrom-Json).sha
+} catch {
+    Say "could not ask GitHub for the latest version ($($_.Exception.Message)) - downloading anyway"
 }
+$installed = $null
+if (Test-Path -LiteralPath $stampPath) { $installed = Get-Content -LiteralPath $stampPath -TotalCount 1 }
 
-# 0. what we are working with
-$gitCmd = Get-Command git -ErrorAction SilentlyContinue
-if (-not $gitCmd) { Stop-Setup "git is not on PATH" }
-Say "repo $Repo | PowerShell $($PSVersionTable.PSVersion) | git at $($gitCmd.Source)"
-$c = RunGit --version
-$c = RunGit status --short --branch --untracked-files=no
-
-# 1. save local edits of tracked files
-$dirty = & git status --porcelain --untracked-files=no
-if ($dirty) {
-    Say "saving your local edits with git stash (get them back later with: git stash pop)"
-    $c = RunGit stash push -m "local edits saved by setup_windows.ps1"
-    if ($c -ne 0) { Stop-Setup "git stash failed" }
+if ($sha -and ($installed -eq $sha) -and (Test-Path -LiteralPath $launcher)) {
+    Say "already up to date ($($sha.Substring(0, 7)))"
 } else {
-    Say "no local edits to save"
-}
-
-# 2. fetch the branch over HTTPS
-& git remote get-url vla *> $null
-if ($LASTEXITCODE -eq 0) { $c = RunGit remote set-url vla $url } else { $c = RunGit remote add vla $url }
-if ($c -ne 0) { Stop-Setup "could not configure the remote 'vla'" }
-Say "downloading branch $branch from $url ..."
-$c = RunGit fetch vla "+refs/heads/${branch}:refs/remotes/vla/${branch}"
-if ($c -ne 0) { Stop-Setup "could not download the branch from GitHub" }
-$target = "refs/remotes/vla/$branch"
-
-# 3. move aside untracked files that the checkout would otherwise refuse to overwrite
-$tracked = New-Object 'System.Collections.Generic.HashSet[string]'
-foreach ($p in (& git ls-files)) { [void]$tracked.Add($p) }
-$incoming = & git diff --name-only --no-renames HEAD $target
-$blocking = @($incoming | Where-Object { -not $tracked.Contains($_) -and (Test-Path -LiteralPath (Join-Path $Repo $_) -PathType Leaf) })
-if ($blocking.Count -gt 0) {
-    $aside = Join-Path $Repo ("_moved_aside_" + (Get-Date -Format "yyyyMMdd_HHmmss"))
-    Say "moving $($blocking.Count) untracked file(s) that block the checkout to $aside"
-    foreach ($p in $blocking) {
-        $dest = Join-Path $aside $p
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-        Move-Item -LiteralPath (Join-Path $Repo $p) -Destination $dest
-        Say "    $p"
+    # 2. download the branch as a ZIP and extract only the heavy-machine folders
+    $zip = Join-Path $tmp "heavy_machines_branch.zip"
+    Say "downloading the latest version from GitHub (about 40 MB) ..."
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 900 -OutFile $zip `
+            -Uri "https://codeload.github.com/$owner/$name/zip/refs/heads/$branch"
+    } catch {
+        Stop-Setup "download failed: $($_.Exception.Message)"
     }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+    $count = 0
+    $failed = $null
+    foreach ($entry in $archive.Entries) {
+        $rel = $entry.FullName.Substring($entry.FullName.IndexOf("/") + 1)      # drop "<repo>-<branch>/"
+        $wanted = @($folders | Where-Object { $rel.StartsWith($_, [System.StringComparison]::Ordinal) })
+        if ($wanted.Count -eq 0 -or $rel.EndsWith("/")) { continue }
+        $dest = Join-Path $Repo ($rel.Replace("/", [string][System.IO.Path]::DirectorySeparatorChar))
+        $dir = Split-Path -Parent $dest
+        if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+        $ok = $false
+        for ($attempt = 1; ($attempt -le 10) -and (-not $ok); $attempt++) {
+            try {
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $dest, $true)
+                $ok = $true
+            } catch {
+                Start-Sleep -Milliseconds 500        # another program (antivirus, sync) briefly holds the file
+            }
+        }
+        if (-not $ok) { $failed = $dest; break }
+        $count++
+    }
+    $archive.Dispose()
+    Remove-Item -LiteralPath $zip -ErrorAction SilentlyContinue
+    if ($failed) { Stop-Setup "could not write $failed - is it open in another program?" }
+    if ($count -lt 50 -or -not (Test-Path -LiteralPath $launcher)) { Stop-Setup "the download looks incomplete ($count files)" }
+    if ($sha) { Set-Content -LiteralPath $stampPath -Value $sha -Encoding ASCII }
+    $shown = "unknown version"
+    if ($sha) { $shown = $sha.Substring(0, 7) }
+    Say "installed $count files ($shown) into $hmDir and assets\heavy_machines"
 }
 
-# 4. check out the branch and verify
-$c = RunGit checkout -B $branch $target
-if ($c -ne 0) { Stop-Setup "git checkout failed (see the lines above)" }
-$c = RunGit branch "--set-upstream-to=vla/$branch" $branch
-$c = RunGit log --oneline -1
-$launcher = Join-Path (Join-Path (Join-Path $Repo "scripts") "heavy_machines") "render_windows.ps1"
-if (-not (Test-Path $launcher)) { Stop-Setup "checkout finished but $launcher is missing" }
-Say "ready: branch $branch checked out. From now on just run: .\scripts\heavy_machines\render_windows.bat"
+if ($NoRender) { $log.Close(); exit 0 }
 
-# 5. first render (same PowerShell executable as this one, so it also works from pwsh)
+# 3. render (same PowerShell executable as this one)
+Say "starting the render ..."
+Say "from now on you only need: $Repo\scripts\heavy_machines\render_windows.bat"
+$log.Close()
+$env:HM_SKIP_UPDATE = "1"
 $shell = (Get-Process -Id $PID).Path
-Say "starting the render launcher ..."
 & $shell -NoProfile -ExecutionPolicy Bypass -File $launcher @args
 exit $LASTEXITCODE

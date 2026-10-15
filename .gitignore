@@ -76,3 +76,4 @@ tests/
 heavy_machine_demo/
 assets/heavy_machines/*/usd/
 assets/heavy_machines/*/usd_fixed/
+scripts/heavy_machines/.installed_commit

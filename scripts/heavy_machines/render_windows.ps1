@@ -5,7 +5,7 @@
 #     scripts\heavy_machines\render_windows.bat                                 # adt_approach_hex, all cameras
 #     scripts\heavy_machines\render_windows.bat --renderer rtx --cameras front  # extra args go to render_scenario.py
 #
-# Steps: update the code (fast-forward only), check the venv, make sure ffmpeg is available for the
+# Steps: update the code from GitHub (setup_windows.ps1, no git), check the venv, make sure ffmpeg is available for the
 # mp4, render, then open the output folder.  Isaac Sim runs directly in this console (not piped), so
 # its first-run licence prompt and progress show exactly as if typed by hand; render_scenario.py keeps
 # its own log in heavy_machine_videos\<scenario>\render.log.
@@ -26,13 +26,11 @@ if (-not (Test-Path $py)) {
     exit 1
 }
 
-# 1. latest code from the tracked branch; never touches local edits
-$branch = (git rev-parse --abbrev-ref HEAD 2>$null)
-if ($LASTEXITCODE -eq 0) {
-    Say "updating branch $branch ..."
-    $env:GIT_TERMINAL_PROMPT = "0"; $env:GCM_INTERACTIVE = "never"     # never wait on a credential prompt
-    git pull --ff-only --quiet
-    if ($LASTEXITCODE -ne 0) { Say "git pull skipped (offline, no upstream or local changes) - using the code on disk" }
+# 1. latest code from GitHub (no git needed); skipped when setup_windows.ps1 has just done it
+if (-not $env:HM_SKIP_UPDATE) {
+    $shell = (Get-Process -Id $PID).Path
+    & $shell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "setup_windows.ps1") -Repo $repo -NoRender
+    if ($LASTEXITCODE -ne 0) { Say "update skipped (see above) - using the code on disk" }
 }
 
 # 2. the venv must hold Isaac Sim and Isaac Lab
