@@ -49,14 +49,16 @@ _log = open(LOG_PATH, "w", encoding="utf-8")
 
 
 def say(msg: str) -> None:
-    """Print a status line and keep it in <out>/render.log."""
-    print(msg, flush=True)
+    """Keep a status line in <out>/render.log and print it."""
     _log.write(msg + "\n")
     _log.flush()
+    print(msg, flush=True)
 
 
 def fail(code: int) -> None:
     """Log the active exception (if any) and leave at once (Isaac Sim's close() can hang)."""
+    # AppLauncher points sys.stdout at os.devnull while Isaac Sim starts; make the failure visible
+    sys.stdout, sys.stderr = sys.__stdout__, sys.__stderr__
     if sys.exc_info()[0] is not None:
         say(traceback.format_exc().rstrip())
     say(f"[scenario] FAILED (exit code {code}) - details in {LOG_PATH}")
@@ -64,13 +66,13 @@ def fail(code: int) -> None:
     os._exit(code)
 
 
+say(f"[scenario] python {sys.executable} (prefix {sys.prefix})")
 try:
+    from heavy_machines.scenarios import bake  # numpy + Pillow only
     from isaaclab.app import AppLauncher
-except Exception:  # noqa: BLE001
-    say("[scenario] Isaac Lab is not importable from this Python: " + sys.executable)
+except BaseException:  # noqa: BLE001
+    say("[scenario] Isaac Lab or the bake dependencies are not importable from this Python")
     fail(4)
-
-from heavy_machines.scenarios import bake  # noqa: E402  (numpy + Pillow only)
 
 parser = argparse.ArgumentParser(description="Render a heavy-machine scenario to video.")
 parser.add_argument("--scenario", default=_pre_args.scenario)
@@ -117,7 +119,8 @@ def run_bake() -> None:
 try:
     say(f"[scenario] {args_cli.scenario} -> {OUT}  (log: {LOG_PATH})")
     run_bake()
-    say("[scenario] starting Isaac Sim (the first start on a new PC can take 10+ minutes) ...")
+    say("[scenario] starting Isaac Sim (the first start on a new PC can take 10+ minutes; "
+        "console output pauses until it is up) ...")
     app_launcher = AppLauncher(args_cli)
     simulation_app = app_launcher.app
 
@@ -135,7 +138,7 @@ try:
     from heavy_machines.scenarios.preview import load
     from heavy_machines.scenarios.scenario import Scenario, sun_direction
     from heavy_machines.scenarios.usd_scene import build_scene, pose_machines
-except Exception:  # noqa: BLE001
+except BaseException:  # noqa: BLE001  (incl. SystemExit if the licence is declined, and Ctrl+C)
     fail(4)
 
 
@@ -186,7 +189,11 @@ def write_video(frame_dir: str, fps: int, path: str) -> bool:
         say("[scenario] ffmpeg not found - install it (or: pip install imageio-ffmpeg), or encode with:\n  ffmpeg "
             + " ".join(f'"{a}"' for a in cmd[1:]))
         return False
-    ok = subprocess.run(cmd, check=False).returncode == 0
+    res = subprocess.run(cmd, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+    for line in res.stdout.splitlines():
+        say("[ffmpeg] " + line)
+    ok = res.returncode == 0
     say(f"[scenario] wrote {path}" if ok else
         f"[scenario] ffmpeg FAILED for {path} (is an older copy open in a video player?)")
     return ok
