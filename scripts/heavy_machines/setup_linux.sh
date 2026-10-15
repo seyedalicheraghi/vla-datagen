@@ -91,6 +91,18 @@ done
 [ -n "$PY" ] || stop "no Python with Isaac Sim + Isaac Lab found. Activate the environment you use for ./isaaclab.sh (e.g. conda activate <env>) and run this again, or set ISAACLAB=/path/to/IsaacLab"
 say "Isaac Sim Python: $PY"
 
+# ffmpeg for the mp4 (frames are written either way)
+if ! "$PY" -c "import shutil, sys, importlib.util as u; sys.exit(0 if shutil.which('ffmpeg') or u.find_spec('imageio_ffmpeg') else 1)"; then
+    say "no ffmpeg found - installing imageio-ffmpeg into that Python for the mp4 encoding ..."
+    if "$PY" -m pip --version >/dev/null 2>&1; then
+        "$PY" -m pip install --quiet imageio-ffmpeg
+    elif command -v uv >/dev/null; then
+        uv pip install --quiet --python "$PY" imageio-ffmpeg
+    else
+        say "neither pip nor uv available - the render will write PNG frames only (sudo apt install ffmpeg fixes that)"
+    fi
+fi
+
 # 3. render (outputs in $DEST/heavy_machine_videos/<scenario>/, log: render.log there)
 cd "$DEST" || stop "cannot enter $DEST"
 say "rendering - Isaac Sim may take a few minutes to start; progress is printed every second of video"
