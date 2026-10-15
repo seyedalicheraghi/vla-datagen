@@ -7,7 +7,8 @@
 Output: <out>/<camera>/frame_NNNNN.png (with the camera look), <out>/<camera>_raw/ (with --save_raw),
 <out>/<scenario>_<camera>.mp4 (ffmpeg or imageio-ffmpeg if available, BT.709-tagged) and
 <out>/textures/ (baked maps, cached: a re-render with the same scenario and options skips the bake).
-Exit code 0 only if every frame and video was written.
+<out>/render.log keeps every status line, the bake output and any error.  Exit code 0 only if every
+frame and video was written.  On Windows use ``render_windows.bat`` (one command, no venv activation).
 
 Textures are baked by ``bake.py`` in a separate process *before* Isaac Sim starts (parallel, cached;
 worker processes inside Kit are not safe).  The scene is authored by ``usd_scene.build_scene`` (pure pxr — validated offline by
@@ -28,6 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -35,13 +37,44 @@ from heavy_machines import safe_console  # noqa: E402
 
 safe_console()
 
-from isaaclab.app import AppLauncher  # noqa: E402
+# the log opens before anything that can fail (Isaac Lab import, bake, Isaac Sim start-up)
+_pre = argparse.ArgumentParser(add_help=False)
+_pre.add_argument("--scenario", default="adt_approach_hex")
+_pre.add_argument("--out", default="heavy_machine_videos/{scenario}")
+_pre_args, _ = _pre.parse_known_args()
+OUT = os.path.abspath(os.path.expanduser(_pre_args.out.format(scenario=_pre_args.scenario)))
+os.makedirs(OUT, exist_ok=True)
+LOG_PATH = os.path.join(OUT, "render.log")
+_log = open(LOG_PATH, "w", encoding="utf-8")
+
+
+def say(msg: str) -> None:
+    """Print a status line and keep it in <out>/render.log."""
+    print(msg, flush=True)
+    _log.write(msg + "\n")
+    _log.flush()
+
+
+def fail(code: int) -> None:
+    """Log the active exception (if any) and leave at once (Isaac Sim's close() can hang)."""
+    if sys.exc_info()[0] is not None:
+        say(traceback.format_exc().rstrip())
+    say(f"[scenario] FAILED (exit code {code}) - details in {LOG_PATH}")
+    _log.close()
+    os._exit(code)
+
+
+try:
+    from isaaclab.app import AppLauncher
+except Exception:  # noqa: BLE001
+    say("[scenario] Isaac Lab is not importable from this Python: " + sys.executable)
+    fail(4)
 
 from heavy_machines.scenarios import bake  # noqa: E402  (numpy + Pillow only)
 
 parser = argparse.ArgumentParser(description="Render a heavy-machine scenario to video.")
-parser.add_argument("--scenario", default="adt_approach_hex")
-parser.add_argument("--out", default="heavy_machine_videos/{scenario}")
+parser.add_argument("--scenario", default=_pre_args.scenario)
+parser.add_argument("--out", default=_pre_args.out)
 parser.add_argument("--cameras", nargs="*", help="camera rigs to record (default: all)")
 parser.add_argument("--renderer", choices=["pathtraced", "rtx"], default="pathtraced",
                     help="pathtraced = offline quality (slow); rtx = real-time ray tracing")
@@ -58,7 +91,6 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 args_cli.enable_cameras = True
 
-OUT = os.path.abspath(os.path.expanduser(args_cli.out.format(scenario=args_cli.scenario)))
 TEX_DIR = os.path.join(OUT, "textures")
 OPTS = bake.options_from_args(args_cli)
 
@@ -70,30 +102,41 @@ def run_bake() -> None:
     for f in dataclasses.fields(bake.SceneOptions):
         if hasattr(args_cli, f.name):
             cmd += [f"--{f.name}", str(getattr(args_cli, f.name))]
-    print("[scenario] baking textures:", " ".join(cmd), flush=True)
-    if subprocess.run(cmd, check=False).returncode != 0:
-        print("[scenario] texture bake FAILED", flush=True)
-        sys.exit(3)
+    say("[scenario] baking textures: " + " ".join(cmd))
+    # relay the bake's output line by line so it also lands in render.log
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                          text=True, encoding="utf-8", errors="replace") as proc:
+        for line in proc.stdout:
+            say(line.rstrip("\n"))
+    if proc.returncode != 0:
+        say("[scenario] texture bake FAILED")
+        fail(3)
 
 
-run_bake()
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
+try:
+    say(f"[scenario] {args_cli.scenario} -> {OUT}  (log: {LOG_PATH})")
+    run_bake()
+    say("[scenario] starting Isaac Sim (the first start on a new PC can take 10+ minutes) ...")
+    app_launcher = AppLauncher(args_cli)
+    simulation_app = app_launcher.app
 
-import numpy as np  # noqa: E402
-import torch  # noqa: E402
-from PIL import Image  # noqa: E402
+    import numpy as np
+    import torch
+    from PIL import Image
 
-import isaaclab.sim as sim_utils  # noqa: E402
-from isaaclab.sensors import Camera, CameraCfg  # noqa: E402
-from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, check_file_path  # noqa: E402
-from isaacsim.core.simulation_manager import SimulationManager  # noqa: E402
+    import isaaclab.sim as sim_utils
+    from isaaclab.sensors import Camera, CameraCfg
+    from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, check_file_path
+    from isaacsim.core.simulation_manager import SimulationManager
 
-from heavy_machines import kinematics as K  # noqa: E402
-from heavy_machines.scenarios import camera_look  # noqa: E402
-from heavy_machines.scenarios.preview import load  # noqa: E402
-from heavy_machines.scenarios.scenario import Scenario, sun_direction  # noqa: E402
-from heavy_machines.scenarios.usd_scene import build_scene, pose_machines  # noqa: E402
+    from heavy_machines import kinematics as K
+    from heavy_machines.scenarios import camera_look
+    from heavy_machines.scenarios.preview import load
+    from heavy_machines.scenarios.scenario import Scenario, sun_direction
+    from heavy_machines.scenarios.usd_scene import build_scene, pose_machines
+except Exception:  # noqa: BLE001
+    fail(4)
 
 
 def _rotation_taking(a, b):
@@ -112,7 +155,7 @@ def build_lights(sc: Scenario) -> None:
     hdr = f"{ISAAC_NUCLEUS_DIR}/Materials/Textures/{L.sky_hdr}"
     use_hdr = (not args_cli.no_sky_hdr) and check_file_path(hdr) != 0
     if not args_cli.no_sky_hdr and not use_hdr:
-        print("[scenario] sky HDR unreachable -> plain sky colour", flush=True)
+        say("[scenario] sky HDR unreachable -> plain sky colour")
     if use_hdr:
         dome = sim_utils.DomeLightCfg(intensity=L.sky_intensity, texture_file=hdr)
     else:
@@ -140,12 +183,12 @@ def write_video(frame_dir: str, fps: int, path: str) -> bool:
            "-c:v", "libx264", "-crf", "16", path]
     if ffmpeg is None:
         # quoted so the line can be pasted into bash, cmd or PowerShell (the -vf filter contains a comma)
-        print("[scenario] ffmpeg not found - install it (or: pip install imageio-ffmpeg), or encode with:\n  ffmpeg "
-              + " ".join(f'"{a}"' for a in cmd[1:]), flush=True)
+        say("[scenario] ffmpeg not found - install it (or: pip install imageio-ffmpeg), or encode with:\n  ffmpeg "
+            + " ".join(f'"{a}"' for a in cmd[1:]))
         return False
     ok = subprocess.run(cmd, check=False).returncode == 0
-    print(f"[scenario] wrote {path}" if ok else
-          f"[scenario] ffmpeg FAILED for {path} (is an older copy open in a video player?)", flush=True)
+    say(f"[scenario] wrote {path}" if ok else
+        f"[scenario] ffmpeg FAILED for {path} (is an older copy open in a video player?)")
     return ok
 
 
@@ -154,10 +197,14 @@ def main():
     out = OUT
     rigs = [c for c in sc.cameras if not args_cli.cameras or c.name in args_cli.cameras]
     if not rigs:
-        print(f"[scenario] no camera matches {args_cli.cameras}; available: {[c.name for c in sc.cameras]}",
-              flush=True)
-        os._exit(2)
+        say(f"[scenario] no camera matches {args_cli.cameras}; available: {[c.name for c in sc.cameras]}")
+        fail(2)
     dt = 1.0 / sc.fps
+    try:
+        import carb
+        say(f"[scenario] Isaac Sim log: {carb.settings.get_settings().get('/log/file')}")
+    except Exception:  # noqa: BLE001
+        pass
 
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
         dt=dt, render_interval=1, device=args_cli.device,
@@ -172,12 +219,12 @@ def main():
                            ("/rtx/pathtracing/maxBounces", 6)):
             # set_setting never raises for an unknown key — it silently creates it, so check first
             if sim.get_setting(key) is None:
-                print(f"[scenario] WARNING: {key} is not a registered renderer setting in this Isaac Sim "
-                      "version; it may have no effect", flush=True)
+                say(f"[scenario] WARNING: {key} is not a registered renderer setting in this Isaac Sim "
+                    "version; it may have no effect")
             sim.set_setting(key, value)
 
     # finds the cache written by run_bake(); bakes in-process only if it is missing
-    link_ops = build_scene(sim.stage, sc, TEX_DIR, OPTS, log=lambda m: print(m, flush=True))
+    link_ops = build_scene(sim.stage, sc, TEX_DIR, OPTS, log=say)
     build_lights(sc)
 
     sim_utils.create_prim("/World/Cameras", "Xform")
@@ -197,7 +244,7 @@ def main():
             from omni.kit.viewport.utility import get_active_viewport
             get_active_viewport().set_active_camera(f"/World/Cameras/{rigs[0].name}")
         except Exception as exc:  # noqa: BLE001
-            print(f"[scenario] viewport camera not switched: {exc}", flush=True)
+            say(f"[scenario] viewport camera not switched: {exc}")
 
     def apply_state(t: float) -> None:
         pose_machines(link_ops, sc, t)
@@ -215,7 +262,7 @@ def main():
         for cam in cams.values():
             cam.update(dt)
 
-    print(f"[scenario] warming up the renderer ({args_cli.warmup} frames) ...", flush=True)
+    say(f"[scenario] warming up the renderer ({args_cli.warmup} frames) ...")
     for _ in range(args_cli.warmup):
         apply_state(0.0)
         advance()
@@ -234,7 +281,7 @@ def main():
                 try:
                     os.remove(old)
                 except OSError as exc:                  # Windows: open in an image viewer
-                    print(f"[scenario] could not remove {old}: {exc}", flush=True)
+                    say(f"[scenario] could not remove {old}: {exc}")
         if args_cli.look == "camera":
             # a fixed horizon line keeps the sky glow from flickering when machines cross it
             f_px = rig.width * rig.focal_length / rig.horizontal_aperture
@@ -242,7 +289,7 @@ def main():
             looks[rig.name] = camera_look.LookParams(horizon_row=row, horizon_tilt=tilt)
             camera_look.warm_up(rig.height, rig.width, looks[rig.name])
 
-    print(f"[scenario] recording {sc.n_frames} frames at {sc.fps} fps ({args_cli.renderer}) -> {out}", flush=True)
+    say(f"[scenario] recording {sc.n_frames} frames at {sc.fps} fps ({args_cli.renderer}) -> {out}")
     completed = True
     for k in range(sc.n_frames):
         if not simulation_app.is_running():
@@ -260,13 +307,19 @@ def main():
                 rgb = camera_look.apply(rgb, depth, looks[rig.name], seed=k)
             Image.fromarray(rgb).save(os.path.join(dirs[rig.name], f"frame_{k:05d}.png"))
         if k % sc.fps == 0:
-            print(f"[scenario] t = {k * dt:4.1f} s", flush=True)
+            say(f"[scenario] t = {k * dt:4.1f} s")
 
     ok = [write_video(dirs[r.name], sc.fps, os.path.join(out, f"{sc.name}_{r.name}.mp4")) for r in rigs]
-    print("[scenario] done", flush=True)
+    if not (completed and all(ok)):
+        fail(1)
+    say("[scenario] done")
+    _log.close()
     # Isaac Sim's close() can hang on background threads; everything is written already.
-    os._exit(0 if (completed and all(ok)) else 1)
+    os._exit(0)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:  # noqa: BLE001  (incl. KeyboardInterrupt: still log and exit cleanly)
+        fail(1)

@@ -130,9 +130,11 @@ beside a parked excavator (1280×720, 30 fps, 10 s).
 ./isaaclab.sh -p scripts/heavy_machines/scenarios/render_scenario.py --scenario adt_approach_hex --headless
 ./isaaclab.sh -p scripts/heavy_machines/scenarios/render_scenario.py --renderer rtx --cameras front   # faster
 
-# Windows (PowerShell, pip-installed Isaac Sim in .venv; WSL is not supported by Isaac Sim)
-#   .\.venv\Scripts\Activate.ps1
-#   python scripts\heavy_machines\scenarios\render_scenario.py --scenario adt_approach_hex --headless
+# Windows (pip-installed Isaac Sim in <repo>\.venv; WSL is not supported by Isaac Sim). One command
+# from any PowerShell or cmd window, no activation needed: updates the code, checks the venv, renders,
+# opens the output folder. Extra arguments go to render_scenario.py.
+#   scripts\heavy_machines\render_windows.bat
+#   scripts\heavy_machines\render_windows.bat --renderer rtx --cameras front
 
 # Offline (no Isaac): layout/framing preview and the scenario tests
 python scripts/heavy_machines/scenarios/preview.py adt_approach_hex --out /tmp/prev.png
