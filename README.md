@@ -130,7 +130,7 @@ This repository is a fork of [NVIDIA Isaac Lab](https://github.com/isaac-sim/Isa
 - [FORKLIFT_TUTORIAL.md](FORKLIFT_TUTORIAL.md): setup and data collection, step by step
 - [docs/FORKLIFT_DATASET.md](docs/FORKLIFT_DATASET.md): the dataset format (cameras, state, actions, units)
 - [`scripts/heavy_machines/`](scripts/heavy_machines/): 18 construction machines (excavators, loaders, dump trucks, crane, telehandler, grader, dozer and more) with one Isaac Lab environment, keyboard teleop, a ROS 2 bag / LeRobot data collector, and a scripted truck-and-excavator quarry video
-- [`scripts/drone_scene/`](scripts/drone_scene/): the Crazyflie demo in a photorealistic backyard (photo-scanned PBR materials, 3D paving and grass, an HDR sky with a calibrated sun), a 20 s flight with front and back onboard cameras, and an offline path-traced preview
+- [`scripts/drone_scene/`](scripts/drone_scene/): Isaac Lab's quadcopter demo in a photorealistic backyard (photo-scanned PBR materials, 3D paving and grass, an HDR sky with a calibrated sun), with two LUCID Vision Labs cameras (front and back) on the drone whose videos go through a simulated lens, Sony Pregius sensor and camera image pipeline on the GPU; a 20 s garden flight
 - [ISAACLAB_README.md](ISAACLAB_README.md): the original Isaac Lab README
 
 Isaac Lab is released under the [BSD-3 License](LICENSE), and its `isaaclab_mimic` extension under [Apache 2.0](LICENSE-mimic). Licenses of dependencies and assets are in [`docs/licenses`](docs/licenses); see [ISAACLAB_README.md](ISAACLAB_README.md#license) for details, including Isaac Sim's own license terms.

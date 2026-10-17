@@ -7,7 +7,9 @@ thrust (body +Z) points along ``a + g``, so the drone tilts into every accelerat
 (body +X, the Crazyflie's front) follows the direction of travel.
 
 Cameras: ``front`` at the nose looking forward and ``back`` at the tail looking backward, both tilted
-10 deg down, with a 90 deg horizontal field of view like a small FPV camera.
+10 deg down.  ``CAMERAS`` is the Crazyflie default (a 90 deg FPV lens); ``quadcopter_pbr.py`` replaces it with
+the two LUCID cameras (``lucid.py``) at the mounts ``vehicles.mount_cameras`` finds on the drone:
+``Flight(cameras=...)``.
 
     flight = Flight()
     p, R = flight.pose(t)                  # position (3,), body-to-world rotation (3, 3)
@@ -45,6 +47,7 @@ class OnboardCamera:
     pitch_down_deg: float = 10.0
     focal_length: float = 10.48               # mm on a 20.955 mm aperture: 90 deg horizontal FOV
     horizontal_aperture: float = 20.955
+    vertical_aperture: float | None = None    # None: 16:9
 
 
 CAMERAS = {
@@ -73,6 +76,7 @@ def _natural_cubic(t: np.ndarray, y: np.ndarray):
 @dataclass
 class Flight:
     waypoints: list = field(default_factory=lambda: list(WAYPOINTS))
+    cameras: dict = field(default_factory=lambda: dict(CAMERAS))
 
     def __post_init__(self):
         w = np.asarray(self.waypoints, float)
@@ -130,7 +134,7 @@ class Flight:
     # --- cameras ------------------------------------------------------------
     def camera_matrix(self, t: float, name: str) -> np.ndarray:
         """USD row-vector world matrix of an onboard camera (it looks down its -Z, +Y up)."""
-        cam = CAMERAS[name]
+        cam = self.cameras[name]
         p, R = self.pose(t)
         pos = p + R @ np.asarray(cam.offset)
         pitch = math.radians(cam.pitch_down_deg)
@@ -143,7 +147,7 @@ class Flight:
 
     def camera_local(self, name: str) -> tuple[np.ndarray, tuple[float, float, float, float]]:
         """The camera's pose in the body frame: (offset, (w, x, y, z)) of a camera looking down its -Z."""
-        cam = CAMERAS[name]
+        cam = self.cameras[name]
         pitch = math.radians(cam.pitch_down_deg)
         fwd = np.array([cam.look * math.cos(pitch), 0.0, -math.sin(pitch)])
         right = np.array([0.0, -cam.look, 0.0])

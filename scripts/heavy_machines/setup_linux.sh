@@ -7,7 +7,7 @@
 # ~/heavy_machines (your Isaac Lab clone is not touched), finds the Python that has Isaac Sim + Isaac Lab,
 # and renders.  Afterwards:
 #   ~/heavy_machines/render.sh   the truck/excavator video (args go to render_scenario.py)
-#   ~/heavy_machines/drone.sh    the Crazyflie demo in a PBR backyard (args go to quadcopter_pbr.py)
+#   ~/heavy_machines/drone.sh    the drone with two LUCID cameras in a PBR backyard (args go to quadcopter_pbr.py)
 # Both update themselves the same way first.
 #
 #   ISAACLAB=/path/to/IsaacLab   your Isaac Lab clone (default ~/Projects/IsaacLab; used to find its Python)
@@ -80,7 +80,7 @@ PY
 chmod +x "$DEST/scripts/heavy_machines/setup_linux.sh" 2>/dev/null
 printf '#!/usr/bin/env bash\n# update (no git) and render; extra arguments go to render_scenario.py\nISAACLAB="${ISAACLAB:-%s}" HM_DEST="%s" exec bash "%s/scripts/heavy_machines/setup_linux.sh" "$@"\n' \
     "$ISAACLAB" "$DEST" "$DEST" > "$DEST/render.sh" && chmod +x "$DEST/render.sh"
-printf '#!/usr/bin/env bash\n# update (no git) and run the Crazyflie PBR demo; extra arguments go to quadcopter_pbr.py\nISAACLAB="${ISAACLAB:-%s}" HM_DEST="%s" exec bash "%s/scripts/heavy_machines/setup_linux.sh" --drone "$@"\n' \
+printf '#!/usr/bin/env bash\n# update (no git) and run the drone PBR demo; extra arguments go to quadcopter_pbr.py\nISAACLAB="${ISAACLAB:-%s}" HM_DEST="%s" exec bash "%s/scripts/heavy_machines/setup_linux.sh" --drone "$@"\n' \
     "$ISAACLAB" "$DEST" "$DEST" > "$DEST/drone.sh" && chmod +x "$DEST/drone.sh"
 [ "$NO_RENDER" = 1 ] && exit 0
 
@@ -118,7 +118,7 @@ fi
 
 cd "$DEST" || stop "cannot enter $DEST"
 if [ "$DRONE" = 1 ]; then
-    say "Crazyflie PBR demo - the first start downloads ~300 MB of NVIDIA assets (cached afterwards)"
+    say "drone PBR demo - the first start downloads ~300 MB of NVIDIA assets (cached afterwards)"
     "$PY" "$DEST/scripts/drone_scene/quadcopter_pbr.py" ${ARGS[@]+"${ARGS[@]}"}
     code=$?
     [ "$code" = 0 ] || { say "FAILED (exit code $code). Send Claude this file:"; echo "    $DEST/drone_scene_videos/drone_scene.log"; }

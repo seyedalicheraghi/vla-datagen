@@ -82,3 +82,5 @@ scripts/heavy_machines/.installed_commit
 /drone_front_camera.mp4
 /drone_back_camera.mp4
 /drone_flight_frames/
+# quadcopter_pbr.py output (run from the repo root)
+/drone_scene_videos/
