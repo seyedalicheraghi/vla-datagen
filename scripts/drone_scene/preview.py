@@ -25,6 +25,11 @@ from drone_scene import prepare as prep  # noqa: E402
 from drone_scene import scene  # noqa: E402
 
 
+# propeller-blur disc density: 1 = the blades' time-averaged coverage (a long exposure); typical daylight
+# shutter speeds leave the discs a little stronger than that
+PROP_BLUR_GAIN = 1.8
+
+
 def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: bool = True, drone_look: bool = True):
     from pxr import Gf, Usd, UsdGeom
 
@@ -45,7 +50,7 @@ def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: b
     if drone_look:
         from drone_scene import drone_look as DL
         summary["drone_look"] = {k: v for k, v in DL.apply_drone_look(
-            stage, "/World/Crazyflie", manifest.get("cache_dir") or prep.DEFAULT_CACHE).items()
+            stage, "/World/Crazyflie", manifest.get("cache_dir") or prep.DEFAULT_CACHE, blur_gain=PROP_BLUR_GAIN).items()
             if k in ("prop_discs", "leds", "meshes_bound", "blades_hidden")}
     stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
     stage.GetRootLayer().Save()
