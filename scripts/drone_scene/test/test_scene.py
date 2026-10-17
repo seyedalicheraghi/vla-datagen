@@ -57,7 +57,7 @@ class TestDroneScene(unittest.TestCase):
         cls.cfg = scene.SceneCfg()
         cls.man = fake_manifest(cls.tmp)
         cls.stage = Usd.Stage.CreateInMemory()
-        cls.summary = scene.build(cls.stage, cls.cfg, cls.man, physics=True)
+        cls.summary = scene.build(cls.stage, cls.cfg, cls.man, physics=True, bricks=False)   # pavers: test_pavers.py
         cls.xf = UsdGeom.XformCache()
 
     def test_summary(self):

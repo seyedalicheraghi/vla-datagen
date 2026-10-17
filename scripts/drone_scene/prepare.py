@@ -32,9 +32,9 @@ if __package__ in (None, ""):                     # run as a script
 from drone_scene import assets, hdr, nucleus  # noqa: E402
 from drone_scene.scene import SunCfg  # noqa: E402  (numpy only)
 
-PREPARE_VERSION = "2"
+PREPARE_VERSION = "3"
 DEFAULT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "drone_scene")
-GROUND = ("pavers", "lawn", "mulch", "curb")
+GROUND = ("pavers", "lawn", "mulch", "curb", "sand")
 
 
 def _key(mirror: bool, preview_sky_factor: int, sun_elevation_deg: float) -> str:
@@ -131,7 +131,8 @@ def prepare(cache_dir: str = DEFAULT_CACHE, *, mirror: bool = False, preview_sky
     else:
         props = {name: nucleus.url(prop.usd) for name, prop in assets.PROPS.items()}
         crazyflie = nucleus.url(assets.CRAZYFLIE)
-    man = {"key": key, "textures": textures, "sky": sky, "props": props, "crazyflie": crazyflie}
+    man = {"key": key, "textures": textures, "sky": sky, "props": props, "crazyflie": crazyflie,
+           "cache_dir": os.path.abspath(cache_dir)}
     with open(manifest_path + ".part", "w", encoding="utf-8") as f:
         json.dump(man, f, indent=1)
     os.replace(manifest_path + ".part", manifest_path)

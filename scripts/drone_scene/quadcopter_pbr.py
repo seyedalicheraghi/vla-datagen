@@ -162,6 +162,10 @@ def main() -> None:
     robot_cfg = CRAZYFLIE_CFG.replace(prim_path="/World/Crazyflie")
     robot_cfg.spawn.func("/World/Crazyflie", robot_cfg.spawn, translation=robot_cfg.init_state.pos)
     say(f"[drone] PBR materials on {scene.apply_drone_materials(stage, '/World/Crazyflie')} drone meshes")
+    from drone_scene import drone_look
+    look = drone_look.apply_drone_look(stage, "/World/Crazyflie", MANIFEST.get("cache_dir") or prep.DEFAULT_CACHE)
+    say(f"[drone] close-up detail: PCB/battery/motor textures, {look.get('leds')} LEDs, "
+        f"{look.get('prop_discs')} propeller blur discs")
     robot = Articulation(robot_cfg)
 
     fl = flight.Flight() if args_cli.fly else None

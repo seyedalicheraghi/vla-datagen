@@ -43,8 +43,9 @@ class BaseMaterial:
 
 BASE = "NVIDIA/Materials/Base"
 MATERIALS: dict[str, BaseMaterial] = {
-    # herringbone clay pavers: ~8 paver lengths per repeat, 200 mm pavers
-    "pavers": BaseMaterial(f"{BASE}/Masonry/Brick_Pavers.mdl", tile_m=1.6),
+    # herringbone clay pavers: 12 paver pitches per repeat, so 1.2 m gives 200 mm pavers (pavers.py builds
+    # the visible patio as 3D bricks from crops of this texture; the flat slab is the collider underneath)
+    "pavers": BaseMaterial(f"{BASE}/Masonry/Brick_Pavers.mdl", tile_m=1.2),
     # Grass_Cut's albedo is ~0.06 (too dark for a sunlit lawn, ~0.1); fresh hardwood mulch is darker and
     # warmer than Mulch_Brown's photo
     # tint measured against the 3D grass in a rendered frame: the flat texture has no self-shadowing between

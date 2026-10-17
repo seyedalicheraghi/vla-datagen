@@ -25,7 +25,7 @@ from drone_scene import prepare as prep  # noqa: E402
 from drone_scene import scene  # noqa: E402
 
 
-def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: bool = True):
+def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: bool = True, drone_look: bool = True):
     from pxr import Gf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateNew(path)
@@ -42,6 +42,11 @@ def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: b
     ops = {op.GetOpName(): op for op in drone.GetOrderedXformOps()}
     (ops.get("xformOp:translate") or drone.AddTranslateOp()).Set(Gf.Vec3d(*cfg.drone_pos))
     summary["drone_meshes_bound"] = scene.apply_drone_materials(stage, "/World/Crazyflie")
+    if drone_look:
+        from drone_scene import drone_look as DL
+        summary["drone_look"] = {k: v for k, v in DL.apply_drone_look(
+            stage, "/World/Crazyflie", manifest.get("cache_dir") or prep.DEFAULT_CACHE).items()
+            if k in ("prop_discs", "leds", "meshes_bound", "blades_hidden")}
     stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
     stage.GetRootLayer().Save()
     return stage, summary
@@ -75,8 +80,9 @@ def main() -> None:
     ev = exposure_ev(man) + a.ev
     t0 = time.time()
     outs = {f"/World/Cameras/{name}": os.path.join(a.out, f"{name}.png") for name in a.cameras}
+    # volpath: the translucent propeller-blur discs need it (path treats any opacity < 1 as nearly opaque)
     stats = mitsuba_preview.render_many(stage, outs, width=a.width, height=a.height, spp=a.spp, exposure_ev=ev,
-                                        log=log)
+                                        log=log, integrator="volpath")
     for (cam, out), st in zip(outs.items(), stats):
         log(f"[preview] {cam}: {out} {st}")
     log(f"[preview] {len(outs)} camera(s) in {time.time() - t0:.0f} s")

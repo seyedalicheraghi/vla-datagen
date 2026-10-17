@@ -18,6 +18,13 @@ hidden scale, so DomeLight intensity, DistantLight intensity and OmniPBR ``emiss
 unit (radiance, with irradiance / pi for the sun); ``exposure_ev`` scales the final image.  Whether
 Isaac's RTX renderer scales any of them differently is not checked here.
 
+Integrator: ``path`` by default.  It casts shadow rays through a ``mask`` BSDF (a translucent surface, e.g. the
+propeller blur discs of ``drone_look``) as if it were opaque; ``integrator="volpath"`` lets the shadow through
+with the mask's transmittance, at no measurable cost on the drone preview.  It is opt-in so that renders
+resumed from an earlier run (``render_flight``) keep their look.  Emissive materials get a low emitter
+``sampling_weight``: Mitsuba picks emitters uniformly, so a few tiny LEDs would otherwise take most of the
+sun's share of the light samples and make the whole frame noisier.
+
 Time: the stage's start time code if it has a time range, else the earliest time sample (so animation
 that only has time samples is read at its first sample), unless ``time_code`` is given.
 
@@ -1448,6 +1455,10 @@ def _read_camera(stage: Usd.Stage, prim: Usd.Prim, tc, xc: UsdGeom.XformCache, r
 _WRAP = {"repeat": "repeat", "mirror": "mirror", "clamp": "clamp", "black": "clamp", "useMetadata": "repeat"}
 
 
+INTEGRATORS = ("path", "volpath")
+EMISSIVE_SAMPLING_WEIGHT = 0.02         # of an emissive material's area emitter, against 1 for the sun and the dome
+
+
 def _constant_opacity(spec: MaterialSpec) -> float:
     o = float(np.clip(spec.opacity, 0.0, 1.0))
     return (1.0 if o >= spec.opacity_threshold else 0.0) if spec.opacity_threshold > 0 else o
@@ -1626,7 +1637,7 @@ class _Builder:
             radiance: dict = self._bitmap(p.emission, spec.emission_tex)
         else:
             radiance = {"type": "rgb", "value": [float(c * spec.emission_scale) for c in spec.emission]}
-        return self.mi.load_dict({"type": "area", "radiance": radiance})
+        return self.mi.load_dict({"type": "area", "radiance": radiance, "sampling_weight": EMISSIVE_SAMPLING_WEIGHT})
 
     def build_materials(self, wanted: dict[int, tuple[MaterialSpec, set[tuple[bool, bool]]]]) -> None:
         """BSDFs for each wanted spec and its {(two_sided, flip_green)} variants; textures are prepared in threads."""
@@ -1805,9 +1816,12 @@ def _render_passes(mi, scene, sensor: int, spp: int, variant: str, width: int, h
 def _render_jobs(stage, jobs: Sequence[tuple[str, str, str | None]], *, width: int, height: int, spp: int,
                  max_depth: int, exposure_ev: float, tonemap: str, log: Log | None, variant: str,
                  backface_culling: bool, flip_green_preview: bool | None, flip_green_mdl: bool | None,
-                 max_texture_px: int, rfilter: str, time_code: float | None) -> list[dict]:
+                 max_texture_px: int, rfilter: str, time_code: float | None,
+                 integrator: str = "path") -> list[dict]:
     t0 = time.time()
     report = _Report(log)
+    if integrator not in INTEGRATORS:
+        raise ValueError(f"unknown integrator {integrator!r} (use {' or '.join(map(repr, INTEGRATORS))})")
     if tonemap not in ("aces", "none"):
         raise ValueError(f"unknown tonemap {tonemap!r} (use 'aces' or 'none')")
     if variant not in ("auto", LLVM, SCALAR):
@@ -1846,7 +1860,7 @@ def _render_jobs(stage, jobs: Sequence[tuple[str, str, str | None]], *, width: i
     images = _Images(max_texture_px, report)
     builder = _Builder(mi, images, report, backface_culling)
     shapes, counts = builder.shapes(groups)
-    scene_dict: dict[str, Any] = {"type": "scene", "integrator": {"type": "path", "max_depth": max_depth}}
+    scene_dict: dict[str, Any] = {"type": "scene", "integrator": {"type": integrator, "max_depth": max_depth}}
     scene_dict.update(shapes)
     scene_dict.update(builder.lights(domes, distants, areas))
     for i, cam in enumerate(cams):
@@ -1904,9 +1918,11 @@ class Session:
     def __init__(self, stage, *, max_depth: int = 8, variant: str = "auto", log: Log | None = None,
                  backface_culling: bool = False, flip_green_preview: bool | None = None,
                  flip_green_mdl: bool | None = None, max_texture_px: int = 2048, time_code: float | None = None,
-                 aovs: bool = False):
+                 aovs: bool = False, integrator: str = "path"):
         t0 = time.time()
         self.report = _Report(log)
+        if integrator not in INTEGRATORS:
+            raise ValueError(f"unknown integrator {integrator!r} (use {' or '.join(map(repr, INTEGRATORS))})")
         if isinstance(stage, (str, os.PathLike)):
             stage = Usd.Stage.Open(os.fspath(stage))
         tc = Usd.TimeCode(time_code) if time_code is not None else (
@@ -1923,7 +1939,7 @@ class Session:
         self.mi = mi
         self.builder = _Builder(mi, _Images(max_texture_px, self.report), self.report, backface_culling)
         shapes, self.counts = self.builder.shapes(groups)
-        path = {"type": "path", "max_depth": max_depth}
+        path = {"type": integrator, "max_depth": max_depth}
         self.aovs = aovs
         integrator = {"type": "aov", "aovs": "albedo:albedo,normal:sh_normal", "inner": path} if aovs else path
         scene_dict: dict[str, Any] = {"type": "scene", "integrator": integrator}
@@ -1955,7 +1971,8 @@ def render(stage, camera: str, out_png: str, *, width: int = 960, height: int = 
            max_depth: int = 8, exposure_ev: float = 0.0, tonemap: str = "aces", save_exr: str | None = None,
            log: Log | None = None, variant: str = "auto", backface_culling: bool = False,
            flip_green_preview: bool | None = None, flip_green_mdl: bool | None = None,
-           max_texture_px: int = 2048, rfilter: str = "gaussian", time_code: float | None = None) -> dict:
+           max_texture_px: int = 2048, rfilter: str = "gaussian", time_code: float | None = None,
+           integrator: str = "path") -> dict:
     """Path-trace ``stage`` (a ``Usd.Stage`` or a file path) through the UsdGeom.Camera at ``camera``.
 
     Writes ``out_png`` (exposure, tone map, sRGB, 8-bit) and optionally ``save_exr`` (linear radiance
@@ -1970,7 +1987,7 @@ def render(stage, camera: str, out_png: str, *, width: int = 960, height: int = 
                         max_depth=max_depth, exposure_ev=exposure_ev, tonemap=tonemap, log=log, variant=variant,
                         backface_culling=backface_culling, flip_green_preview=flip_green_preview,
                         flip_green_mdl=flip_green_mdl, max_texture_px=max_texture_px, rfilter=rfilter,
-                        time_code=time_code)[0]
+                        time_code=time_code, integrator=integrator)[0]
 
 
 def render_many(stage, cameras: dict[str, str], *, exr_dir: str | None = None, width: int = 960,
@@ -1978,7 +1995,7 @@ def render_many(stage, cameras: dict[str, str], *, exr_dir: str | None = None, w
                 tonemap: str = "aces", log: Log | None = None, variant: str = "auto",
                 backface_culling: bool = False, flip_green_preview: bool | None = None,
                 flip_green_mdl: bool | None = None, max_texture_px: int = 2048, rfilter: str = "gaussian",
-                time_code: float | None = None) -> list[dict]:
+                time_code: float | None = None, integrator: str = "path") -> list[dict]:
     """``render`` for several cameras ({camera path: png path}) from one scene build (reading the stage dominates)."""
     def exr(png: str) -> str | None:
         return os.path.join(exr_dir, os.path.splitext(os.path.basename(png))[0] + ".exr") if exr_dir else None
@@ -1988,7 +2005,7 @@ def render_many(stage, cameras: dict[str, str], *, exr_dir: str | None = None, w
                         exposure_ev=exposure_ev, tonemap=tonemap, log=log, variant=variant,
                         backface_culling=backface_culling, flip_green_preview=flip_green_preview,
                         flip_green_mdl=flip_green_mdl, max_texture_px=max_texture_px, rfilter=rfilter,
-                        time_code=time_code)
+                        time_code=time_code, integrator=integrator)
 
 
 def main() -> None:
@@ -2005,10 +2022,12 @@ def main() -> None:
     p.add_argument("--exr", default=None, help="also save the linear HDR image")
     p.add_argument("--variant", choices=("auto", LLVM, SCALAR), default="auto")
     p.add_argument("--backface-culling", action="store_true", help="shade single-sided meshes one-sided")
+    p.add_argument("--integrator", choices=INTEGRATORS, default="path",
+                   help="volpath: translucent surfaces (masks) let shadows through")
     a = p.parse_args()
     stats = render(a.stage, a.camera, a.out, width=a.width, height=a.height, spp=a.spp, max_depth=a.max_depth,
                    exposure_ev=a.ev, tonemap=a.tonemap, save_exr=a.exr, variant=a.variant,
-                   backface_culling=a.backface_culling, log=lambda m: print(m, flush=True))
+                   backface_culling=a.backface_culling, integrator=a.integrator, log=lambda m: print(m, flush=True))
     print({k: v for k, v in stats.items() if k != "fallbacks"})
 
 

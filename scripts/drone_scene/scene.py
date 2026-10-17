@@ -471,11 +471,20 @@ def tint_materials(stage, root: str, tint) -> int:
     return n
 
 
-def author_leaves(stage, root: str, cfg: SceneCfg, prop_paths: dict[str, str]) -> int:
+def _default_cache() -> str:
+    import os
+    return os.path.join(os.path.expanduser("~"), ".cache", "drone_scene")
+
+
+def author_leaves(stage, root: str, cfg: SceneCfg, prop_paths: dict[str, str], on_bricks: bool = False) -> int:
     protos = [n for n in ("leaves_maple", "leaves_oak") if n in prop_paths]
     if not protos or cfg.leaves <= 0:
         return 0
     pts = leaf_positions(cfg)
+    z0 = cfg.patio_top + 0.002
+    if on_bricks:                                  # rest on the 3D paver tops, not inside them
+        from .pavers import PaverSpec
+        z0 += PaverSpec().top_rise
     rng = np.random.default_rng(cfg.seed + 3)
     n = len(pts)
     quats = []
@@ -484,7 +493,7 @@ def author_leaves(stage, root: str, cfg: SceneCfg, prop_paths: dict[str, str]) -
         quats.append(q)
     scales = rng.uniform(0.8, 1.25, n)
     _instancer(stage, f"{root}/Patio/Leaves", protos, prop_paths, list(rng.integers(len(protos), size=n)),
-               [(x, y, cfg.patio_top + 0.002) for x, y in pts], quats, [(s, s, s) for s in scales])
+               [(x, y, z0) for x, y in pts], quats, [(s, s, s) for s in scales])
     return n
 
 
@@ -581,7 +590,8 @@ def add_ground_collision(stage, root: str = "/World/Scenery") -> int:
     return n
 
 
-def build(stage, cfg: SceneCfg, manifest: dict, root: str = "/World/Scenery", physics: bool = False) -> dict:
+def build(stage, cfg: SceneCfg, manifest: dict, root: str = "/World/Scenery", physics: bool = False,
+          bricks: bool = True) -> dict:
     """Author the whole scenery from a prepare.py manifest; returns a summary."""
     from pxr import UsdGeom
 
@@ -591,11 +601,20 @@ def build(stage, cfg: SceneCfg, manifest: dict, root: str = "/World/Scenery", ph
     UsdGeom.Xform.Define(stage, root)
     mats = author_ground_materials(stage, root, manifest["textures"])
     author_ground(stage, root, cfg, mats)
+    paving = None
+    if bricks:
+        # real 3D herringbone pavers on top; the flat slab stays as the (invisible) collider
+        from . import pavers
+        pavers.hide_flat_patio(stage, root)
+        paving = pavers.author_patio(stage, root, cfg.patio, cfg.patio_top,
+                                     manifest.get("cache_dir") or _default_cache(), seed=cfg.seed,
+                                     textures=manifest["textures"])
     author_props(stage, root, cfg, manifest["props"])
     clumps = author_grass(stage, root, cfg, manifest["props"])
-    leaves = author_leaves(stage, root, cfg, manifest["props"])
+    leaves = author_leaves(stage, root, cfg, manifest["props"], on_bricks=bricks)
     author_lights(stage, root, cfg, manifest["sky"])
     author_cameras(stage, cfg)
     colliders = add_ground_collision(stage, root) if physics else 0
     return {"materials": len(mats), "grass_clumps": clumps, "leaves": leaves, "colliders": colliders,
+            "paving": {k: paving[k] for k in ("bricks", "cut_bricks", "crops", "triangles")} if paving else None,
             "props": sum(1 for p in PLANTING if p[0] in manifest["props"])}
