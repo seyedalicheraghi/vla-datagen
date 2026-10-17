@@ -47,6 +47,9 @@ parser.add_argument("--record", type=float, default=0.0, help="seconds of video 
 parser.add_argument("--cameras", nargs="+", default=["hero", "demo"], choices=CAMERA_NAMES, help="cameras to record")
 parser.add_argument("--fps", type=int, default=25, help="video frame rate (25 = exactly every 8th 200 Hz physics step)")
 parser.add_argument("--fly", action="store_true", help="fly the 20 s garden tour (flight.py) instead of hovering")
+parser.add_argument("--lens", action="store_true", help="camera artefacts: bloom, vignette, grain, colour fringe")
+parser.add_argument("--motion_blur", action="store_true", help="real-time motion blur (not with --pathtracing)")
+parser.add_argument("--aces", action="store_true", help="force the ACES tonemapper (enum unverified; see rtx_look)")
 parser.add_argument("--out", default="drone_scene_videos")
 parser.add_argument("--cache", default=prep.DEFAULT_CACHE)
 
@@ -147,13 +150,16 @@ def main() -> None:
         render=sim_utils.RenderCfg(rendering_mode="quality", antialiasing_mode="DLAA", enable_translucency=True,
                                    enable_shadows=True, enable_ambient_occlusion=True, enable_reflections=True,
                                    enable_global_illumination=True)))
+    # physically based camera pipeline (rtx_look.py): no artificial ambient fill (the "quality" preset turns it on,
+    # so this must come after SimulationContext), fixed exposure, sun/sky sampling, GI bounces, path-tracer samples
+    from drone_scene import rtx_look
+    optional = [g for g, on in (("lens", args_cli.lens), ("tonemap_aces", args_cli.aces),
+                                ("motion_blur", args_cli.motion_blur and not args_cli.pathtracing)) if on]
     if args_cli.pathtracing:
-        for key, value in (("/rtx/rendermode", "PathTracing"), ("/rtx/pathtracing/spp", args_cli.spp),
-                           ("/rtx/pathtracing/totalSpp", args_cli.spp), ("/rtx/pathtracing/maxBounces", 8),
-                           ("/rtx/pathtracing/optixDenoiser/enabled", True)):
-            if sim.get_setting(key) is None:
-                say(f"[drone] WARNING: {key} is not a registered renderer setting here; it may have no effect")
-            sim.set_setting(key, value)
+        pt, _ = rtx_look.path_tracing_samples(args_cli.spp)
+        rtx_look.apply(sim.set_setting, sim.get_setting, "pathtracing", say, optional=optional, overrides=pt)
+    else:
+        rtx_look.apply(sim.set_setting, sim.get_setting, "realtime", say, optional=optional)
 
     stage = sim.stage
     summary = scene.build(stage, cfg, MANIFEST, physics=True)
