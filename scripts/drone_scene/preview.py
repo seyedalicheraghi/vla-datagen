@@ -25,13 +25,17 @@ from drone_scene import prepare as prep  # noqa: E402
 from drone_scene import scene  # noqa: E402
 
 
-def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict):
+def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict, drone: bool = True):
     from pxr import Gf, Usd, UsdGeom
 
     stage = Usd.Stage.CreateNew(path)
     man = dict(manifest)
     man["sky"] = dict(manifest["sky"], file=manifest["sky"]["file_preview"])     # smaller sky for Mitsuba
     summary = scene.build(stage, cfg, man)
+    if not drone:
+        stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
+        stage.GetRootLayer().Save()
+        return stage, summary
     drone = UsdGeom.Xform.Define(stage, "/World/Crazyflie")
     drone.GetPrim().GetReferences().AddReference(manifest["crazyflie"])
     # the asset brings its own translate op (Isaac Lab's spawner sets it the same way)

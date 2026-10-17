@@ -8,10 +8,14 @@ weight, reset every 10 s), plus:
   calibrated DistantLight, and real PBR materials on the drone;
 - ``--view demo|hero|top`` picks the viewport camera (``demo`` = the original view);
 - ``--pathtracing`` switches the renderer to path tracing (offline quality);
-- ``--record SECONDS`` renders the chosen cameras to PNG frames and an mp4 (use with --headless).
+- ``--record SECONDS`` renders the chosen cameras to PNG frames and an mp4 (use with --headless);
+- ``--fly`` flies the drone along ``flight.Flight`` (a 20 s garden tour) instead of hovering, with two
+  cameras mounted on it: ``front`` (nose, looking forward) and ``back`` (tail, looking backward).
 
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py                         # GUI
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --headless --record 4 --cameras hero demo --pathtracing
+    ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --fly --view front     # GUI, onboard view
+    ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --fly --headless --record 20 --cameras front back
 
 Assets are downloaded and pre-processed by ``prepare.py`` before Isaac Sim starts (cached in
 ~/.cache/drone_scene).  Output and log: <out>/ (default ./drone_scene_videos).
@@ -29,17 +33,20 @@ import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from drone_scene import flight  # noqa: E402  (numpy only)
 from drone_scene import prepare as prep  # noqa: E402  (no pxr, no Isaac)
 from drone_scene import scene  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Crazyflie hover demo in a PBR backyard.")
-CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras]
+ONBOARD = sorted(flight.CAMERAS)                    # cameras mounted on the drone (with --fly)
+CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras] + ONBOARD
 parser.add_argument("--view", default="demo", choices=CAMERA_NAMES, help="viewport camera")
 parser.add_argument("--pathtracing", action="store_true", help="path-traced rendering (slower, best quality)")
 parser.add_argument("--spp", type=int, default=64, help="path-tracing samples per pixel per frame")
 parser.add_argument("--record", type=float, default=0.0, help="seconds of video to render (0 = interactive)")
 parser.add_argument("--cameras", nargs="+", default=["hero", "demo"], choices=CAMERA_NAMES, help="cameras to record")
 parser.add_argument("--fps", type=int, default=25, help="video frame rate (25 = exactly every 8th 200 Hz physics step)")
+parser.add_argument("--fly", action="store_true", help="fly the 20 s garden tour (flight.py) instead of hovering")
 parser.add_argument("--out", default="drone_scene_videos")
 parser.add_argument("--cache", default=prep.DEFAULT_CACHE)
 
@@ -47,6 +54,8 @@ from isaaclab.app import AppLauncher  # noqa: E402
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+if not args_cli.fly and ({args_cli.view} | set(args_cli.cameras)) & set(ONBOARD):
+    parser.error(f"the onboard cameras {ONBOARD} need --fly")
 OUT = os.path.abspath(os.path.expanduser(args_cli.out))
 os.makedirs(OUT, exist_ok=True)
 LOG_PATH = os.path.join(OUT, "drone_scene.log")
@@ -116,6 +125,21 @@ def write_video(frame_dir: str, fps: float, path: str) -> bool:
     return res.returncode == 0
 
 
+def author_onboard_cameras(stage, body: str, fl) -> None:
+    """Plain USD cameras on the drone body for the GUI viewport (--view front/back)."""
+    from pxr import Gf, UsdGeom
+
+    for name, oc in flight.CAMERAS.items():
+        pos, (w, x, y, z) = fl.camera_local(name)
+        cam = UsdGeom.Camera.Define(stage, f"{body}/{name}_view")
+        cam.CreateFocalLengthAttr(oc.focal_length)
+        cam.CreateHorizontalApertureAttr(oc.horizontal_aperture)
+        cam.CreateVerticalApertureAttr(oc.horizontal_aperture * 9 / 16)
+        cam.CreateClippingRangeAttr(Gf.Vec2f(0.01, 10000.0))
+        cam.AddTranslateOp().Set(Gf.Vec3d(*map(float, pos)))
+        cam.AddOrientOp().Set(Gf.Quatf(w, x, y, z))
+
+
 def main() -> None:
     cfg = scene.SceneCfg()
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
@@ -140,19 +164,35 @@ def main() -> None:
     say(f"[drone] PBR materials on {scene.apply_drone_materials(stage, '/World/Crazyflie')} drone meshes")
     robot = Articulation(robot_cfg)
 
-    view = cfg.camera(args_cli.view)
-    sim.set_camera_view(eye=list(view.eye), target=list(view.target))
+    fl = flight.Flight() if args_cli.fly else None
+    if fl is not None:
+        author_onboard_cameras(stage, "/World/Crazyflie/body", fl)
+    view_path = f"/World/Cameras/{args_cli.view}"
+    if args_cli.view in ONBOARD:
+        view_path = f"/World/Crazyflie/body/{args_cli.view}_view"
+    else:
+        view = cfg.camera(args_cli.view)
+        sim.set_camera_view(eye=list(view.eye), target=list(view.target))
     if not args_cli.headless:
         # look through the authored camera itself so the view also gets its lens and depth of field
         try:
             from omni.kit.viewport.utility import get_active_viewport
-            get_active_viewport().camera_path = f"/World/Cameras/{args_cli.view}"
+            get_active_viewport().camera_path = view_path
         except Exception as exc:  # noqa: BLE001
             say(f"[drone] viewport keeps Isaac's default lens ({exc})")
 
     cams: dict[str, Camera] = {}
     if args_cli.record > 0:
-        for name in args_cli.cameras:
+        for name in [n for n in args_cli.cameras if n in ONBOARD]:
+            oc = flight.CAMERAS[name]
+            pos, quat = fl.camera_local(name)
+            cams[name] = Camera(CameraCfg(
+                prim_path=f"/World/Crazyflie/body/{name}_cam", update_period=0.0, height=480, width=854,
+                data_types=["rgb"],
+                spawn=sim_utils.PinholeCameraCfg(focal_length=oc.focal_length, horizontal_aperture=oc.horizontal_aperture,
+                                                 clipping_range=(0.01, 10000.0)),
+                offset=CameraCfg.OffsetCfg(pos=tuple(float(v) for v in pos), rot=quat, convention="opengl")))
+        for name in [n for n in args_cli.cameras if n not in ONBOARD]:
             c = cfg.camera(name)
             spawn = sim_utils.PinholeCameraCfg(
                 focal_length=c.focal_length, horizontal_aperture=c.horizontal_aperture,
@@ -164,6 +204,8 @@ def main() -> None:
 
     sim.reset()
     for name, cam in cams.items():
+        if name in ONBOARD:
+            continue                                # mounted on the drone: they move with it
         c = cfg.camera(name)
         cam.set_world_poses_from_view(torch.tensor([c.eye], device=sim.device, dtype=torch.float32),
                                       torch.tensor([c.target], device=sim.device, dtype=torch.float32))
@@ -197,13 +239,21 @@ def main() -> None:
 
     count, frame = 0, 0
     while simulation_app.is_running():
-        if count % 2000 == 0:                      # reset, as in the original demo
+        if fl is not None:
+            # kinematic flight: the pose and velocity of the garden tour (looped, 2 s hover between laps)
+            t = (count * sim_dt) % (fl.duration + 2.0) if not cams else count * sim_dt
+            t = min(t, fl.duration)
+            p, q, v = fl.position(t), fl.quat_wxyz(t), fl.velocity(t)
+            robot.write_root_pose_to_sim(torch.tensor([[*p, *q]], device=sim.device, dtype=torch.float32))
+            robot.write_root_velocity_to_sim(torch.tensor([[*v, 0.0, 0.0, 0.0]], device=sim.device, dtype=torch.float32))
+        elif count % 2000 == 0:                    # reset, as in the original demo
             robot.write_joint_state_to_sim(robot.data.default_joint_pos, robot.data.default_joint_vel)
             robot.write_root_pose_to_sim(robot.data.default_root_state[:, :7])
             robot.write_root_velocity_to_sim(robot.data.default_root_state[:, 7:])
             robot.reset()
         forces = torch.zeros(robot.num_instances, 4, 3, device=sim.device)
-        forces[..., 2] = robot_mass * gravity / 4.0
+        if fl is None:
+            forces[..., 2] = robot_mass * gravity / 4.0
         robot.permanent_wrench_composer.set_forces_and_torques(
             forces=forces, torques=torch.zeros_like(forces), body_ids=prop_body_ids)
         robot.write_data_to_sim()

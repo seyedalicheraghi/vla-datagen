@@ -47,10 +47,13 @@ MATERIALS: dict[str, BaseMaterial] = {
     "pavers": BaseMaterial(f"{BASE}/Masonry/Brick_Pavers.mdl", tile_m=1.6),
     # Grass_Cut's albedo is ~0.06 (too dark for a sunlit lawn, ~0.1); fresh hardwood mulch is darker and
     # warmer than Mulch_Brown's photo
-    "lawn": BaseMaterial(f"{BASE}/Natural/Grass_Cut.mdl", tile_m=1.5, tint=(1.45, 1.45, 1.25)),
+    # tint measured against the 3D grass in a rendered frame: the flat texture has no self-shadowing between
+    # blades, so untinted it reads twice as bright and much paler than the grass clumps standing on it
+    "lawn": BaseMaterial(f"{BASE}/Natural/Grass_Cut.mdl", tile_m=1.5, tint=(1.20, 1.15, 0.52)),
     "mulch": BaseMaterial(f"{BASE}/Natural/Mulch_Brown.mdl", tile_m=1.2, tint=(0.62, 0.52, 0.42)),
     "curb": BaseMaterial(f"{BASE}/Masonry/Concrete_Rough.mdl", tile_m=1.0),
     "soil": BaseMaterial(f"{BASE}/Natural/Soil_Rocky.mdl", tile_m=1.5),
+    "sand": BaseMaterial(f"{BASE}/Natural/Sand.mdl", tile_m=0.8),            # joint sand between pavers
 }
 
 _TEXTURE_PARAMS = {

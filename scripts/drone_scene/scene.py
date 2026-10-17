@@ -59,8 +59,9 @@ class SceneCfg:
     curb_top: float = 0.008
     bed: tuple[float, float, float, float] = (-3.8, -2.4, -3.6, 3.2)
     lawn_half: float = 80.0               # far lawn extent; the HDR horizon takes over beyond
-    grass_area: tuple[float, float, float, float] = (-9.0, 7.0, -9.0, 8.0)
-    grass_height: float = 0.75            # z scale of the clumps: ~10-12 cm, a mown lawn
+    grass_area: tuple[float, float, float, float] = (-10.5, 8.5, -10.5, 9.5)
+    grass_feather: float = 3.0            # clumps thin out over this band inside grass_area: no hard edge
+    grass_height: float = 0.55            # z scale of the clumps: ~7-9 cm, a mown lawn
     leaves: int = 40                      # fallen leaves on the patio
     sun: SunCfg = field(default_factory=SunCfg)
     sky_rotation_deg: float = 0.0
@@ -237,9 +238,14 @@ def grass_instances(cfg: SceneCfg) -> list[tuple[str, float, float]]:
     for proto, half, spacing, near in GRASS_TIERS:
         reach = half * math.sqrt(2) * GRASS_MAX_SCALE          # worst case over yaw
 
+        gx0, gx1, gy0, gy1 = cfg.grass_area
+
         def keep(x, y, reach=reach, near=near):
             d = min(rect_distance(x, y, r) for r in rects)
-            return d >= reach and (near is None or d <= near)
+            if d < reach or (near is not None and d > near):
+                return False
+            edge = min(x - gx0, gx1 - x, y - gy0, gy1 - y)          # feathered outer edge
+            return edge >= cfg.grass_feather or rng.random() < edge / cfg.grass_feather
 
         out += [(proto, float(x), float(y)) for x, y in poisson_disk(cfg.grass_area, spacing, rng, keep)]
     return out

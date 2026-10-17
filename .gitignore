@@ -77,3 +77,8 @@ heavy_machine_demo/
 assets/heavy_machines/*/usd/
 assets/heavy_machines/*/usd_fixed/
 scripts/heavy_machines/.installed_commit
+
+# drone flight test videos (render_flight.py output)
+/drone_front_camera.mp4
+/drone_back_camera.mp4
+/drone_flight_frames/

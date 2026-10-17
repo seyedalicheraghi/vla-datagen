@@ -1879,6 +1879,78 @@ def _render_jobs(stage, jobs: Sequence[tuple[str, str, str | None]], *, width: i
     return results
 
 
+def camera_from_matrix(world: np.ndarray, *, focal_length: float = 18.147, horizontal_aperture: float = 20.955,
+                       near: float = 0.01, far: float = 1.0e6, f_stop: float = 0.0, focus_distance: float = 0.0,
+                       name: str = "camera") -> _Camera:
+    """A camera from a USD-style world matrix (row-vector convention: rows 0-2 = camera x, y, z axes, row 3 =
+    position; the camera looks down its -Z), with the same lens conventions as a UsdGeom.Camera prim."""
+    m = np.asarray(world, np.float64).T
+    r = m[:3, :3] / np.maximum(np.linalg.norm(m[:3, :3], axis=0, keepdims=True), 1e-12)
+    cam_m = np.eye(4)
+    cam_m[:3, :3], cam_m[:3, 3] = r, m[:3, 3]
+    lens = 0.5 * (focal_length / f_stop) * 1e-3 if f_stop > 0 and focus_distance > 0 else 0.0
+    return _Camera(name, cam_m @ np.diag([-1.0, 1.0, -1.0, 1.0]),
+                   math.degrees(2.0 * math.atan(horizontal_aperture / (2.0 * focal_length))), near, far, lens,
+                   focus_distance)
+
+
+class Session:
+    """Build a stage's Mitsuba scene once, then render any number of camera poses against it (animations).
+
+    ``aovs=True`` also returns first-hit albedo and world shading normals (for a denoiser).  The stage's own
+    cameras are ignored; pass ``camera_from_matrix(...)`` per frame.
+    """
+
+    def __init__(self, stage, *, max_depth: int = 8, variant: str = "auto", log: Log | None = None,
+                 backface_culling: bool = False, flip_green_preview: bool | None = None,
+                 flip_green_mdl: bool | None = None, max_texture_px: int = 2048, time_code: float | None = None,
+                 aovs: bool = False):
+        t0 = time.time()
+        self.report = _Report(log)
+        if isinstance(stage, (str, os.PathLike)):
+            stage = Usd.Stage.Open(os.fspath(stage))
+        tc = Usd.TimeCode(time_code) if time_code is not None else (
+            Usd.TimeCode(stage.GetStartTimeCode()) if stage.HasAuthoredTimeCodeRange() else Usd.TimeCode.EarliestTime())
+        mats = _Materials(tc, self.report, flip_green_preview, flip_green_mdl)
+        col = _Collector(stage, tc, self.report, mats)
+        col.run()
+        groups = list(col.groups.values())
+        domes, distants, areas = _read_lights(stage, tc, UsdGeom.XformCache(tc), self.report)
+        n_shapes = sum(len(g.parts) + (len(g.mats) if len(g.mats) > 1 else 0) for g in groups)
+        self.variant = _set_variant(variant if variant != "auto" else (SCALAR if n_shapes > MAX_LLVM_SHAPES else LLVM),
+                                    self.report)
+        import mitsuba as mi
+        self.mi = mi
+        self.builder = _Builder(mi, _Images(max_texture_px, self.report), self.report, backface_culling)
+        shapes, self.counts = self.builder.shapes(groups)
+        path = {"type": "path", "max_depth": max_depth}
+        self.aovs = aovs
+        integrator = {"type": "aov", "aovs": "albedo:albedo,normal:sh_normal", "inner": path} if aovs else path
+        scene_dict: dict[str, Any] = {"type": "scene", "integrator": integrator}
+        scene_dict.update(shapes)
+        scene_dict.update(self.builder.lights(domes, distants, areas))
+        self.scene = mi.load_dict(scene_dict)
+        self.report.say(f"[mitsuba_preview] session scene built in {time.time() - t0:.1f} s ({self.variant}, "
+                        f"{self.counts['triangles']:,} triangles)")
+
+    def render(self, camera: _Camera, width: int, height: int, spp: int, *, seed: int = 0,
+               rfilter: str = "gaussian") -> dict[str, np.ndarray]:
+        """{'color': linear (H, W, 3)} plus 'albedo' and 'normal' with ``aovs``."""
+        sensor = self.mi.load_dict(self.builder.sensor(camera, width, height, spp, rfilter))
+        per_pass = 16 if self.variant == SCALAR else max(1, min(spp, (1 << 23) // (width * height)))
+        acc, done, k = None, 0, 0
+        while done < spp:
+            n = min(per_pass, spp - done)
+            img = np.array(self.mi.render(self.scene, sensor=sensor, spp=n, seed=seed * 1009 + k), np.float64)
+            acc = img * n if acc is None else acc + img * n
+            done, k = done + n, k + 1
+        img = (acc / spp).astype(np.float32)
+        out = {"color": img[..., :3]}
+        if self.aovs:
+            out["albedo"], out["normal"] = img[..., 3:6], img[..., 6:9]
+        return out
+
+
 def render(stage, camera: str, out_png: str, *, width: int = 960, height: int = 540, spp: int = 64,
            max_depth: int = 8, exposure_ev: float = 0.0, tonemap: str = "aces", save_exr: str | None = None,
            log: Log | None = None, variant: str = "auto", backface_culling: bool = False,
