@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -29,27 +30,33 @@ if __package__ in (None, ""):                     # run as a script
     __package__ = "drone_scene"
 
 from drone_scene import assets, hdr, nucleus  # noqa: E402
+from drone_scene.scene import SunCfg  # noqa: E402  (numpy only)
 
-PREPARE_VERSION = "1"
+PREPARE_VERSION = "2"
 DEFAULT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "drone_scene")
 GROUND = ("pavers", "lawn", "mulch", "curb")
 
 
-def _key(mirror: bool, preview_sky_factor: int) -> str:
-    blob = repr((PREPARE_VERSION, assets.SKY, assets.REFERENCE_SKY, assets.REFERENCE_INTENSITY, GROUND,
+def _key(mirror: bool, preview_sky_factor: int, sun_elevation_deg: float) -> str:
+    blob = repr((PREPARE_VERSION, assets.SKY, assets.REFERENCE_SKY, assets.REFERENCE_INTENSITY, GROUND, sun_elevation_deg,
                  sorted(assets.PROPS), assets.CRAZYFLIE, mirror, preview_sky_factor,
                  {k: (m.mdl, m.tile_m) for k, m in assets.MATERIALS.items()}))
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, log=print) -> dict:
-    """Sunless sky HDR (+ a smaller copy for the preview) and the calibrated dome/sun intensities."""
+def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, sun_elevation_deg: float = SunCfg.elevation_deg,
+                log=print) -> dict:
+    """Sunless sky HDR (+ a smaller copy for the preview) and the calibrated dome/sun intensities.
+
+    The sun light is placed at ``sun_elevation_deg`` (scene.SunCfg), not where the HDR has it, so the
+    calibration uses that elevation for the sun's share of the horizontal illuminance.
+    """
     out_dir = os.path.join(cache_dir, "sky")
     os.makedirs(out_dir, exist_ok=True)
     name = os.path.splitext(os.path.basename(assets.SKY))[0]
     full = os.path.join(out_dir, f"{name}_nosun.hdr")
     small = os.path.join(out_dir, f"{name}_nosun_x{preview_sky_factor}.hdr")
-    info_path = os.path.join(out_dir, f"{name}_nosun.json")
+    info_path = os.path.join(out_dir, f"{name}_nosun_sun{sun_elevation_deg:g}.json")
     if all(os.path.exists(p) for p in (full, small, info_path)):
         with open(info_path, encoding="utf-8") as f:
             info = json.load(f)
@@ -64,7 +71,8 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, log=print) -> dict:
         raise RuntimeError(f"no clear sun found in {assets.SKY}")
     sunless = hdr.remove_sun(sky, sun)
     reference = hdr.read_hdr(nucleus.fetch(assets.REFERENCE_SKY, cache_dir, log=log))
-    cal = hdr.calibrate(sunless, sun, reference, assets.REFERENCE_INTENSITY)
+    cal = hdr.calibrate(sunless, sun, reference, assets.REFERENCE_INTENSITY,
+                        sun_cos_zenith=math.sin(math.radians(sun_elevation_deg)))
     irr = np.asarray(sun.irradiance, float)
     color = irr / max(float(hdr.luminance(irr)), 1e-9)
     color = color / max(color.max(), 1e-9)                      # UsdLux colour: max channel 1
@@ -76,6 +84,8 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, log=print) -> dict:
         "dome_intensity": float(cal["dome_intensity"]),
         "sun_intensity": sun_intensity,
         "sun_color": [float(c) for c in color],
+        "sun_elevation_deg": float(sun_elevation_deg),
+        # where the HDR had its sun (hdr.py's azimuth convention, the mirror of USD's dome mapping)
         "hdr_sun": {"elevation_deg": float(sun.elevation_deg), "azimuth_deg": float(sun.azimuth_deg),
                     "solid_angle_sr": float(sun.solid_angle), "irradiance": [float(c) for c in irr]},
         "reference": {"sky": assets.REFERENCE_SKY, "intensity": assets.REFERENCE_INTENSITY},
@@ -91,10 +101,10 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, log=print) -> dict:
 
 
 def prepare(cache_dir: str = DEFAULT_CACHE, *, mirror: bool = False, preview_sky_factor: int = 4,
-            log=print) -> dict:
+            sun_elevation_deg: float = SunCfg.elevation_deg, log=print) -> dict:
     """Return the manifest: {'textures', 'sky', 'props', 'crazyflie'} (paths local, or URLs for props)."""
     os.makedirs(cache_dir, exist_ok=True)
-    key = _key(mirror, preview_sky_factor)
+    key = _key(mirror, preview_sky_factor, sun_elevation_deg)
     manifest_path = os.path.join(cache_dir, f"manifest_{'mirror' if mirror else 'isaac'}.json")
     if os.path.exists(manifest_path):
         with open(manifest_path, encoding="utf-8") as f:
@@ -111,7 +121,7 @@ def prepare(cache_dir: str = DEFAULT_CACHE, *, mirror: bool = False, preview_sky
     for name in GROUND:
         log(f"[prepare] material {name}: {assets.MATERIALS[name].mdl}")
         textures[name] = assets.material_textures(name, cache_dir, log=log)
-    sky = prepare_sky(cache_dir, preview_sky_factor, log=log)
+    sky = prepare_sky(cache_dir, preview_sky_factor, sun_elevation_deg, log=log)
     if mirror:
         props = {}
         for name, prop in assets.PROPS.items():

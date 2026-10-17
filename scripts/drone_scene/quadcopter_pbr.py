@@ -69,7 +69,8 @@ def fail(code: int) -> None:
 
 
 try:
-    MANIFEST = prep.prepare(os.path.expanduser(args_cli.cache), mirror=False, log=say)
+    MANIFEST = prep.prepare(os.path.expanduser(args_cli.cache), mirror=False,
+                            sun_elevation_deg=scene.SceneCfg().sun.elevation_deg, log=say)
 except BaseException:  # noqa: BLE001
     say("[drone] could not download/prepare the scene assets")
     fail(3)

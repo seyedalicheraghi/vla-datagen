@@ -67,8 +67,11 @@ class SceneCfg:
     seed: int = 7
     cameras: list[CameraCfg] = field(default_factory=lambda: [
         CameraCfg("demo", eye=(0.5, 0.5, 1.0), target=(0.0, 0.0, 0.5)),                   # quadcopter.py view
-        CameraCfg("hero", eye=(1.15, -0.42, 0.58), target=(-0.05, 0.04, 0.48), focal_length=32.0,
-                  f_stop=2.8),
+        # 70 mm from ~1 m, a little below the drone, sun behind the camera's right shoulder: the drone is
+        # front-lit against the sunlit garden and the trees on the horizon, sharp at f/8, the rest soft
+        CameraCfg("hero", eye=(0.16, 1.02, 0.43), target=(0.0, 0.0, 0.505), focal_length=70.0, f_stop=8.0),
+        # the same lens looking past the drone into the shade of the maple (moodier)
+        CameraCfg("garden", eye=(1.02, -0.16, 0.43), target=(0.0, 0.0, 0.505), focal_length=70.0, f_stop=8.0),
         CameraCfg("top", eye=(0.01, 0.0, 9.0), target=(-0.8, 0.0, 0.0), focal_length=14.0),
     ])
 
@@ -93,10 +96,13 @@ PLANTING = [
 # only within this distance of a hard edge (m) or None).  The small clumps fill the strip along the
 # curb that a big clump could not reach without poking through the pavers.
 GRASS_TIERS = [
-    ("grass_a", 0.65, 0.95, None),
-    ("grass_b", 0.34, 0.40, 1.1),
-    ("grass_c", 0.15, 0.16, 0.40),
+    ("grass_a", 0.65, 0.62, None),        # overlapping clumps: a lawn, not tufts on a carpet
+    ("grass_b", 0.34, 0.34, 1.15),        # reaches the big clumps (which start ~1.06 m out)
+    ("grass_c", 0.15, 0.15, 0.62),        # reaches the medium clumps (which start ~0.55 m out)
 ]
+# The clump texture mixes green and straw-coloured blades; this diffuse_tint (an OmniPBR input both RTX
+# and the preview honour) turns it into a watered lawn
+GRASS_TINT = (0.62, 0.90, 0.50)
 
 # The Crazyflie's meshes and what they are on a real Crazyflie 2.1
 DRONE_PARTS = {
@@ -113,7 +119,7 @@ DRONE_PARTS = {
 # UsdPreviewSurface constants: (base colour linear RGB, roughness, metallic, clearcoat)
 DRONE_MATERIALS = {
     "pcb": ((0.018, 0.020, 0.022), 0.32, 0.0, 0.6),
-    "mount": ((0.78, 0.78, 0.76), 0.45, 0.0, 0.0),
+    "mount": ((0.62, 0.62, 0.60), 0.38, 0.0, 0.0),        # off-white injection-moulded plastic
     "motor": ((0.62, 0.62, 0.63), 0.28, 1.0, 0.0),
     "battery": ((0.80, 0.80, 0.82), 0.30, 0.85, 0.0),
     "plastic_dark": ((0.035, 0.035, 0.035), 0.5, 0.0, 0.0),
@@ -439,10 +445,23 @@ def author_grass(stage, root: str, cfg: SceneCfg, prop_paths: dict[str, str]) ->
     n = len(clumps)
     yaws = rng.uniform(0, 2 * math.pi, n)
     scales = rng.uniform(2 - GRASS_MAX_SCALE, GRASS_MAX_SCALE, n)
-    _instancer(stage, f"{root}/Lawn/Grass", protos, prop_paths,
-               [protos.index(p) for p, _, _ in clumps], [(x, y, cfg.lawn_z) for _, x, y in clumps],
-               [(math.cos(a / 2), 0.0, 0.0, math.sin(a / 2)) for a in yaws],
-               [(s, s, s * cfg.grass_height) for s in scales])
+    inst = _instancer(stage, f"{root}/Lawn/Grass", protos, prop_paths,
+                      [protos.index(p) for p, _, _ in clumps], [(x, y, cfg.lawn_z) for _, x, y in clumps],
+                      [(math.cos(a / 2), 0.0, 0.0, math.sin(a / 2)) for a in yaws],
+                      [(s, s, s * cfg.grass_height) for s in scales])
+    tint_materials(stage, str(inst.GetPath()) + "/Prototypes", GRASS_TINT)
+    return n
+
+
+def tint_materials(stage, root: str, tint) -> int:
+    """Override ``diffuse_tint`` on every MDL shader under ``root`` (inside referenced assets too)."""
+    from pxr import Gf, Sdf, Usd, UsdShade
+
+    n = 0
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(root)):
+        if prim.IsA(UsdShade.Shader) and UsdShade.Shader(prim).GetImplementationSource() == "sourceAsset":
+            UsdShade.Shader(prim).CreateInput("diffuse_tint", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*tint))
+            n += 1
     return n
 
 

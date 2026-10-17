@@ -45,8 +45,10 @@ BASE = "NVIDIA/Materials/Base"
 MATERIALS: dict[str, BaseMaterial] = {
     # herringbone clay pavers: ~8 paver lengths per repeat, 200 mm pavers
     "pavers": BaseMaterial(f"{BASE}/Masonry/Brick_Pavers.mdl", tile_m=1.6),
-    "lawn": BaseMaterial(f"{BASE}/Natural/Grass_Cut.mdl", tile_m=1.5),
-    "mulch": BaseMaterial(f"{BASE}/Natural/Mulch_Brown.mdl", tile_m=1.2),
+    # Grass_Cut's albedo is ~0.06 (too dark for a sunlit lawn, ~0.1); fresh hardwood mulch is darker and
+    # warmer than Mulch_Brown's photo
+    "lawn": BaseMaterial(f"{BASE}/Natural/Grass_Cut.mdl", tile_m=1.5, tint=(1.45, 1.45, 1.25)),
+    "mulch": BaseMaterial(f"{BASE}/Natural/Mulch_Brown.mdl", tile_m=1.2, tint=(0.62, 0.52, 0.42)),
     "curb": BaseMaterial(f"{BASE}/Masonry/Concrete_Rough.mdl", tile_m=1.0),
     "soil": BaseMaterial(f"{BASE}/Natural/Soil_Rocky.mdl", tile_m=1.5),
 }

@@ -65,16 +65,17 @@ def main() -> None:
 
     os.makedirs(a.out, exist_ok=True)
     cfg = scene.SceneCfg()
-    man = prep.prepare(os.path.expanduser(a.cache), mirror=True, log=log)
+    man = prep.prepare(os.path.expanduser(a.cache), mirror=True, sun_elevation_deg=cfg.sun.elevation_deg, log=log)
     stage, summary = build_preview_stage(os.path.join(a.out, "drone_scene.usda"), cfg, man)
     log(f"[preview] stage: {summary}")
     ev = exposure_ev(man) + a.ev
-    for name in a.cameras:
-        t0 = time.time()
-        out = os.path.join(a.out, f"{name}.png")
-        stats = mitsuba_preview.render(stage, f"/World/Cameras/{name}", out, width=a.width, height=a.height,
-                                       spp=a.spp, exposure_ev=ev, log=log)
-        log(f"[preview] {name}: {out} ({time.time() - t0:.0f} s) {stats}")
+    t0 = time.time()
+    outs = {f"/World/Cameras/{name}": os.path.join(a.out, f"{name}.png") for name in a.cameras}
+    stats = mitsuba_preview.render_many(stage, outs, width=a.width, height=a.height, spp=a.spp, exposure_ev=ev,
+                                        log=log)
+    for (cam, out), st in zip(outs.items(), stats):
+        log(f"[preview] {cam}: {out} {st}")
+    log(f"[preview] {len(outs)} camera(s) in {time.time() - t0:.0f} s")
 
 
 if __name__ == "__main__":
