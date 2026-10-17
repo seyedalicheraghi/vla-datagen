@@ -1,0 +1,2 @@
+# plain git files (not Git LFS), so a browser link downloads the video directly
+*.mp4 -filter -diff -merge binary
