@@ -3,14 +3,17 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/seyedalicheraghi/vla-datagen/<commit>/scripts/heavy_machines/setup_linux.sh -o /tmp/hm_setup.sh && bash /tmp/hm_setup.sh
 #
-# Downloads scripts/heavy_machines and assets/heavy_machines from the branch into ~/heavy_machines
-# (your Isaac Lab clone is not touched), finds the Python that has Isaac Sim + Isaac Lab, and renders.
-# Afterwards just run ~/heavy_machines/render.sh (it updates itself the same way, then renders).
-# Extra arguments go to render_scenario.py, e.g.  ~/heavy_machines/render.sh --renderer rtx --cameras front
+# Downloads scripts/heavy_machines, scripts/drone_scene and assets/heavy_machines from the branch into
+# ~/heavy_machines (your Isaac Lab clone is not touched), finds the Python that has Isaac Sim + Isaac Lab,
+# and renders.  Afterwards:
+#   ~/heavy_machines/render.sh   the truck/excavator video (args go to render_scenario.py)
+#   ~/heavy_machines/drone.sh    the Crazyflie demo in a PBR backyard (args go to quadcopter_pbr.py)
+# Both update themselves the same way first.
 #
 #   ISAACLAB=/path/to/IsaacLab   your Isaac Lab clone (default ~/Projects/IsaacLab; used to find its Python)
 #   HM_DEST=/path                 install folder (default ~/heavy_machines)
 #   --no-render                   update only
+#   --drone                       run the drone demo instead of the truck/excavator render
 
 set -uo pipefail
 ISAACLAB="${ISAACLAB:-$HOME/Projects/IsaacLab}"
@@ -20,9 +23,14 @@ say() { printf '\033[36m[setup] %s\033[0m\n' "$*"; }
 stop() { say "STOPPED: $*"; say "Nothing was deleted."; exit 1; }
 
 NO_RENDER=0
+DRONE=0
 ARGS=()
 for a in "$@"; do
-    if [ "$a" = "--no-render" ]; then NO_RENDER=1; else ARGS+=("$a"); fi
+    case "$a" in
+        --no-render) NO_RENDER=1 ;;
+        --drone) DRONE=1 ;;
+        *) ARGS+=("$a") ;;
+    esac
 done
 
 command -v python3 >/dev/null || stop "python3 not found"
@@ -52,12 +60,15 @@ n = 0
 with zipfile.ZipFile(io.BytesIO(data)) as z:
     for info in z.infolist():
         rel = info.filename.split("/", 1)[1] if "/" in info.filename else ""
-        if info.is_dir() or not rel.startswith(("scripts/heavy_machines/", "assets/heavy_machines/")):
+        if info.is_dir() or not rel.startswith(("scripts/heavy_machines/", "scripts/drone_scene/",
+                                                 "assets/heavy_machines/")):
             continue
         path = os.path.join(dest, *rel.split("/"))
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
+        # new file + rename: bash may be executing the old copy of this very script
+        with open(path + ".part", "wb") as f:
             f.write(z.read(info))
+        os.replace(path + ".part", path)
         n += 1
 if n < 50:
     sys.exit(f"[setup] the download looks incomplete ({n} files)")
@@ -69,6 +80,8 @@ PY
 chmod +x "$DEST/scripts/heavy_machines/setup_linux.sh" 2>/dev/null
 printf '#!/usr/bin/env bash\n# update (no git) and render; extra arguments go to render_scenario.py\nISAACLAB="${ISAACLAB:-%s}" HM_DEST="%s" exec bash "%s/scripts/heavy_machines/setup_linux.sh" "$@"\n' \
     "$ISAACLAB" "$DEST" "$DEST" > "$DEST/render.sh" && chmod +x "$DEST/render.sh"
+printf '#!/usr/bin/env bash\n# update (no git) and run the Crazyflie PBR demo; extra arguments go to quadcopter_pbr.py\nISAACLAB="${ISAACLAB:-%s}" HM_DEST="%s" exec bash "%s/scripts/heavy_machines/setup_linux.sh" --drone "$@"\n' \
+    "$ISAACLAB" "$DEST" "$DEST" > "$DEST/drone.sh" && chmod +x "$DEST/drone.sh"
 [ "$NO_RENDER" = 1 ] && exit 0
 
 # 2. the Python that has Isaac Sim and Isaac Lab (what ./isaaclab.sh -p would run, but checked)
@@ -103,8 +116,16 @@ if ! "$PY" -c "import shutil, sys, importlib.util as u; sys.exit(0 if shutil.whi
     fi
 fi
 
-# 3. render (outputs in $DEST/heavy_machine_videos/<scenario>/, log: render.log there)
 cd "$DEST" || stop "cannot enter $DEST"
+if [ "$DRONE" = 1 ]; then
+    say "Crazyflie PBR demo - the first start downloads ~300 MB of NVIDIA assets (cached afterwards)"
+    "$PY" "$DEST/scripts/drone_scene/quadcopter_pbr.py" ${ARGS[@]+"${ARGS[@]}"}
+    code=$?
+    [ "$code" = 0 ] || { say "FAILED (exit code $code). Send Claude this file:"; echo "    $DEST/drone_scene_videos/drone_scene.log"; }
+    exit "$code"
+fi
+
+# 3. render (outputs in $DEST/heavy_machine_videos/<scenario>/, log: render.log there)
 say "rendering - Isaac Sim may take a few minutes to start; progress is printed every second of video"
 "$PY" "$DEST/scripts/heavy_machines/scenarios/render_scenario.py" --headless ${ARGS[@]+"${ARGS[@]}"}
 code=$?
