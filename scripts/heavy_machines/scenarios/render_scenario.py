@@ -8,7 +8,7 @@ Output: <out>/<camera>/frame_NNNNN.png (with the camera look), <out>/<camera>_ra
 <out>/<scenario>_<camera>.mp4 (ffmpeg or imageio-ffmpeg if available, BT.709-tagged) and
 <out>/textures/ (baked maps, cached: a re-render with the same scenario and options skips the bake).
 <out>/render.log keeps every status line, the bake output and any error.  Exit code 0 only if every
-frame and video was written.  On Windows use ``render_windows.bat`` (one command, no venv activation).
+frame and video was written.
 
 Textures are baked by ``bake.py`` in a separate process *before* Isaac Sim starts (parallel, cached;
 worker processes inside Kit are not safe).  The scene is authored by ``usd_scene.build_scene`` (pure pxr — validated offline by
