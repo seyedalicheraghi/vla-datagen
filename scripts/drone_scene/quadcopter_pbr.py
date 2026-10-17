@@ -33,12 +33,13 @@ from drone_scene import prepare as prep  # noqa: E402  (no pxr, no Isaac)
 from drone_scene import scene  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Crazyflie hover demo in a PBR backyard.")
-parser.add_argument("--view", default="demo", help="viewport camera: demo | hero | top")
+CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras]
+parser.add_argument("--view", default="demo", choices=CAMERA_NAMES, help="viewport camera")
 parser.add_argument("--pathtracing", action="store_true", help="path-traced rendering (slower, best quality)")
 parser.add_argument("--spp", type=int, default=64, help="path-tracing samples per pixel per frame")
 parser.add_argument("--record", type=float, default=0.0, help="seconds of video to render (0 = interactive)")
-parser.add_argument("--cameras", nargs="*", default=["hero", "demo"], help="cameras to record")
-parser.add_argument("--fps", type=int, default=30)
+parser.add_argument("--cameras", nargs="+", default=["hero", "demo"], choices=CAMERA_NAMES, help="cameras to record")
+parser.add_argument("--fps", type=int, default=25, help="video frame rate (25 = exactly every 8th 200 Hz physics step)")
 parser.add_argument("--out", default="drone_scene_videos")
 parser.add_argument("--cache", default=prep.DEFAULT_CACHE)
 
@@ -89,11 +90,12 @@ try:
     from isaaclab.sensors import Camera, CameraCfg
 
     from isaaclab_assets import CRAZYFLIE_CFG  # isort:skip
+    from isaacsim.core.simulation_manager import SimulationManager
 except BaseException:  # noqa: BLE001
     fail(4)
 
 
-def write_video(frame_dir: str, fps: int, path: str) -> bool:
+def write_video(frame_dir: str, fps: float, path: str) -> bool:
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         try:
@@ -102,7 +104,7 @@ def write_video(frame_dir: str, fps: int, path: str) -> bool:
         except Exception:  # noqa: BLE001
             say(f"[drone] no ffmpeg: frames are in {frame_dir}")
             return False
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-framerate", str(fps), "-i", os.path.join(frame_dir, "frame_%05d.png"),
+    cmd = [ffmpeg, "-y", "-loglevel", "error", "-framerate", f"{fps:g}", "-i", os.path.join(frame_dir, "frame_%05d.png"),
            "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p", "-colorspace", "bt709",
            "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-crf", "16", path]
     res = subprocess.run(cmd, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -139,6 +141,13 @@ def main() -> None:
 
     view = cfg.camera(args_cli.view)
     sim.set_camera_view(eye=list(view.eye), target=list(view.target))
+    if not args_cli.headless:
+        # look through the authored camera itself so the view also gets its lens and depth of field
+        try:
+            from omni.kit.viewport.utility import get_active_viewport
+            get_active_viewport().camera_path = f"/World/Cameras/{args_cli.view}"
+        except Exception as exc:  # noqa: BLE001
+            say(f"[drone] viewport keeps Isaac's default lens ({exc})")
 
     cams: dict[str, Camera] = {}
     if args_cli.record > 0:
@@ -166,6 +175,7 @@ def main() -> None:
 
     record_steps = int(round(args_cli.record / sim_dt))
     every = max(1, int(round(1.0 / (args_cli.fps * sim_dt))))
+    video_fps = 1.0 / (every * sim_dt)               # exact, so the video plays in real time
     dirs = {}
     for name in cams:
         dirs[name] = os.path.join(OUT, name)
@@ -176,8 +186,12 @@ def main() -> None:
             except OSError:
                 pass
     if cams:
-        say("[drone] warming up the renderer ...")
+        say("[drone] warming up the renderer and waiting for textures/assets to stream in ...")
         for _ in range(30):
+            sim.render()
+        for _ in range(3000):
+            if not SimulationManager.assets_loading():
+                break
             sim.render()
 
     count, frame = 0, 0
@@ -201,14 +215,14 @@ def main() -> None:
                 rgb = cam.data.output["rgb"][0, ..., :3].detach().cpu().numpy().astype(np.uint8)
                 Image.fromarray(rgb).save(os.path.join(dirs[name], f"frame_{frame:05d}.png"))
             frame += 1
-            if frame % args_cli.fps == 0:
-                say(f"[drone] recorded {frame / args_cli.fps:.0f} s")
+            if frame % round(video_fps) == 0:
+                say(f"[drone] recorded {frame / video_fps:.0f} s")
         count += 1
         if cams and count >= record_steps:
             break
 
     if cams:
-        ok = [write_video(dirs[n], args_cli.fps, os.path.join(OUT, f"drone_{n}.mp4")) for n in cams]
+        ok = [write_video(dirs[n], video_fps, os.path.join(OUT, f"drone_{n}.mp4")) for n in cams]
         say("[drone] done" if all(ok) else "[drone] finished, but some videos were not written")
         _log.close()
         os._exit(0 if all(ok) else 1)

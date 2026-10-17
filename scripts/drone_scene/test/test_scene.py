@@ -23,7 +23,9 @@ except ImportError:  # pragma: no cover
 
 from drone_scene import assets, scene  # noqa: E402
 
-CF2X = "/tmp/claude-0/-home-user-vla-datagen/39bfe37a-c345-5663-b8fb-e785cd7a1b70/scratchpad/drone_assets/cf2x/cf2x.usd"
+CACHE = os.environ.get("DRONE_SCENE_CACHE", os.path.join(os.path.expanduser("~"), ".cache", "drone_scene"))
+CF2X = os.path.join(CACHE, "Isaac", "Robots", "Bitcraze", "Crazyflie", "cf2x.usd")      # mirrored by prepare.py
+PAVERS_MDL = os.path.join(CACHE, "NVIDIA", "Materials", "Base", "Masonry", "Brick_Pavers.mdl")
 
 
 def fake_manifest(tmp: str) -> dict:
@@ -35,6 +37,8 @@ def fake_manifest(tmp: str) -> dict:
         UsdGeom.SetStageMetersPerUnit(st, 0.01)
         UsdGeom.SetStageUpAxis(st, UsdGeom.Tokens.z)
         root = UsdGeom.Xform.Define(st, "/Root")
+        root.AddTranslateOp().Set(Gf.Vec3d(0, 0, 0))          # like NVIDIA's assets: own ops on the root
+        root.AddRotateXYZOp().Set(Gf.Vec3f(0, 0, 0))
         UsdGeom.Cube.Define(st, "/Root/Box").CreateSizeAttr(100.0)
         st.SetDefaultPrim(root.GetPrim())
         st.GetRootLayer().Save()
@@ -169,7 +173,7 @@ class TestDroneScene(unittest.TestCase):
             r = Gf.Rotation(Gf.Quatd(w, x, y, z))
             np.testing.assert_allclose(np.array(r.TransformDir(Gf.Vec3d(0, 0, 1))), d, atol=1e-9)
 
-    @unittest.skipUnless(os.path.exists(CF2X), "Crazyflie USD not downloaded")
+    @unittest.skipUnless(os.path.exists(CF2X), "Crazyflie USD not mirrored yet (run prepare.py --mirror)")
     def test_drone_materials_bind_every_mesh(self):
         st = Usd.Stage.CreateInMemory()
         UsdGeom.Xform.Define(st, "/World")
@@ -183,8 +187,7 @@ class TestDroneScene(unittest.TestCase):
             self.assertTrue(UsdShade.MaterialBindingAPI(p).ComputeBoundMaterial()[0], p.GetPath())
 
     def test_mdl_texture_parsing(self):
-        text = open(os.path.join(os.path.dirname(CF2X), "..", "mdl", "Brick_Pavers.mdl")).read() \
-            if os.path.exists(os.path.join(os.path.dirname(CF2X), "..", "mdl", "Brick_Pavers.mdl")) else \
+        text = open(PAVERS_MDL).read() if os.path.exists(PAVERS_MDL) else \
             'diffuse_texture: texture_2d("./Brick_Pavers/Brick_Pavers_BaseColor.png", ::tex::gamma_srgb),\n' \
             'ORM_texture: texture_2d("./Brick_Pavers/Brick_Pavers_ORM.png", ::tex::gamma_linear),\n' \
             'normalmap_texture: texture_2d("./Brick_Pavers/Brick_Pavers_N.png", ::tex::gamma_linear),\n' \

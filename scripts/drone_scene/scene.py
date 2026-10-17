@@ -73,7 +73,10 @@ class SceneCfg:
     ])
 
     def camera(self, name: str) -> CameraCfg:
-        return next(c for c in self.cameras if c.name == name)
+        for c in self.cameras:
+            if c.name == name:
+                return c
+        raise KeyError(f"no camera {name!r}; available: {[c.name for c in self.cameras]}")
 
 
 # props placed by hand: (prop, x, y, yaw_deg, scale)
@@ -394,13 +397,18 @@ def author_ground(stage, root: str, cfg: SceneCfg, mats: dict) -> None:
 
 
 def _reference(stage, path: str, asset_path: str, units: float, xyz, yaw_deg: float, scale: float):
+    """Place an asset: our transform on a wrapper Xform, the reference on its child ``asset``.
+
+    NVIDIA's assets carry their own xformOps on their root prim, so the reference must not share a prim
+    with our placement ops.
+    """
     from pxr import Gf, UsdGeom
 
     x = UsdGeom.Xform.Define(stage, path)
-    x.GetPrim().GetReferences().AddReference(asset_path)
     x.AddTranslateOp().Set(Gf.Vec3d(*xyz))
     x.AddRotateZOp().Set(float(yaw_deg))
     x.AddScaleOp().Set(Gf.Vec3f(units * scale, units * scale, units * scale))
+    UsdGeom.Xform.Define(stage, f"{path}/asset").GetPrim().GetReferences().AddReference(asset_path)
     return x
 
 

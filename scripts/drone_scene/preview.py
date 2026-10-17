@@ -34,7 +34,9 @@ def build_preview_stage(path: str, cfg: scene.SceneCfg, manifest: dict):
     summary = scene.build(stage, cfg, man)
     drone = UsdGeom.Xform.Define(stage, "/World/Crazyflie")
     drone.GetPrim().GetReferences().AddReference(manifest["crazyflie"])
-    drone.AddTranslateOp().Set(Gf.Vec3d(*cfg.drone_pos))
+    # the asset brings its own translate op (Isaac Lab's spawner sets it the same way)
+    ops = {op.GetOpName(): op for op in drone.GetOrderedXformOps()}
+    (ops.get("xformOp:translate") or drone.AddTranslateOp()).Set(Gf.Vec3d(*cfg.drone_pos))
     summary["drone_meshes_bound"] = scene.apply_drone_materials(stage, "/World/Crazyflie")
     stage.SetDefaultPrim(stage.GetPrimAtPath("/World"))
     stage.GetRootLayer().Save()
