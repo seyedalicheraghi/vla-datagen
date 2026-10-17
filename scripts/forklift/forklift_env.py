@@ -26,7 +26,7 @@ from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sensors import Camera, CameraCfg, TiledCamera, TiledCameraCfg
-from isaaclab.sim import SimulationCfg
+from isaaclab.sim import RenderCfg, SimulationCfg
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils import configclass
 
@@ -235,7 +235,11 @@ def _build_compound_pallet(stage, root_path: str, color=_PALLET_COLOR) -> None:
 class ForkliftEnvCfg(DirectRLEnvCfg):
     """Settings for the warehouse forklift environment."""
 
-    sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=4)
+    # FXAA instead of the default DLSS: DLSS renders small cameras at a
+    # fraction of their size and upscales, and with several 224–448 px
+    # cameras it intermittently produced solid white frames.
+    sim: SimulationCfg = SimulationCfg(dt=1 / 120, render_interval=4,
+                                       render=RenderCfg(antialiasing_mode="FXAA"))
     decimation: int = 4
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=1, env_spacing=70.0)
     episode_length_s: float = 120.0
@@ -281,6 +285,14 @@ class ForkliftEnvCfg(DirectRLEnvCfg):
     n_distractors_min: int = 0
     n_distractors_max: int = 0
     distractor_region: tuple = (0.0, -8.0, 15.0, 8.0)
+    # Extra env-local (x, y) points distractors must keep clear of, set per
+    # episode (e.g. the forklift's driving corridor to the cargo).
+    distractor_keepout_xys: tuple = ()
+
+    # Third-person "chase" camera for demo videos only — it is never written
+    # to datasets and is off by default (no extra rendering cost).
+    enable_chase_cam: bool = False
+    chase_cam_resolution: tuple = (1280, 720)
 
 
 # ---------------------------------------------------------------------------
@@ -477,6 +489,7 @@ class ForkliftEnv(DirectRLEnv):
         self.cam_front = None
         self.cam_top_left = None
         self.cam_top_right = None
+        self.cam_chase = None
 
         if self.cfg.enable_sensors:
             _cam_w, _cam_h = self.cfg.camera_resolution
@@ -503,6 +516,26 @@ class ForkliftEnv(DirectRLEnv):
             self.cam_top_right = Camera(CameraCfg(
                 prim_path="/World/envs/env_.*/CamTopRight", **_cam_cfg))
 
+            if self.cfg.enable_chase_cam:
+                _chase_w, _chase_h = self.cfg.chase_cam_resolution
+                self.cam_chase = Camera(CameraCfg(
+                    prim_path="/World/envs/env_.*/CamChase",
+                    update_period=0.0,          # every control step → smooth video
+                    height=_chase_h,
+                    width=_chase_w,
+                    data_types=["rgb"],
+                    spawn=sim_utils.PinholeCameraCfg(
+                        focal_length=18.0,      # ~60° horizontal field of view
+                        horizontal_aperture=20.955,
+                        clipping_range=(0.1, 120.0),
+                    ),
+                    offset=CameraCfg.OffsetCfg(
+                        pos=(0.0, 0.0, 0.0),
+                        rot=(1.0, 0.0, 0.0, 0.0),
+                        convention="world",
+                    ),
+                ))
+
         # ── Register with scene ───────────────────────────────────────
         self.scene.clone_environments(copy_from_source=False)
         self.scene.articulations["forklift"] = self.forklift
@@ -518,6 +551,8 @@ class ForkliftEnv(DirectRLEnv):
             self.scene.sensors["cam_front"]     = self.cam_front
             self.scene.sensors["cam_top_left"]  = self.cam_top_left
             self.scene.sensors["cam_top_right"] = self.cam_top_right
+        if self.cam_chase is not None:
+            self.scene.sensors["cam_chase"]     = self.cam_chase
 
         # Observability state
         self._step_count = 0           # global step counter (not reset per episode)
@@ -590,6 +625,10 @@ class ForkliftEnv(DirectRLEnv):
                 arr = img[0]
                 if arr.max().item() == 0:
                     self._cam_status[label] = "BLACK"
+                elif arr[..., :3].float().std().item() < 2.0:
+                    # Solid white/grey frames are a renderer failure too
+                    # (seen with DLSS on small cameras) — not a real view.
+                    self._cam_status[label] = "FLAT"
                 else:
                     self._cam_status[label] = "OK"
             cam_strs.append(f"{label}={self._cam_status[label]}")
@@ -908,8 +947,11 @@ class ForkliftEnv(DirectRLEnv):
         dj_pos[:, self._fork_idx] = _FORK_LIFT_J
         self.forklift.write_joint_state_to_sim(dj_pos, dj_vel, env_ids=env_ids)
 
-        # Clear grab state and reset authoritative position/heading/fork
-        self._fork_pos[env_ids] = 0.0
+        # Clear grab state and reset authoritative position/heading/fork.
+        # _fork_pos drives the lift joint every substep, so it must match the
+        # joint value written above — otherwise the tines jump from the pocket
+        # (j = -0.15) to j = 0 (above the deck) on the first step.
+        self._fork_pos[env_ids] = _FORK_LIFT_J
         self._carry_pos[env_ids, 0] = default_root[:, 0]
         self._carry_pos[env_ids, 1] = default_root[:, 1]
         # Extract heading from reset quaternion (default is identity → heading=0)
@@ -979,6 +1021,7 @@ class ForkliftEnv(DirectRLEnv):
             blocked = [fl_xy]
             for cx, cy, _ in (self.cfg.cargo_override or []):
                 blocked.append((cx, cy))
+            blocked.extend(self.cfg.distractor_keepout_xys)
             poses = self._distractor_rng.sample(n_eff, blocked)
         else:
             poses = []
@@ -1396,6 +1439,24 @@ class ForkliftEnv(DirectRLEnv):
             convention="world",
         )
 
+        # ── Chase camera (demo videos only) ──────────────────────────
+        # Behind and left of the truck, looking past it at what lies ahead.
+        if self.cam_chase is not None:
+            CHASE_BACK    = 7.0
+            CHASE_LEFT    = 2.5
+            CHASE_UP      = 4.5
+            CHASE_PITCH   = -0.42   # ~24° down
+            CHASE_YAW_OFF = -0.22   # ~13° toward the truck's centreline
+
+            ch_x = fl_pos[:, 0] - CHASE_BACK * cos_h - CHASE_LEFT * sin_h
+            ch_y = fl_pos[:, 1] - CHASE_BACK * sin_h + CHASE_LEFT * cos_h
+            ch_z = fl_pos[:, 2] + CHASE_UP
+            self.cam_chase.set_world_poses(
+                torch.stack([ch_x, ch_y, ch_z], dim=1),
+                _yaw_pitch_quat(heading + CHASE_YAW_OFF, CHASE_PITCH),
+                convention="world",
+            )
+
     # ------------------------------------------------------------------
     # Observations, rewards, termination
     # ------------------------------------------------------------------
@@ -1414,6 +1475,8 @@ class ForkliftEnv(DirectRLEnv):
             obs["rgb_front"] = self.cam_front.data.output["rgb"]
             obs["rgb_left"]  = self.cam_top_left.data.output["rgb"]
             obs["rgb_right"] = self.cam_top_right.data.output["rgb"]
+        if self.cam_chase is not None:
+            obs["rgb_chase"] = self.cam_chase.data.output["rgb"]
 
         # Per-step status line
         self._print_step_status(obs)

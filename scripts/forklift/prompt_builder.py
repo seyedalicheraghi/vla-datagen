@@ -105,3 +105,17 @@ DEFAULT_TEMPLATE = (
     "lift the cargo at coordinate ({cx:.2f}, {cy:.2f}, {cz:.2f}) "
     "from forklift at ({fx:.2f}, {fy:.2f}, yaw {fyaw_deg:.0f} deg)"
 )
+
+# Scripted collection (scripted_collect.py) and closed-loop testing
+# (eval_closed_loop.py) must use the same wording, or a language-conditioned
+# policy is tested on prompts it never saw.
+DRIVE_LIFT_TEMPLATE = (
+    "drive to the cargo at coordinate ({cx:.2f}, {cy:.2f}, {cz:.2f}) "
+    "from forklift at ({fx:.2f}, {fy:.2f}, yaw {fyaw_deg:.0f} deg), "
+    "lift it to maximum fork height, then lower it"
+)
+LIFT_LOWER_TEMPLATE = (
+    "lift the cargo at coordinate ({cx:.2f}, {cy:.2f}, {cz:.2f}) "
+    "from forklift at ({fx:.2f}, {fy:.2f}, yaw {fyaw_deg:.0f} deg) "
+    "to maximum fork height, then lower it"
+)
