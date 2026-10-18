@@ -86,12 +86,76 @@ housing 16 mm clear of the body (room for the M12 GigE connector). They are draw
 lens, connectors and an aluminium bracket. The third-person views (`hero`, `garden`, `demo`) stand back 3×
 for the larger drone.
 
+## Long flight over a real map (`--route straight`)
+
+The drone takes off from a real backyard and flies 2 km straight (`--distance`) to land on open grass. The
+take-off is from the hand-built backyard patio, placed in a real yard. Both cameras record the whole flight:
+
+```bash
+# about 4.5 minutes of flight: take-off, climb to ~40 m, 2 km at 10 m/s, descent, landing on grass
+./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --record -1 --cameras front back chase
+
+# quick look: first 60 s, half-resolution cameras
+./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --record 60 --cameras front back --resolution_scale 0.5
+
+# GUI, following the drone
+./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --view chase
+```
+
+The map is a real place, built from open geodata by `world/` on your PC before Isaac Sim starts:
+
+| What | Source | Licence |
+|---|---|---|
+| terrain (bare earth) | USGS 3DEP lidar 1 m (US), else 3DEP 10 m / Copernicus DEM 30 m | public domain / Copernicus |
+| buildings, roads, water, land use, single trees | Overture Maps (OpenStreetMap, Microsoft and Esri footprints) | ODbL 1.0, CC BY 4.0 |
+| ground type | ESA WorldCover 2021, 10 m | CC BY 4.0 |
+| individual trees (position, height) | Meta / WRI 1 m canopy height map | CC BY 4.0 |
+| ground colour seen from far away, texture calibration | Sentinel-2 L2A (clearest summer scene) | Copernicus, free |
+| trees, grass, ground textures | NVIDIA Omniverse assets | NVIDIA |
+
+What gets built:
+
+- **Terrain.** The detail zone (the route ±600 m and 400 m beyond each end) has 1-16 m cells, finest along
+  the route. Out to ~6.5 km, coarser terrain is raised by the real canopy, so tree lines stand on the
+  horizon, and coloured with the satellite image.
+- **Ground.** NVIDIA photo-scanned materials per land class: lawn, meadow, forest floor, soil, concrete,
+  sand. Crop fields get rows on a 0.76 m spacing along the survey grid. Satellite reflectance calibrates
+  each patch's colour, so fields and lawns have their real colour from the air.
+- **Buildings.** Every Overture footprint becomes walls with windows, plus gable or hip roofs on houses
+  (cross-gables on L-shaped ones) and flat roofs on large buildings. Heights come from the data, or from
+  the building type and size.
+- **Roads.** Ribbons at the class width with lane markings: asphalt, concrete or gravel.
+- **Trees.** One NVIDIA tree per detected crown, scaled to its measured height. The species mix is
+  mostly oaks, maples, ash and honey locust, with some spruce.
+- **Landing site.** 3D meadow grass around the landing spot.
+
+What the run does:
+
+- **Map.** The first run installs the map tools into `~/.cache/drone_scene/world_libs`, once and outside
+  Isaac Sim's packages (about 250 MB). It downloads about 150 MB of map data and builds the map in a few
+  minutes on the CPU. The map is cached under `~/.cache/drone_scene/worlds/`; later runs start at once.
+- **Sun and sky.** The sun is placed for the real date and time (`--when`, default 15 Jul 2025, 10:30
+  local). The sky is a pure-sky HDR whose glow is turned to the sun's direction.
+- **Cruise height.** It is `--cruise_agl` (40 m) above the take-off, raised if needed to stay 15 m above
+  every tree and building near the line.
+- **Flight attitude.** At 10 m/s the drone leans about 12° into the air stream, like a real quadrotor. The
+  LUCID cameras are tilted 20° down (`--camera_pitch`), so the front one looks about 32° down in cruise.
+- **Video output.** Frames go straight into ffmpeg, so a 4-minute 3 MP flight doesn't need tens of GB of
+  PNGs (`--save_frames` keeps them anyway).
+
+Choosing the place: `--region LAT,LON` searches for a route around that point (default: west Ames, Iowa). The
+search looks for a backyard behind a house, then open grass `--distance` metres away at least 35 m from
+buildings, trees and roads. It prefers the route that crosses the most varied ground. To fly a specific path,
+give `--takeoff LAT,LON --landing LAT,LON`. Outside the US the terrain falls back to Copernicus 30 m, a
+surface model that includes trees and buildings.
+
 ## Tests (no Isaac Sim needed)
 
 ```bash
 python scripts/drone_scene/test/test_lucid.py      # optics, distortion, sensor noise, demosaicing, exposure
 python scripts/drone_scene/test/test_vehicles.py   # mounts, LMF2 materials, framing
-python scripts/drone_scene/test/test_flight.py     # the flight path and camera poses
+python scripts/drone_scene/test/test_flight.py     # the garden flight, the straight flight and camera poses
+python scripts/drone_scene/test/test_world.py      # map builder: terrain, land cover, buildings, roads, trees, site choice
 ```
 
 What these tests cannot check, because they cannot run Isaac Sim: whether Isaac Sim 5.1 returns `HdrColor`

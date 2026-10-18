@@ -53,14 +53,28 @@ from drone_scene import vehicles  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Quadcopter demo with two LUCID cameras in a PBR backyard.")
 ONBOARD = sorted(flight.CAMERAS)                    # cameras mounted on the drone (with --fly)
-CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras] + ONBOARD
+CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras] + ONBOARD + ["chase"]
 parser.add_argument("--view", default="demo", choices=CAMERA_NAMES, help="viewport camera")
 parser.add_argument("--pathtracing", action="store_true", help="path-traced rendering (slower, best quality)")
 parser.add_argument("--spp", type=int, default=64, help="path-tracing samples per pixel per frame")
-parser.add_argument("--record", type=float, default=0.0, help="seconds of video to render (0 = interactive)")
+parser.add_argument("--record", type=float, default=0.0,
+                    help="seconds of video to render (0 = interactive, -1 = the whole flight)")
 parser.add_argument("--cameras", nargs="+", default=["hero", "demo"], choices=CAMERA_NAMES, help="cameras to record")
 parser.add_argument("--fps", type=int, default=25, help="video frame rate (25 = exactly every 8th 200 Hz physics step)")
 parser.add_argument("--fly", action="store_true", help="fly the 20 s garden tour (flight.py) instead of hovering")
+parser.add_argument("--route", default="garden", choices=["garden", "straight"],
+                    help="garden: the 20 s backyard tour; straight: take off from a real backyard, fly --distance m "
+                         "straight over a real map built from open geodata (world/), land on grass")
+parser.add_argument("--region", default=None, help="lat,lon to look for a straight route around (default: Ames, Iowa)")
+parser.add_argument("--takeoff", default=None, help="lat,lon of the take-off spot (straight route)")
+parser.add_argument("--landing", default=None, help="lat,lon of the landing spot (straight route)")
+parser.add_argument("--distance", type=float, default=2000.0, help="straight route length (m)")
+parser.add_argument("--when", default="2025-07-15T15:30:00Z", help="UTC date and time of the flight (sets the sun)")
+parser.add_argument("--cruise_agl", type=float, default=40.0, help="cruise height above the take-off ground (m)")
+parser.add_argument("--speed", type=float, default=10.0, help="cruise speed (m/s)")
+parser.add_argument("--camera_pitch", type=float, default=None,
+                    help="LUCID cameras tilted down by this (deg; default 10 garden, 20 straight)")
+parser.add_argument("--save_frames", action="store_true", help="also keep every frame as a PNG (large)")
 parser.add_argument("--vehicle", default=vehicles.DEFAULT_VEHICLE, choices=sorted(vehicles.VEHICLES),
                     help="the drone: lmf2 (1.2 kg, carries the cameras) or crazyflie (the original 27 g demo drone)")
 parser.add_argument("--lucid", default=lucid.DEFAULT_CAMERA, choices=sorted(lucid.CAMERAS), help="LUCID camera model")
@@ -87,6 +101,10 @@ from isaaclab.app import AppLauncher  # noqa: E402
 
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+if args_cli.route == "straight":
+    args_cli.fly = True
+if "chase" in ({args_cli.view} | set(args_cli.cameras)) and args_cli.route != "straight":
+    parser.error("the chase camera follows the straight route (--route straight)")
 if not args_cli.fly and ({args_cli.view} | set(args_cli.cameras)) & set(ONBOARD):
     parser.error(f"the onboard cameras {ONBOARD} need --fly")
 try:
@@ -98,6 +116,7 @@ except (KeyError, ValueError) as exc:
 if args_cli.supersample < 1.0:
     parser.error("--supersample must be >= 1")
 VEHICLE = vehicles.VEHICLES[args_cli.vehicle]
+CAMERA_PITCH = args_cli.camera_pitch if args_cli.camera_pitch is not None else (20.0 if args_cli.route == "straight" else 10.0)
 OUT = os.path.abspath(os.path.expanduser(args_cli.out))
 os.makedirs(OUT, exist_ok=True)
 LOG_PATH = os.path.join(OUT, "drone_scene.log")
@@ -119,9 +138,31 @@ def fail(code: int) -> None:
     os._exit(code)
 
 
+WORLD = None
+if args_cli.route == "straight":
+    try:
+        from drone_scene.world import runner
+        wargs = ["--distance", f"{args_cli.distance:g}", "--when", args_cli.when, "--cruise-agl", f"{args_cli.cruise_agl:g}"]
+        for flag, val in (("--region", args_cli.region), ("--takeoff", args_cli.takeoff), ("--landing", args_cli.landing)):
+            if val:
+                wargs += [flag, val]
+        WORLD = runner.ensure_world(os.path.expanduser(args_cli.cache), wargs, log=say)
+        say(f"[drone] map: take-off {WORLD['takeoff']['lat']:.5f},{WORLD['takeoff']['lon']:.5f} -> landing "
+            f"{WORLD['landing']['lat']:.5f},{WORLD['landing']['lon']:.5f} ({WORLD['distance_m']:.0f} m, heading "
+            f"{WORLD['heading_deg']:.0f} deg), cruise at {WORLD['cruise_z']:.0f} m; sun {WORLD['sun']['elevation_deg']:.0f} deg up")
+        say(f"[drone] {WORLD['attribution']}")
+    except BaseException:  # noqa: BLE001
+        say("[drone] could not build the map for the straight route")
+        fail(3)
 try:
-    MANIFEST = prep.prepare(os.path.expanduser(args_cli.cache), mirror=False,
-                            sun_elevation_deg=scene.SceneCfg().sun.elevation_deg, log=say)
+    from drone_scene import assets
+    if WORLD:
+        SUN_EL = round(max(5.0, float(WORLD["sun"]["elevation_deg"])), 1)
+        MANIFEST = prep.prepare(os.path.expanduser(args_cli.cache), mirror=False, sun_elevation_deg=SUN_EL, log=say,
+                                sky=assets.WORLD_SKY)
+    else:
+        MANIFEST = prep.prepare(os.path.expanduser(args_cli.cache), mirror=False,
+                                sun_elevation_deg=scene.SceneCfg().sun.elevation_deg, log=say)
 except BaseException:  # noqa: BLE001
     say("[drone] could not download/prepare the scene assets")
     fail(3)
@@ -150,24 +191,57 @@ except BaseException:  # noqa: BLE001
     fail(4)
 
 
-def write_video(frame_dir: str, fps: float, path: str) -> bool:
+def find_ffmpeg() -> str | None:
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         try:
             import imageio_ffmpeg
             ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
         except Exception:  # noqa: BLE001
-            say(f"[drone] no ffmpeg: frames are in {frame_dir}")
-            return False
-    cmd = [ffmpeg, "-y", "-loglevel", "error", "-framerate", f"{fps:g}", "-i", os.path.join(frame_dir, "frame_%05d.png"),
-           "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p", "-colorspace", "bt709",
-           "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-crf", "16", path]
-    res = subprocess.run(cmd, check=False, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
-    for line in res.stdout.splitlines():
-        say("[ffmpeg] " + line)
-    say(f"[drone] wrote {path}" if res.returncode == 0 else f"[drone] ffmpeg FAILED for {path}")
-    return res.returncode == 0
+            return None
+    return ffmpeg
+
+
+class VideoWriter:
+    """Frames go straight into ffmpeg (H.264, BT.709) through a pipe: a 4-minute 3 MP flight would be tens of GB
+    as PNG frames.  Without ffmpeg (or with keep_png) every frame is also written as a PNG."""
+
+    def __init__(self, path: str, frame_dir: str, fps: float, keep_png: bool = False):
+        self.path, self.frame_dir, self.fps, self.n = path, frame_dir, fps, 0
+        self.ffmpeg, self.proc, self.keep_png = find_ffmpeg(), None, keep_png
+        if self.ffmpeg is None:
+            self.keep_png = True
+            say(f"[drone] no ffmpeg: {os.path.basename(path)} is written as PNG frames in {frame_dir}")
+
+    def add(self, rgb) -> None:
+        h, w = rgb.shape[:2]
+        if self.ffmpeg and self.proc is None:
+            cmd = [self.ffmpeg, "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}",
+                   "-framerate", f"{self.fps:g}", "-i", "-",
+                   "-vf", "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p", "-colorspace", "bt709",
+                   "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-crf", "16",
+                   "-preset", "medium", self.path]
+            self.log = open(self.path + ".ffmpeg.log", "w")
+            self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=self.log, stderr=subprocess.STDOUT)
+        if self.proc is not None:
+            self.proc.stdin.write(np.ascontiguousarray(rgb[..., :3], dtype=np.uint8).tobytes())
+        if self.keep_png:
+            Image.fromarray(rgb[..., :3]).save(os.path.join(self.frame_dir, f"frame_{self.n:05d}.png"))
+        self.n += 1
+
+    def close(self) -> bool:
+        if self.proc is None:
+            return self.keep_png and self.n > 0
+        self.proc.stdin.close()
+        ok = self.proc.wait() == 0
+        self.log.close()
+        with open(self.path + ".ffmpeg.log") as fh:
+            for line in fh.read().splitlines():
+                say("[ffmpeg] " + line)
+        say(f"[drone] wrote {self.path} ({self.n} frames)" if ok else f"[drone] ffmpeg FAILED for {self.path}")
+        if ok:
+            os.remove(self.path + ".ffmpeg.log")
+        return ok
 
 
 def author_onboard_cameras(stage, body: str, geom: flight.Flight) -> None:
@@ -228,6 +302,24 @@ def spawn_vehicle(stage, cfg: scene.SceneCfg):
     return robot_cfg
 
 
+class ChaseCamera:
+    """A third-person camera following the drone like a chase drone: behind and above it, lagging smoothly."""
+
+    def __init__(self, back: float = 10.0, up: float = 3.5, lag_s: float = 0.8):
+        self.back, self.up, self.lag = back, up, lag_s
+        self.eye = None
+
+    def update(self, p, direction, dt: float):
+        p = np.asarray(p, float)
+        want = p - np.asarray(direction, float) * self.back + np.array([0.0, 0.0, self.up])
+        if self.eye is None:
+            self.eye = want
+        else:
+            a = 1.0 - math.exp(-dt / self.lag)
+            self.eye = self.eye + (want - self.eye) * a
+        return [float(v) for v in self.eye], [float(v) for v in p]
+
+
 class HdrReader:
     """Replicator's HdrColor (linear radiance before tone mapping) on a camera's render product."""
 
@@ -250,8 +342,37 @@ class HdrReader:
         return t.reshape(self.shape[0], self.shape[1], -1)
 
 
+def scene_cfg() -> scene.SceneCfg:
+    """The backyard's configuration; on the straight route it is the take-off backyard of the real map: the real sun,
+    the pure sky (aimed so its glow sits around the sun) and only a small lawn of its own (the map's terrain is
+    the ground beyond it)."""
+    from dataclasses import replace
+
+    from drone_scene import hdr
+    cfg = scene.SceneCfg()
+    if WORLD:
+        az = float(WORLD["sun"]["azimuth_ccw_from_east_deg"])
+        hs = MANIFEST["sky"].get("hdr_sun", {})
+        cfg = replace(cfg, sun=scene.SunCfg(elevation_deg=SUN_EL, azimuth_deg=az), lawn_half=12.0,
+                      sky_rotation_deg=hdr.dome_rotation_deg(hs["azimuth_deg"], az) if "azimuth_deg" in hs else 0.0)
+    return vehicles.frame_scene(cfg, VEHICLE)
+
+
+def make_flight(onboard: dict, robot_z0: float):
+    """The flight (or just the camera geometry when hovering)."""
+    if not WORLD:
+        return flight.Flight(cameras=onboard)
+    L = WORLD["landing"]
+    start_z = robot_z0
+    clearance = start_z - WORLD["takeoff"]["z"]
+    cruise = max(WORLD["cruise_z"], start_z + args_cli.cruise_agl, L["z"] + clearance + 10.0)
+    return flight.StraightFlight(start=(0.0, 0.0, start_z), end_ground_z=L["z"], distance=WORLD["distance_m"],
+                                 heading_deg=WORLD["heading_deg"], cruise_z=cruise, speed=args_cli.speed,
+                                 ground_clearance=clearance, cameras=onboard)
+
+
 def main() -> None:
-    cfg = vehicles.frame_scene(scene.SceneCfg(), VEHICLE)
+    cfg = scene_cfg()
     sim = sim_utils.SimulationContext(sim_utils.SimulationCfg(
         dt=0.005, device=args_cli.device,
         render=sim_utils.RenderCfg(rendering_mode="quality", antialiasing_mode="DLAA", enable_translucency=True,
@@ -271,6 +392,10 @@ def main() -> None:
     stage = sim.stage
     summary = scene.build(stage, cfg, MANIFEST, physics=True)
     say(f"[drone] scenery: {summary}")
+    if WORLD:
+        from pxr import UsdGeom
+        UsdGeom.Xform.Define(stage, "/World/Map").GetPrim().GetReferences().AddReference(WORLD["usd"])
+        say(f"[drone] map: {WORLD['usd']} ({WORLD['stats']})")
 
     robot_cfg = spawn_vehicle(stage, cfg)
     robot = Articulation(robot_cfg)
@@ -280,27 +405,37 @@ def main() -> None:
     pts = vehicles.body_points(stage, body)
     if len(pts) == 0:
         say(f"[drone] WARNING: no mesh found under {body}; the cameras are mounted at the body origin")
-    mounts = vehicles.mount_cameras(pts, RIG, VEHICLE.camera_z)
-    onboard = {n: flight.OnboardCamera(n, m.position, m.look, focal_length=PLAN["focal_length"],
+    mounts = vehicles.mount_cameras(pts, RIG, VEHICLE.camera_z, pitch_down_deg=CAMERA_PITCH)
+    onboard = {n: flight.OnboardCamera(n, m.position, m.look, pitch_down_deg=CAMERA_PITCH,
+                                       focal_length=PLAN["focal_length"],
                                        horizontal_aperture=PLAN["horizontal_aperture"],
                                        vertical_aperture=PLAN["vertical_aperture"]) for n, m in mounts.items()}
-    geom = flight.Flight(cameras=onboard)            # camera poses (and the flight path, with --fly)
+    # body origin above its landing gear, standing on the patio (backyard) or the map's take-off spot
+    z_feet = float(pts[:, 2].min()) if len(pts) else 0.0
+    from drone_scene.pavers import PaverSpec
+    robot_z0 = cfg.patio_top + PaverSpec().top_rise - z_feet + 0.005
+    geom = make_flight(onboard, robot_z0)           # camera poses (and the flight path, with --fly)
     fl = geom if args_cli.fly else None
+    if WORLD:
+        say(f"[drone] flight: {fl.duration:.0f} s - take-off, climb to {fl.cruise_z:.0f} m, {fl.distance:.0f} m at "
+            f"{fl.speed:g} m/s heading {fl.heading_deg:.0f} deg, descend, land on grass")
     author_lucid_bodies(stage, body, geom, mounts)
     author_onboard_cameras(stage, body, geom)
     say(f"[drone] cameras: {lucid.describe(RIG)}")
     for n, m in mounts.items():
         say(f"[drone]   {n}: lens at {tuple(round(v, 3) for v in m.position)} m in the {VEHICLE.body} frame, "
-            f"10 deg down; render {PLAN['width']}x{PLAN['height']} (x{PLAN['overscan']:.2f} for the distortion)")
+            f"{CAMERA_PITCH:g} deg down; render {PLAN['width']}x{PLAN['height']} (x{PLAN['overscan']:.2f} for the distortion)")
     say(f"[drone] {vehicles.payload_report(VEHICLE, RIG)}")
 
     view_path = f"/World/Cameras/{args_cli.view}"
     if args_cli.view in ONBOARD:
         view_path = f"{body}/{args_cli.view}_view"
+    elif args_cli.view == "chase":
+        view_path = None                            # the GUI camera is moved every frame instead
     else:
         view = cfg.camera(args_cli.view)
         sim.set_camera_view(eye=list(view.eye), target=list(view.target))
-    if not args_cli.headless:
+    if not args_cli.headless and view_path:
         # look through the authored camera itself so the view also gets its lens and depth of field
         try:
             from omni.kit.viewport.utility import get_active_viewport
@@ -320,7 +455,12 @@ def main() -> None:
                                                  vertical_aperture=PLAN["vertical_aperture"],
                                                  clipping_range=(0.01, 10000.0)),
                 offset=CameraCfg.OffsetCfg(pos=tuple(float(v) for v in pos), rot=quat, convention="opengl")))
-        for name in [n for n in args_cli.cameras if n not in ONBOARD]:
+        if "chase" in args_cli.cameras:
+            cams["chase"] = Camera(CameraCfg(prim_path="/World/RecordCameras/chase", update_period=0.0, height=720,
+                                             width=1280, data_types=["rgb"],
+                                             spawn=sim_utils.PinholeCameraCfg(focal_length=24.0, clipping_range=(0.05, 20000.0)),
+                                             offset=CameraCfg.OffsetCfg(convention="world")))
+        for name in [n for n in args_cli.cameras if n not in ONBOARD and n != "chase"]:
             c = cfg.camera(name)
             spawn = sim_utils.PinholeCameraCfg(
                 focal_length=c.focal_length, horizontal_aperture=c.horizontal_aperture,
@@ -332,8 +472,8 @@ def main() -> None:
 
     sim.reset()
     for name, cam in cams.items():
-        if name in ONBOARD:
-            continue                                # mounted on the drone: they move with it
+        if name in ONBOARD or name == "chase":
+            continue                                # mounted on the drone / following it: they move with it
         c = cfg.camera(name)
         cam.set_world_poses_from_view(torch.tensor([c.eye], device=sim.device, dtype=torch.float32),
                                       torch.tensor([c.target], device=sim.device, dtype=torch.float32))
@@ -365,8 +505,11 @@ def main() -> None:
     gravity = torch.tensor(sim.cfg.gravity, device=sim.device).norm()
     say("[drone] setup complete")
 
-    record_steps = int(round(args_cli.record / sim_dt))
-    dirs = {}
+    seconds = fl.duration if (args_cli.record < 0 and fl is not None) else args_cli.record
+    record_steps = int(round(seconds / sim_dt))
+    if cams:
+        say(f"[drone] recording {seconds:.0f} s at {video_fps:g} fps = {int(seconds * video_fps)} frames per camera")
+    dirs, writers = {}, {}
     for name in cams:
         dirs[name] = os.path.join(OUT, name)
         os.makedirs(dirs[name], exist_ok=True)
@@ -375,6 +518,8 @@ def main() -> None:
                 os.remove(old)
             except OSError:
                 pass
+        writers[name] = VideoWriter(os.path.join(OUT, f"drone_{name}.mp4"), dirs[name], video_fps, args_cli.save_frames)
+    chase = ChaseCamera() if ("chase" in cams or args_cli.view == "chase") and fl is not None else None
     if cams:
         say("[drone] warming up the renderer and waiting for textures/assets to stream in ...")
         for _ in range(30):
@@ -408,14 +553,21 @@ def main() -> None:
             forces=forces, torques=torch.zeros_like(forces), body_ids=prop_body_ids)
         robot.write_data_to_sim()
         capture = bool(cams) and count % every == 0
+        if chase is not None and (capture or not cams):
+            t = min(count * sim_dt, fl.duration)
+            eye, target = chase.update(fl.position(t), fl.direction, sim_dt * (every if cams else 1))
+            if "chase" in cams:
+                cams["chase"].set_world_poses_from_view(torch.tensor([eye], device=sim.device, dtype=torch.float32),
+                                                        torch.tensor([target], device=sim.device, dtype=torch.float32))
+            if args_cli.view == "chase" and not args_cli.headless:
+                sim.set_camera_view(eye=list(eye), target=list(target))
         sim.step(render=capture or not cams)
         robot.update(sim_dt)
         if capture:
             for name, cam in cams.items():
                 cam.update(sim_dt)
                 if name not in sensors:
-                    rgb = cam.data.output["rgb"][0, ..., :3].detach().cpu().numpy().astype(np.uint8)
-                    Image.fromarray(rgb).save(os.path.join(dirs[name], f"frame_{frame:05d}.png"))
+                    writers[name].add(cam.data.output["rgb"][0, ..., :3].detach().cpu().numpy().astype(np.uint8))
                     continue
                 hdr, source = (readers[name].read() if name in readers else None), "HdrColor"
                 if hdr is None or not bool(hdr[..., :3].abs().amax() > 0):
@@ -433,7 +585,7 @@ def main() -> None:
                     say(f"[drone] {name}: mean scene radiance = {ratio:.2f} x an 18 % grey card under the calibrated "
                         f"sun + sky" + ("" if 0.03 < ratio < 30 else " - HdrColor is not in the scene's light "
                                         "units, so exposure_us in camera_info is not physical (the images are fine)"))
-                Image.fromarray(out["rgb"].cpu().numpy()).save(os.path.join(dirs[name], f"frame_{frame:05d}.png"))
+                writers[name].add(out["rgb"].cpu().numpy())
                 if args_cli.save_raw:
                     Image.fromarray(out["raw"].cpu().numpy().astype(np.uint16)).save(
                         os.path.join(dirs[name], f"raw_{frame:05d}.png"))
@@ -441,9 +593,10 @@ def main() -> None:
                                       "exposure_us": None if math.isnan(out["exposure_us"]) else round(out["exposure_us"], 2),
                                       "gain_db": out["gain_db"], "saturated": round(out["saturated"], 5)})
             frame += 1
-            if frame % round(video_fps) == 0:
+            if frame % round(video_fps * (1 if seconds <= 30 else 10)) == 0:
                 extra = "".join(f", {n} exposure {records[n][-1]['exposure_us']} us" for n in records if records[n])
-                say(f"[drone] recorded {frame / video_fps:.0f} s{extra}")
+                phase = f" ({fl.phase_name(count * sim_dt)})" if hasattr(fl, "phase_name") else ""
+                say(f"[drone] recorded {frame / video_fps:.0f} of {seconds:.0f} s{phase}{extra}")
         count += 1
         if cams and count >= record_steps:
             break
@@ -455,12 +608,14 @@ def main() -> None:
             info.update(vehicle=VEHICLE.name, mount={"body": VEHICLE.body, "position_m": [float(v) for v in pos],
                                                      "orientation_wxyz": list(quat), "convention": "USD camera (-Z forward, +Y up)",
                                                      "pitch_down_deg": geom.cameras[name].pitch_down_deg},
+                        route=({k: WORLD[k] for k in ("takeoff", "landing", "distance_m", "heading_deg", "cruise_z", "sun")}
+                               if WORLD else "garden"),
                         render_plan=PLAN, fps=video_fps, settings=sensor_sim.SensorSettings(
                             exposure=args_cli.exposure, exposure_us=args_cli.exposure_us, gain_db=args_cli.gain_db,
                             gamma=GAMMA).__dict__, notes=RIG.warnings(video_fps), frames=records[name])
             with open(os.path.join(OUT, f"drone_{name}_camera_info.json"), "w", encoding="utf-8") as f:
                 json.dump(info, f, indent=1)
-        ok = [write_video(dirs[n], video_fps, os.path.join(OUT, f"drone_{n}.mp4")) for n in cams]
+        ok = [writers[n].close() for n in cams]
         say("[drone] done" if all(ok) else "[drone] finished, but some videos were not written")
         _log.close()
         os._exit(0 if all(ok) else 1)

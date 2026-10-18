@@ -32,6 +32,19 @@ def box_points(x0, x1, y0, y1, z0, z1, n=12):
     return g.reshape(-1, 3)
 
 
+def inside_housing(points, mount, rig, pitch_deg) -> int:
+    """Body points inside the (tilted) camera housing + lens, which runs from the lens front back to the rear face."""
+    p = math.radians(pitch_deg)
+    fwd = np.array([mount.look * math.cos(p), 0.0, -math.sin(p)])
+    right = np.array([0.0, -mount.look, 0.0])
+    up = np.cross(right, fwd)
+    rel = points - np.asarray(mount.position)
+    a, b_, c = rel @ fwd, rel @ right, rel @ up
+    w, h, _ = (v * 1e-3 for v in rig.body.size_mm)
+    L = rig.length_mm() * 1e-3
+    return int(((a < 0) & (a > -L) & (np.abs(b_) < w / 2) & (np.abs(c) < h / 2)).sum())
+
+
 class TestMounts(unittest.TestCase):
     def setUp(self):
         self.rig = lucid.make_rig("TRI032S-CC")
@@ -169,9 +182,13 @@ class TestRealLMF2(unittest.TestCase):
         pts = vehicles.body_points(stage, f"{v.prim}/{v.body}")
         self.assertGreater(len(pts), 100000)
         self.assertAlmostEqual(float(pts[:, 0].max() - pts[:, 0].min()), 0.515, delta=0.01)
-        m = vehicles.mount_cameras(pts, lucid.make_rig(), v.camera_z)
-        self.assertGreater(m["front"].position[0], 0.15)
-        self.assertLess(m["back"].position[0], -0.15)
+        rig = lucid.make_rig()
+        for pitch in (10.0, 20.0):
+            m = vehicles.mount_cameras(pts, rig, v.camera_z, pitch_down_deg=pitch)
+            self.assertTrue(0.10 < m["front"].position[0] < 0.30, m["front"])
+            self.assertTrue(-0.30 < m["back"].position[0] < -0.10, m["back"])
+            for mt in m.values():
+                self.assertEqual(inside_housing(pts, mt, rig, pitch), 0, f"{mt.name} at {pitch} deg hits the drone")
 
 
 if __name__ == "__main__":

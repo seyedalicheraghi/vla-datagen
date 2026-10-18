@@ -24,6 +24,9 @@ from . import nucleus
 # ---------------------------------------------------------------------------
 
 SKY = "NVIDIA/Assets/Skies/Clear/noon_grass_4k.hdr"            # sunny park lawn with trees on the horizon
+# the large map (world/): sky only, no ground or trees in the photo, because the 3D map reaches the horizon and a
+# photographed horizon would travel with the drone over kilometres
+WORLD_SKY = "Isaac/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr"
 REFERENCE_SKY = "Isaac/Materials/Textures/Skies/PolyHaven/kloofendal_43d_clear_puresky_4k.hdr"
 REFERENCE_INTENSITY = 750.0       # Isaac Lab's drone and locomotion tasks expose this sky well at 750
 

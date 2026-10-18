@@ -184,20 +184,28 @@ class Mount:
 
 
 def mount_cameras(points: np.ndarray, rig, camera_z: float, *, pitch_down_deg: float = 10.0,
-                  clearance_m: float = 0.016, margin_m: float = 0.006) -> dict[str, Mount]:
+                  clearance_m: float = 0.016, margin_m: float = 0.006,
+                  z_options=(0.0, 0.02, 0.04, 0.06, -0.02)) -> dict[str, Mount]:
     """Front and back mounts on the centre line: the housing's rear face ``clearance_m`` (room for the M12
-    connector) beyond the outermost body vertex inside the camera's cross-section (+ ``margin_m``)."""
+    connector) beyond the outermost body vertex inside the space the tilted housing sweeps (+ ``margin_m``).
+    Each camera tries the heights ``camera_z + z_options`` and takes the one that sticks out least, as you would
+    when fitting a bracket (a part sticking out low at the tail pushes a tilted camera up, not out)."""
     w, h, d = (v * 1e-3 for v in rig.body.size_mm)
     length = rig.length_mm() * 1e-3
     half_w, half_h = max(w, rig.lens.diameter_mm * 1e-3) / 2 + margin_m, h / 2 + margin_m
     pitch = math.radians(pitch_down_deg)
     mounts = {}
     for name, look in (("front", 1.0), ("back", -1.0)):
-        sel = (np.abs(points[:, 1]) <= half_w) & (np.abs(points[:, 2] - camera_z) <= half_h + length * math.sin(pitch))
-        ahead = look * points[sel, 0]
-        surface = float(ahead.max()) if ahead.size else 0.0
-        surface = max(surface, 0.0)
-        rear = np.array([look * (surface + clearance_m), 0.0, camera_z])
+        best = None
+        for dz in sorted(z_options, key=abs):
+            z = camera_z + dz
+            sel = (np.abs(points[:, 1]) <= half_w) & (np.abs(points[:, 2] - z) <= half_h + length * math.sin(pitch))
+            ahead = look * points[sel, 0]
+            surf = max(float(ahead.max()) if ahead.size else 0.0, 0.0)
+            if best is None or surf < best[0] - 1e-3:
+                best = (surf, z)
+        surface, z_mount = best
+        rear = np.array([look * (surface + clearance_m), 0.0, z_mount])
         fwd = np.array([look * math.cos(pitch), 0.0, -math.sin(pitch)])
         lens_front = rear + fwd * length
         mounts[name] = Mount(name, look, tuple(float(v) for v in lens_front), look * surface,

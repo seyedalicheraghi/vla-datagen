@@ -37,15 +37,15 @@ DEFAULT_CACHE = os.path.join(os.path.expanduser("~"), ".cache", "drone_scene")
 GROUND = ("pavers", "lawn", "mulch", "curb", "sand")
 
 
-def _key(mirror: bool, preview_sky_factor: int, sun_elevation_deg: float) -> str:
-    blob = repr((PREPARE_VERSION, assets.SKY, assets.REFERENCE_SKY, assets.REFERENCE_INTENSITY, GROUND, sun_elevation_deg,
+def _key(mirror: bool, preview_sky_factor: int, sun_elevation_deg: float, sky: str = assets.SKY) -> str:
+    blob = repr((PREPARE_VERSION, sky, assets.REFERENCE_SKY, assets.REFERENCE_INTENSITY, GROUND, sun_elevation_deg,
                  sorted(assets.PROPS), assets.CRAZYFLIE, mirror, preview_sky_factor,
                  {k: (m.mdl, m.tile_m) for k, m in assets.MATERIALS.items()}))
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
 def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, sun_elevation_deg: float = SunCfg.elevation_deg,
-                log=print) -> dict:
+                log=print, sky: str = assets.SKY) -> dict:
     """Sunless sky HDR (+ a smaller copy for the preview) and the calibrated dome/sun intensities.
 
     The sun light is placed at ``sun_elevation_deg`` (scene.SunCfg), not where the HDR has it, so the
@@ -53,7 +53,7 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, sun_elevation_deg: 
     """
     out_dir = os.path.join(cache_dir, "sky")
     os.makedirs(out_dir, exist_ok=True)
-    name = os.path.splitext(os.path.basename(assets.SKY))[0]
+    name = os.path.splitext(os.path.basename(sky))[0]
     full = os.path.join(out_dir, f"{name}_nosun.hdr")
     small = os.path.join(out_dir, f"{name}_nosun_x{preview_sky_factor}.hdr")
     info_path = os.path.join(out_dir, f"{name}_nosun_sun{sun_elevation_deg:g}.json")
@@ -64,11 +64,11 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, sun_elevation_deg: 
         return info
 
     t0 = time.time()
-    log(f"[prepare] sky: {assets.SKY}")
-    sky = hdr.read_hdr(nucleus.fetch(assets.SKY, cache_dir, log=log))
+    log(f"[prepare] sky: {sky}")
+    sky_rel, sky = sky, hdr.read_hdr(nucleus.fetch(sky, cache_dir, log=log))
     sun = hdr.find_sun(sky)
     if sun is None:
-        raise RuntimeError(f"no clear sun found in {assets.SKY}")
+        raise RuntimeError(f"no clear sun found in {sky_rel}")
     sunless = hdr.remove_sun(sky, sun)
     reference = hdr.read_hdr(nucleus.fetch(assets.REFERENCE_SKY, cache_dir, log=log))
     cal = hdr.calibrate(sunless, sun, reference, assets.REFERENCE_INTENSITY,
@@ -101,11 +101,13 @@ def prepare_sky(cache_dir: str, preview_sky_factor: int = 4, sun_elevation_deg: 
 
 
 def prepare(cache_dir: str = DEFAULT_CACHE, *, mirror: bool = False, preview_sky_factor: int = 4,
-            sun_elevation_deg: float = SunCfg.elevation_deg, log=print) -> dict:
-    """Return the manifest: {'textures', 'sky', 'props', 'crazyflie'} (paths local, or URLs for props)."""
+            sun_elevation_deg: float = SunCfg.elevation_deg, log=print, sky: str = assets.SKY) -> dict:
+    """Return the manifest: {'textures', 'sky', 'props', 'crazyflie'} (paths local, or URLs for props).
+    ``sky``: the HDR (Nucleus path) whose sun is cut out and replaced by a light at ``sun_elevation_deg``."""
     os.makedirs(cache_dir, exist_ok=True)
-    key = _key(mirror, preview_sky_factor, sun_elevation_deg)
-    manifest_path = os.path.join(cache_dir, f"manifest_{'mirror' if mirror else 'isaac'}.json")
+    key = _key(mirror, preview_sky_factor, sun_elevation_deg, sky)
+    tag = "" if sky == assets.SKY else "_" + os.path.splitext(os.path.basename(sky))[0]
+    manifest_path = os.path.join(cache_dir, f"manifest_{'mirror' if mirror else 'isaac'}{tag}_{sun_elevation_deg:g}.json")
     if os.path.exists(manifest_path):
         with open(manifest_path, encoding="utf-8") as f:
             man = json.load(f)
@@ -121,7 +123,7 @@ def prepare(cache_dir: str = DEFAULT_CACHE, *, mirror: bool = False, preview_sky
     for name in GROUND:
         log(f"[prepare] material {name}: {assets.MATERIALS[name].mdl}")
         textures[name] = assets.material_textures(name, cache_dir, log=log)
-    sky = prepare_sky(cache_dir, preview_sky_factor, sun_elevation_deg, log=log)
+    sky = prepare_sky(cache_dir, preview_sky_factor, sun_elevation_deg, log=log, sky=sky)
     if mirror:
         props = {}
         for name, prop in assets.PROPS.items():

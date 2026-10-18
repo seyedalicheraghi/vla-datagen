@@ -1,4 +1,5 @@
-"""A 20 s garden flight for the Crazyflie and its two onboard cameras (pure numpy).
+"""Drone flights and their two onboard cameras (pure numpy): ``Flight``, a 20 s garden tour, and
+``StraightFlight``, a take-off / straight cruise / landing mission between two places on a large map.
 
 The drone takes off from its hover spot over the patio, tours the lawn around the patio at 0.9-1.6 m,
 swings past the shrub bed and comes back to hover where it started.  The path is a C2 cubic spline
@@ -73,8 +74,42 @@ def _natural_cubic(t: np.ndarray, y: np.ndarray):
     return np.linalg.solve(A, r)
 
 
+class _Trajectory:
+    """What every flight shares: the pose, and the poses of the cameras riding on the body.  Subclasses
+    provide ``position(t)``, ``rotation(t)`` and a ``cameras`` dict."""
+
+    def pose(self, t: float) -> tuple[np.ndarray, np.ndarray]:
+        return self.position(t), self.rotation(t)
+
+    def quat_wxyz(self, t: float) -> tuple[float, float, float, float]:
+        return rot_to_quat(self.rotation(t))
+
+    # --- cameras ------------------------------------------------------------
+    def camera_matrix(self, t: float, name: str) -> np.ndarray:
+        """USD row-vector world matrix of an onboard camera (it looks down its -Z, +Y up)."""
+        cam = self.cameras[name]
+        p, R = self.pose(t)
+        pos = p + R @ np.asarray(cam.offset)
+        pitch = math.radians(cam.pitch_down_deg)
+        fwd_b = np.array([cam.look * math.cos(pitch), 0.0, -math.sin(pitch)])
+        right_b = np.array([0.0, -cam.look, 0.0])                       # looking +X, right is -Y
+        up_b = np.cross(right_b, fwd_b)
+        m = np.eye(4)
+        m[0, :3], m[1, :3], m[2, :3], m[3, :3] = R @ right_b, R @ up_b, -(R @ fwd_b), pos
+        return m
+
+    def camera_local(self, name: str) -> tuple[np.ndarray, tuple[float, float, float, float]]:
+        """The camera's pose in the body frame: (offset, (w, x, y, z)) of a camera looking down its -Z."""
+        cam = self.cameras[name]
+        pitch = math.radians(cam.pitch_down_deg)
+        fwd = np.array([cam.look * math.cos(pitch), 0.0, -math.sin(pitch)])
+        right = np.array([0.0, -cam.look, 0.0])
+        up = np.cross(right, fwd)
+        return np.asarray(cam.offset), rot_to_quat(np.column_stack([right, up, -fwd]))
+
+
 @dataclass
-class Flight:
+class Flight(_Trajectory):
     waypoints: list = field(default_factory=lambda: list(WAYPOINTS))
     cameras: dict = field(default_factory=lambda: dict(CAMERAS))
 
@@ -125,34 +160,156 @@ class Flight:
         x = np.cross(y, z)
         return np.column_stack([x, y, z])
 
-    def pose(self, t: float) -> tuple[np.ndarray, np.ndarray]:
-        return self.position(t), self.rotation(t)
+# ---------------------------------------------------------------------------
+# Point-to-point flight (a delivery-style mission over a large map)
+# ---------------------------------------------------------------------------
 
-    def quat_wxyz(self, t: float) -> tuple[float, float, float, float]:
-        return rot_to_quat(self.rotation(t))
+@dataclass(frozen=True)
+class SmoothMove:
+    """Rest-to-rest move over ``distance``: the acceleration rises and falls as sin^2 over ``ramp`` seconds
+    (no jerk spikes), then a constant ``speed`` cruise, then the mirror-image stop.  Short moves never reach
+    ``speed``."""
 
-    # --- cameras ------------------------------------------------------------
-    def camera_matrix(self, t: float, name: str) -> np.ndarray:
-        """USD row-vector world matrix of an onboard camera (it looks down its -Z, +Y up)."""
-        cam = self.cameras[name]
-        p, R = self.pose(t)
-        pos = p + R @ np.asarray(cam.offset)
-        pitch = math.radians(cam.pitch_down_deg)
-        fwd_b = np.array([cam.look * math.cos(pitch), 0.0, -math.sin(pitch)])
-        right_b = np.array([0.0, -cam.look, 0.0])                       # looking +X, right is -Y
-        up_b = np.cross(right_b, fwd_b)
-        m = np.eye(4)
-        m[0, :3], m[1, :3], m[2, :3], m[3, :3] = R @ right_b, R @ up_b, -(R @ fwd_b), pos
-        return m
+    distance: float
+    speed: float
+    ramp: float
 
-    def camera_local(self, name: str) -> tuple[np.ndarray, tuple[float, float, float, float]]:
-        """The camera's pose in the body frame: (offset, (w, x, y, z)) of a camera looking down its -Z."""
-        cam = self.cameras[name]
-        pitch = math.radians(cam.pitch_down_deg)
-        fwd = np.array([cam.look * math.cos(pitch), 0.0, -math.sin(pitch)])
-        right = np.array([0.0, -cam.look, 0.0])
-        up = np.cross(right, fwd)
-        return np.asarray(cam.offset), rot_to_quat(np.column_stack([right, up, -fwd]))
+    @property
+    def v_max(self) -> float:
+        return min(self.speed, self.distance / self.ramp) if self.ramp > 0 else self.speed
+
+    @property
+    def duration(self) -> float:
+        if self.distance <= 0:
+            return 0.0
+        v = self.v_max
+        return 2 * self.ramp + (self.distance - v * self.ramp) / v
+
+    def _ramp(self, t: float) -> tuple[float, float, float]:
+        """(s, v, a) after t seconds of the speed-up ramp."""
+        T, A = self.ramp, 2 * self.v_max / self.ramp
+        w = 2 * math.pi / T
+        a = A * math.sin(math.pi * t / T) ** 2
+        v = A * (t / 2 - math.sin(w * t) / (2 * w))
+        s = A * (t * t / 4 + (math.cos(w * t) - 1) / (2 * w * w))
+        return s, v, a
+
+    def at(self, t: float) -> tuple[float, float, float]:
+        """(distance travelled, speed, acceleration) at time t (clamped to the move)."""
+        if self.distance <= 0:
+            return 0.0, 0.0, 0.0
+        T, D, v = self.ramp, self.distance, self.v_max
+        t = min(max(t, 0.0), self.duration)
+        if t <= T:
+            return self._ramp(t)
+        if t >= self.duration - T:
+            s, sv, sa = self._ramp(self.duration - t)
+            return D - s, sv, -sa
+        return v * T / 2 + v * (t - T), v, 0.0
+
+
+@dataclass
+class StraightFlight(_Trajectory):
+    """Take off from ``start``, climb vertically to ``cruise_z``, fly ``distance`` metres straight along
+    ``heading_deg`` (counter-clockwise from +X), stop, descend vertically (slowly for the last
+    ``final_height`` metres) and land on the ground at the destination (``end_ground_z``).
+
+    ``start`` is the body origin on the ground at take-off (ground height + ``ground_clearance``, the body
+    origin's height above its landing gear).  Heights are world z.  Attitude follows quadrotor physics with
+    air drag: body +Z is along ``a + g + drag |v_air| v_air`` (thrust also cancels drag, so the drone leans
+    into the air stream even at constant speed: ~12 deg at 10 m/s with the default ``drag``), body +X along
+    ``heading_deg``.
+    """
+
+    start: tuple = (0.0, 0.0, 0.10)
+    end_ground_z: float = 0.0
+    distance: float = 2000.0
+    heading_deg: float = 0.0
+    cruise_z: float = 40.0
+    speed: float = 10.0
+    climb_rate: float = 3.0
+    descent_rate: float = 2.0
+    final_height: float = 4.0
+    final_descent_rate: float = 0.5
+    ground_clearance: float = 0.10
+    ramp: float = 8.0                     # s from hover to cruise speed
+    vertical_ramp: float = 2.0
+    idle: float = 2.0                     # s on the ground before take-off and after landing
+    hover: float = 1.5                    # s of hover between the phases
+    drag: float = 0.021                   # quadratic drag per unit mass (1/m)
+    wind: tuple = (0.0, 0.0, 0.0)         # m/s, world frame
+    cameras: dict = field(default_factory=lambda: dict(CAMERAS))
+
+    def __post_init__(self):
+        h = math.radians(self.heading_deg)
+        self.direction = np.array([math.cos(h), math.sin(h), 0.0])
+        p0 = np.asarray(self.start, float)
+        land_z = self.end_ground_z + self.ground_clearance
+        if self.cruise_z < max(p0[2], land_z + self.final_height):
+            raise ValueError(f"cruise_z {self.cruise_z:.1f} is below the take-off or landing approach height")
+        up, down = np.array([0.0, 0.0, 1.0]), np.array([0.0, 0.0, -1.0])
+        # (direction, move) phases; None = stand still for that many seconds
+        plan = [
+            (None, self.idle),
+            (up, SmoothMove(self.cruise_z - p0[2], self.climb_rate, self.vertical_ramp)),
+            (None, self.hover),
+            (self.direction, SmoothMove(self.distance, self.speed, self.ramp)),
+            (None, self.hover),
+            (down, SmoothMove(self.cruise_z - (land_z + self.final_height), self.descent_rate, self.vertical_ramp)),
+            (None, self.hover),
+            (down, SmoothMove(self.final_height, self.final_descent_rate, self.vertical_ramp)),
+            (None, self.idle),
+        ]
+        self.phases, t, p = [], 0.0, p0.copy()
+        for d, m in plan:
+            T = m if d is None else m.duration
+            self.phases.append((t, T, p.copy(), d, m))
+            if d is not None:
+                p = p + d * m.distance
+            t += T
+        self.duration = t
+        self.end = p
+        self.yaw = h
+
+    def _state(self, t: float):
+        t = min(max(t, 0.0), self.duration)
+        for t0, T, p0, d, m in self.phases:
+            if t <= t0 + T or (t0, T) == self.phases[-1][:2]:
+                if d is None:
+                    return p0, np.zeros(3), np.zeros(3)
+                s, v, a = m.at(t - t0)
+                return p0 + d * s, d * v, d * a
+        raise AssertionError("unreachable")
+
+    def position(self, t: float) -> np.ndarray:
+        return self._state(t)[0]
+
+    def velocity(self, t: float) -> np.ndarray:
+        return self._state(t)[1]
+
+    def acceleration(self, t: float) -> np.ndarray:
+        return self._state(t)[2]
+
+    def phase_name(self, t: float) -> str:
+        names = ["ground", "climb", "hover", "cruise", "hover", "descent", "hover", "landing", "landed"]
+        for (t0, T, *_), name in zip(self.phases, names):
+            if t <= t0 + T:
+                return name
+        return names[-1]
+
+    def heading(self, t: float) -> float:
+        return self.yaw
+
+    def rotation(self, t: float) -> np.ndarray:
+        """Body-to-world rotation: body +Z along the thrust (a + g + drag), body +X towards the heading."""
+        v_air = self.velocity(t) - np.asarray(self.wind, float)
+        z = self.acceleration(t) + np.array([0.0, 0.0, G]) + self.drag * np.linalg.norm(v_air) * v_air
+        z /= np.linalg.norm(z)
+        x_h = np.array([math.cos(self.yaw), math.sin(self.yaw), 0.0])
+        y = np.cross(z, x_h)
+        y /= np.linalg.norm(y)
+        x = np.cross(y, z)
+        return np.column_stack([x, y, z])
 
 
 def rot_to_quat(R: np.ndarray) -> tuple[float, float, float, float]:

@@ -840,3 +840,11 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def dome_rotation_deg(hdr_sun_azimuth_deg: float, target_azimuth_deg: float) -> float:
+    """rotateZ (deg) for a stock USD DomeLight showing this HDR so that the spot where the HDR's sun was (its
+    glow, which ``remove_sun`` leaves in place) lies at ``target_azimuth_deg`` (counter-clockwise from +X, where
+    the scene's DistantLight sun is).  ``hdr_sun_azimuth_deg`` is ``SunInfo.azimuth_deg`` (this module's
+    convention).  Uses azimuth_usd = -azimuth_here - 90 deg (module docstring; not verified against RTX)."""
+    return (target_azimuth_deg + 90.0 + hdr_sun_azimuth_deg) % 360.0
