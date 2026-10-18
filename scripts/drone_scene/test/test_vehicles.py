@@ -79,6 +79,29 @@ class TestMounts(unittest.TestCase):
         p, R = f.pose(0.0)
         np.testing.assert_allclose(M[3, :3], p + R @ np.asarray(m["front"].position), atol=1e-12)
 
+    def test_view_blocked_counts_big_faces(self):
+        """A 30 cm plate with only four corners, right below a camera looking down: half the image is plate."""
+        rig = lucid.make_rig()
+        plate = np.array([[[-0.15, -0.15, -0.1], [0.15, -0.15, -0.1], [0.15, 0.15, -0.1]],
+                          [[-0.15, -0.15, -0.1], [0.15, 0.15, -0.1], [-0.15, 0.15, -0.1]]])
+        b = vehicles.view_blocked(plate, (0.0, 0.0, 0.0), 1.0, rig, 90.0)
+        self.assertGreater(b, 0.5)
+        low = plate - np.array([0.0, 0.0, 0.25])          # 35 cm below a level camera: 63 deg down, out of view
+        self.assertEqual(vehicles.view_blocked(low, (0.0, 0.0, 0.0), 1.0, rig, 0.0), 0.0)
+        # level, plate 10 cm below: its front edge is 34 deg down, a sliver at the bottom of the 69 deg-tall view
+        self.assertTrue(0.0 < vehicles.view_blocked(plate, (0.0, 0.0, 0.0), 1.0, rig, 0.0) < 0.1)
+
+    def test_mount_moves_out_of_its_own_view(self):
+        """A wide low plate in front of the body: the camera moves until the plate leaves its view."""
+        rig = lucid.make_rig()
+        plate = np.array([[[0.0, -0.3, 0.0], [0.25, -0.3, 0.0], [0.25, 0.3, 0.0]],
+                          [[0.0, -0.3, 0.0], [0.25, 0.3, 0.0], [0.0, 0.3, 0.0]]])
+        body = box_points(-0.05, 0.05, -0.05, 0.05, 0.0, 0.08)
+        free = vehicles.mount_cameras(body, rig, 0.04, pitch_down_deg=30.0)
+        fit = vehicles.mount_cameras(body, rig, 0.04, pitch_down_deg=30.0, triangles=plate)
+        self.assertGreater(vehicles.view_blocked(plate, free["front"].position, 1.0, rig, 30.0), 0.01)
+        self.assertLessEqual(fit["front"].view_blocked, 0.01)
+
     def test_payload(self):
         self.assertIn("OK", vehicles.payload_report(vehicles.VEHICLES["lmf2"], self.rig))
         self.assertIn("TOO HEAVY", vehicles.payload_report(vehicles.VEHICLES["crazyflie"], self.rig))
@@ -183,12 +206,15 @@ class TestRealLMF2(unittest.TestCase):
         self.assertGreater(len(pts), 100000)
         self.assertAlmostEqual(float(pts[:, 0].max() - pts[:, 0].min()), 0.515, delta=0.01)
         rig = lucid.make_rig()
+        tri = vehicles.body_triangles(stage, f"{v.prim}/{v.body}")
+        self.assertGreater(len(tri), 300000)
         for pitch in (10.0, 20.0):
-            m = vehicles.mount_cameras(pts, rig, v.camera_z, pitch_down_deg=pitch)
+            m = vehicles.mount_cameras(pts, rig, v.camera_z, pitch_down_deg=pitch, triangles=tri)
             self.assertTrue(0.10 < m["front"].position[0] < 0.30, m["front"])
             self.assertTrue(-0.30 < m["back"].position[0] < -0.10, m["back"])
             for mt in m.values():
                 self.assertEqual(inside_housing(pts, mt, rig, pitch), 0, f"{mt.name} at {pitch} deg hits the drone")
+                self.assertLessEqual(mt.view_blocked, 0.01, f"{mt.name} at {pitch} deg sees the drone")
 
 
 if __name__ == "__main__":

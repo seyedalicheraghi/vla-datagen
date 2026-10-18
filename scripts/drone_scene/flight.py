@@ -143,10 +143,12 @@ class Flight(_Trajectory):
 
     # --- attitude ----------------------------------------------------------
     def heading(self, t: float) -> float:
-        """Yaw (rad) along the horizontal velocity; near-standstill ends borrow it from 1 s inside the flight."""
+        """Yaw (rad) along the horizontal velocity.  Near standstill (the ends) the direction of travel 1 s inside
+        the flight is blended in, fading out smoothly by 0.5 m/s, so the nose never snaps round."""
         v = self.velocity(t)[:2]
-        if np.linalg.norm(v) < 0.25:
-            v = self.velocity(min(max(t, 1.0), self.duration - 1.0))[:2]
+        ref = self.velocity(min(max(t, 1.0), self.duration - 1.0))[:2]
+        ref = ref / max(np.linalg.norm(ref), 1e-9)
+        v = v + max(0.0, 0.5 - float(np.linalg.norm(v))) * ref
         return math.atan2(v[1], v[0])
 
     def rotation(self, t: float) -> np.ndarray:

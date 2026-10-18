@@ -181,35 +181,117 @@ class Mount:
     position: tuple[float, float, float]      # lens front (the camera prim) in the body frame
     surface_x: float                # where the body ends behind the camera (signed, body frame)
     bracket_mm: float
+    view_blocked: float = 0.0       # fraction of the image covered by the drone itself
+
+
+def body_triangles(stage, body_path: str) -> np.ndarray:
+    """Every triangle of every mesh under ``body_path`` (instances included), in the body frame, (M, 3, 3)."""
+    from pxr import Usd, UsdGeom
+
+    body = stage.GetPrimAtPath(body_path)
+    if not body:
+        return np.zeros((0, 3, 3))
+    xc = UsdGeom.XformCache(Usd.TimeCode.Default())
+    to_body = np.array(xc.GetLocalToWorldTransform(body).GetInverse())
+    out = []
+    for prim in Usd.PrimRange(body, Usd.TraverseInstanceProxies()):
+        if not prim.IsA(UsdGeom.Mesh):
+            continue
+        m = UsdGeom.Mesh(prim)
+        pts, cnt, idx = (m.GetPointsAttr().Get(), m.GetFaceVertexCountsAttr().Get(), m.GetFaceVertexIndicesAttr().Get())
+        if not pts or not cnt:
+            continue
+        P = np.asarray(pts, float)
+        M = np.array(xc.GetLocalToWorldTransform(prim)) @ to_body
+        P = P @ M[:3, :3] + M[3, :3]
+        cnt, idx = np.asarray(cnt), np.asarray(idx)
+        off = np.concatenate([[0], np.cumsum(cnt)[:-1]])
+        for k in range(3, int(cnt.max()) + 1):                 # fan-triangulate polygons
+            sel = cnt >= k
+            out.append(np.stack([P[idx[off[sel]]], P[idx[off[sel] + k - 2]], P[idx[off[sel] + k - 1]]], 1))
+    return np.concatenate(out) if out else np.zeros((0, 3, 3))
+
+
+def view_blocked(triangles: np.ndarray, lens_front, look: float, rig, pitch_down_deg: float, scale: int = 8) -> float:
+    """Fraction of the camera's image covered by the drone's own triangles (projected through the lens with its
+    distortion and filled on an image ``scale`` times smaller than the sensor).  Triangles must be whole meshes:
+    sampling only their vertices misses big flat panels."""
+    from PIL import Image, ImageDraw
+
+    from .lucid import distort
+    if len(triangles) == 0:
+        return 0.0
+    p = math.radians(pitch_down_deg)
+    fwd = np.array([look * math.cos(p), 0.0, -math.sin(p)])
+    right = np.array([0.0, -look, 0.0])
+    up = np.cross(right, fwd)
+    rel = triangles - np.asarray(lens_front)
+    cam = np.stack([rel @ right, rel @ up, rel @ fwd], axis=-1)          # (M, 3, 3): x right, y up, z forward
+    near = 0.003
+    front = cam[..., 2] > near
+    polys = list(cam[front.all(axis=1)])
+    for tri in cam[front.any(axis=1) & ~front.all(axis=1)]:              # straddles the near plane: clip it
+        out = []
+        for k in range(3):
+            a, b = tri[k], tri[(k + 1) % 3]
+            if a[2] > near:
+                out.append(a)
+            if (a[2] > near) != (b[2] > near):
+                out.append(a + (b - a) * (near - a[2]) / (b[2] - a[2]))
+        if len(out) >= 3:
+            polys.append(np.asarray(out))
+    if not polys:
+        return 0.0
+    W, H = max(8, rig.width // scale), max(6, rig.height // scale)
+    img = Image.new("1", (W, H), 0)
+    draw = ImageDraw.Draw(img)
+    for poly in polys:
+        xd, yd = distort(poly[:, 0] / poly[:, 2], -poly[:, 1] / poly[:, 2], rig.lens)
+        u, v = (xd * rig.fx + rig.cx) / scale, (yd * rig.fx + rig.cy) / scale
+        if u.max() < 0 or u.min() >= W or v.max() < 0 or v.min() >= H:
+            continue
+        draw.polygon(list(zip(np.clip(u, -50 * W, 50 * W), np.clip(v, -50 * H, 50 * H))), fill=1)
+    return float(np.asarray(img).mean())
 
 
 def mount_cameras(points: np.ndarray, rig, camera_z: float, *, pitch_down_deg: float = 10.0,
                   clearance_m: float = 0.016, margin_m: float = 0.006,
-                  z_options=(0.0, 0.02, 0.04, 0.06, -0.02)) -> dict[str, Mount]:
+                  z_options=(0.0, 0.02, 0.04, 0.06, -0.02), out_options=(0.0, 0.02, 0.04, 0.07, 0.10, 0.14),
+                  max_blocked: float = 0.01, triangles: np.ndarray | None = None) -> dict[str, Mount]:
     """Front and back mounts on the centre line: the housing's rear face ``clearance_m`` (room for the M12
     connector) beyond the outermost body vertex inside the space the tilted housing sweeps (+ ``margin_m``).
-    Each camera tries the heights ``camera_z + z_options`` and takes the one that sticks out least, as you would
-    when fitting a bracket (a part sticking out low at the tail pushes a tilted camera up, not out)."""
+
+    Each camera tries the heights ``camera_z + z_options`` and extra stand-offs ``out_options`` and takes the most
+    compact mount whose own view is at most ``max_blocked`` covered by the drone's ``triangles`` (as you would when
+    fitting a
+    bracket: a part sticking out low at the tail pushes a tilted camera up rather than out, and a camera that sees
+    its own airframe moves out); if none is clear enough, the least blocked one.  Without triangles only the
+    collision rule applies."""
     w, h, d = (v * 1e-3 for v in rig.body.size_mm)
     length = rig.length_mm() * 1e-3
     half_w, half_h = max(w, rig.lens.diameter_mm * 1e-3) / 2 + margin_m, h / 2 + margin_m
     pitch = math.radians(pitch_down_deg)
+    fwd0 = np.array([math.cos(pitch), 0.0, -math.sin(pitch)])
     mounts = {}
     for name, look in (("front", 1.0), ("back", -1.0)):
-        best = None
-        for dz in sorted(z_options, key=abs):
+        fwd = fwd0 * np.array([look, 1.0, 1.0])
+        cands = []
+        for dz in z_options:
             z = camera_z + dz
             sel = (np.abs(points[:, 1]) <= half_w) & (np.abs(points[:, 2] - z) <= half_h + length * math.sin(pitch))
             ahead = look * points[sel, 0]
             surf = max(float(ahead.max()) if ahead.size else 0.0, 0.0)
-            if best is None or surf < best[0] - 1e-3:
-                best = (surf, z)
-        surface, z_mount = best
-        rear = np.array([look * (surface + clearance_m), 0.0, z_mount])
-        fwd = np.array([look * math.cos(pitch), 0.0, -math.sin(pitch)])
-        lens_front = rear + fwd * length
+            for out in out_options:
+                rear = np.array([look * (surf + clearance_m + out), 0.0, z])
+                lens_front = rear + fwd * length
+                blocked = view_blocked(triangles, lens_front, look, rig, pitch_down_deg) \
+                    if triangles is not None and len(triangles) else 0.0
+                cands.append((surf + out, abs(dz), blocked, surf, out, lens_front))
+        clear = [c for c in cands if c[2] <= max_blocked]
+        best = min(clear, key=lambda c: (round(c[0], 4), c[1])) if clear else min(cands, key=lambda c: (c[2], c[0]))
+        _, _, blocked, surface, out, lens_front = best
         mounts[name] = Mount(name, look, tuple(float(v) for v in lens_front), look * surface,
-                             bracket_mm=(clearance_m + 0.010) * 1e3)
+                             bracket_mm=(clearance_m + out + 0.010) * 1e3, view_blocked=blocked)
     return mounts
 
 

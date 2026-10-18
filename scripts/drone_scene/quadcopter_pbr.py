@@ -167,7 +167,10 @@ except BaseException:  # noqa: BLE001
     say("[drone] could not download/prepare the scene assets")
     fail(3)
 
-if args_cli.record > 0:
+if args_cli.record < 0 and not args_cli.fly:
+    parser.error("--record -1 (the whole flight) needs a flight: --fly or --route straight")
+RECORDING = args_cli.record != 0                    # > 0: that many seconds, < 0: the whole flight
+if RECORDING:
     args_cli.enable_cameras = True
 try:
     say("[drone] starting Isaac Sim ...")
@@ -406,7 +409,8 @@ def main() -> None:
     pts = vehicles.body_points(stage, body)
     if len(pts) == 0:
         say(f"[drone] WARNING: no mesh found under {body}; the cameras are mounted at the body origin")
-    mounts = vehicles.mount_cameras(pts, RIG, VEHICLE.camera_z, pitch_down_deg=CAMERA_PITCH)
+    mounts = vehicles.mount_cameras(pts, RIG, VEHICLE.camera_z, pitch_down_deg=CAMERA_PITCH,
+                                    triangles=vehicles.body_triangles(stage, body))
     onboard = {n: flight.OnboardCamera(n, m.position, m.look, pitch_down_deg=CAMERA_PITCH,
                                        focal_length=PLAN["focal_length"],
                                        horizontal_aperture=PLAN["horizontal_aperture"],
@@ -425,6 +429,7 @@ def main() -> None:
     say(f"[drone] cameras: {lucid.describe(RIG)}")
     for n, m in mounts.items():
         say(f"[drone]   {n}: lens at {tuple(round(v, 3) for v in m.position)} m in the {VEHICLE.body} frame, "
+            f"{100 * m.view_blocked:.1f}% of its view on the drone itself, "
             f"{CAMERA_PITCH:g} deg down; render {PLAN['width']}x{PLAN['height']} (x{PLAN['overscan']:.2f} for the distortion)")
     say(f"[drone] {vehicles.payload_report(VEHICLE, RIG)}")
 
@@ -445,7 +450,7 @@ def main() -> None:
             say(f"[drone] viewport keeps Isaac's default lens ({exc})")
 
     cams: dict[str, Camera] = {}
-    if args_cli.record > 0:
+    if RECORDING:
         for name in [n for n in args_cli.cameras if n in ONBOARD]:
             pos, quat = geom.camera_local(name)
             cams[name] = Camera(CameraCfg(
@@ -535,7 +540,7 @@ def main() -> None:
     count, frame = 0, 0
     while simulation_app.is_running():
         if fl is not None:
-            # kinematic flight: the pose and velocity of the garden tour (looped, 2 s hover between laps)
+            # kinematic flight: the pose and velocity along the flight (looped with a 2 s pause when not recording)
             t = (count * sim_dt) % (fl.duration + 2.0) if not cams else count * sim_dt
             t = min(t, fl.duration)
             p, q, v = fl.position(t), fl.quat_wxyz(t), fl.velocity(t)
@@ -555,7 +560,6 @@ def main() -> None:
         robot.write_data_to_sim()
         capture = bool(cams) and count % every == 0
         if chase is not None and (capture or not cams):
-            t = min(count * sim_dt, fl.duration)
             eye, target = chase.update(fl.position(t), fl.direction, sim_dt * (every if cams else 1))
             if "chase" in cams:
                 cams["chase"].set_world_poses_from_view(torch.tensor([eye], device=sim.device, dtype=torch.float32),
