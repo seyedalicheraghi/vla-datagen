@@ -312,15 +312,17 @@ class ChaseCamera:
         self.back, self.up, self.lag = back, up, lag_s
         self.eye = None
 
-    def update(self, p, direction, dt: float):
+    def update(self, p, v, direction, dt: float):
+        """Smooth follow with velocity feed-forward: a plain first-order lag would trail speed x lag further
+        back (18 m instead of 10 m at 10 m/s)."""
         p = np.asarray(p, float)
         want = p - np.asarray(direction, float) * self.back + np.array([0.0, 0.0, self.up])
         if self.eye is None:
             self.eye = want
         else:
             a = 1.0 - math.exp(-dt / self.lag)
-            self.eye = self.eye + (want - self.eye) * a
-        return [float(v) for v in self.eye], [float(v) for v in p]
+            self.eye = self.eye + (want + np.asarray(v, float) * self.lag - self.eye) * a
+        return [float(c) for c in self.eye], [float(c) for c in p]
 
 
 class HdrReader:
@@ -559,14 +561,17 @@ def main() -> None:
             forces=forces, torques=torch.zeros_like(forces), body_ids=prop_body_ids)
         robot.write_data_to_sim()
         capture = bool(cams) and count % every == 0
-        if chase is not None and (capture or not cams):
-            eye, target = chase.update(fl.position(t), fl.direction, sim_dt * (every if cams else 1))
+        # GUI: a flight renders at the video frame rate (every `every`-th 5 ms step), so it plays in real time;
+        # rendering every physics step would run a 4-minute flight 10x slower.  The hover demo renders every step.
+        render_now = capture if cams else (fl is None or count % every == 0)
+        if chase is not None and render_now:
+            eye, target = chase.update(fl.position(t), fl.velocity(t), fl.direction, sim_dt * every)
             if "chase" in cams:
                 cams["chase"].set_world_poses_from_view(torch.tensor([eye], device=sim.device, dtype=torch.float32),
                                                         torch.tensor([target], device=sim.device, dtype=torch.float32))
             if args_cli.view == "chase" and not args_cli.headless:
                 sim.set_camera_view(eye=list(eye), target=list(target))
-        sim.step(render=capture or not cams)
+        sim.step(render=render_now)
         robot.update(sim_dt)
         if capture:
             for name, cam in cams.items():
