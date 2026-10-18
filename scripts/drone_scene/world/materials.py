@@ -94,7 +94,7 @@ def ground_specs(cache_dir: str, log=None) -> dict[int, MaterialSpec]:
             out[k] = MaterialSpec(name, color=WATER.color, roughness=WATER.roughness)
             continue
         if src.startswith("procedural:"):
-            t = textures.crop_rows(tex_dir, seed=k)
+            t = textures.crop_rows(tex_dir, f"crop_rows_{TEXTURE_VERSION}", seed=k)   # versioned like the others
             out[k] = MaterialSpec(name, {r: t[r] for r in ("albedo", "normal", "orm")}, t["tile_m"], tint,
                                   flip_green=False, roughness_scale=rs)
         else:

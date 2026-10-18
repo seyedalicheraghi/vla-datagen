@@ -45,7 +45,7 @@ from . import usdio  # noqa: E402
 from . import vegetation as V  # noqa: E402
 from .geo import Frame, Grid, compass_to_ccw_from_east, sun_position  # noqa: E402
 
-BUILD_VERSION = "5"     # bump when the output changes for the same arguments (cache key)
+BUILD_VERSION = "6"     # bump when the output changes for the same arguments (cache key)
 DEFAULT_REGION = (42.0250, -93.6900)          # west Ames, Iowa: suburbs, parks and farmland
 ATTRIBUTION = ("Map data: Overture Maps Foundation (OpenStreetMap contributors ODbL, Microsoft/Esri building "
                "footprints), ESA WorldCover 2021 (CC BY 4.0), Copernicus Sentinel-2 data, USGS 3DEP (public domain) / "

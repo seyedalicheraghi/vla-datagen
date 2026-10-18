@@ -103,7 +103,8 @@ fleet-scribe      ledger, backlog, lessons; remove the round's worktrees
 - **Ask before pushing.** `git push` is an "ask" rule, and the hook also catches `git -C dir push`. Force pushes are
   denied. Accepted changes stay on the local branch `realism` until you say merge and push.
 - **Cache safety.** Parallel candidates that change the map or textures give the version constants a suffix
-  (`BUILD_VERSION = "5+r001-c2"`), so they never share a cache entry; the integrator turns them into clean bumps.
+  (`BUILD_VERSION = "6+r001-c2"`), so they never share a cache entry; the integrator turns them into clean bumps.
+  Every generated texture carries `TEXTURE_VERSION` in its file name (the crop-row texture did not until now).
 
 ## Why it is built this way
 
