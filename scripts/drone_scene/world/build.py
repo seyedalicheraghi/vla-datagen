@@ -45,7 +45,7 @@ from . import usdio  # noqa: E402
 from . import vegetation as V  # noqa: E402
 from .geo import Frame, Grid, compass_to_ccw_from_east, sun_position  # noqa: E402
 
-BUILD_VERSION = "4"     # bump when the output changes for the same arguments (cache key)
+BUILD_VERSION = "5"     # bump when the output changes for the same arguments (cache key)
 DEFAULT_REGION = (42.0250, -93.6900)          # west Ames, Iowa: suburbs, parks and farmland
 ATTRIBUTION = ("Map data: Overture Maps Foundation (OpenStreetMap contributors ODbL, Microsoft/Esri building "
                "footprints), ESA WorldCover 2021 (CC BY 4.0), Copernicus Sentinel-2 data, USGS 3DEP (public domain) / "
@@ -68,7 +68,9 @@ def parse(argv=None):
     p.add_argument("--takeoff", type=_latlon, default=None, help="lat,lon of the take-off spot")
     p.add_argument("--landing", type=_latlon, default=None, help="lat,lon of the landing spot")
     p.add_argument("--distance", type=float, default=2000.0)
-    p.add_argument("--when", default="2025-07-15T15:30:00Z", help="UTC date/time: sets the sun")
+    p.add_argument("--when", default=None,
+                   help="UTC date/time (e.g. 2025-07-15T15:30:00Z): sets the sun.  Default: 10:30 local solar time "
+                        "on 15 July (north of the equator) or 15 January (south)")
     p.add_argument("--half-width", type=float, default=600.0, help="detail zone half width around the route (m)")
     p.add_argument("--margin", type=float, default=400.0, help="detail zone beyond take-off and landing (m)")
     p.add_argument("--far", type=float, default=6000.0, help="far terrain half size around the route centre (m)")
@@ -82,9 +84,32 @@ def parse(argv=None):
 
 
 def _key(a) -> str:
-    blob = repr((BUILD_VERSION, a.region if not (a.takeoff and a.landing) else None, a.takeoff, a.landing, a.distance,
-                 a.when, a.half_width, a.margin, a.far, a.horizon, a.cruise_agl, a.clearance, a.max_trees, a.seed))
+    """What changes the geometry.  The sun (--when) and the cruise height only change world.json, which is
+    refreshed on a cache hit (``finish_manifest``), so they are not in the key."""
+    blob = repr((BUILD_VERSION, a.region if not a.takeoff else None, a.takeoff, a.landing, a.distance,
+                 a.half_width, a.margin, a.far, a.horizon, a.max_trees, a.seed))
     return hashlib.sha1(blob.encode()).hexdigest()[:10]
+
+
+def default_when(lat: float, lon: float) -> dt.datetime:
+    """10:30 local solar time on 15 July (northern hemisphere) or 15 January (southern), in UTC."""
+    day = dt.datetime(2025, 7, 15) if lat >= 0 else dt.datetime(2025, 1, 15)
+    return day + dt.timedelta(hours=10.5 - lon / 15.0)
+
+
+def finish_manifest(man: dict, a, log) -> dict:
+    """The parts of world.json that depend on --when, --cruise-agl and --clearance (cheap to recompute)."""
+    t = man["takeoff"]
+    when = (dt.datetime.fromisoformat(a.when.replace("Z", "+00:00")) if a.when
+            else default_when(t["lat"], t["lon"]))
+    el, az = sun_position(t["lat"], t["lon"], when)
+    if el < 10:
+        log(f"[world] WARNING: the sun is only {el:.1f} deg above the horizon at {when.isoformat()} UTC (give --when)")
+    man["sun"] = {"when_utc": when.isoformat(), "elevation_deg": el, "azimuth_compass_deg": az,
+                  "azimuth_ccw_from_east_deg": compass_to_ccw_from_east(az)}
+    obstacle = man["cruise"]["obstacle_top"]
+    man["cruise_z"] = max(a.cruise_agl, obstacle + a.clearance)
+    return man
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +120,8 @@ def find_site(a, cache, log):
     """(takeoff lat/lon, landing lat/lon, notes) from the arguments or the map."""
     if a.takeoff and a.landing:
         return a.takeoff, a.landing, {"chosen": "given"}
+    if a.landing:
+        raise SystemExit("--landing needs --takeoff too (or give neither and let the map choose)")
     lat0, lon0 = a.takeoff or a.region
     f = Frame(lat0, lon0)
     r = a.distance + 500.0 if not a.takeoff else a.distance + 300.0
@@ -106,19 +133,21 @@ def find_site(a, cache, log):
     rd_all = [(r.line, R.road_spec(r)[0]) for r in data.roads(ov["segment"])]
     rd = [x for x in rd_all if x[1] >= 3.0]
     water = data.water_polygons(ov["water"])
-    classes = ground_classes(f, rect, 10.0, cache, ov.get("land_use"), water, log)
+    classes = ground_classes(f, rect, 10.0, cache, ov.get("land_use"), water, log,
+                             streams=data.stream_lines(ov["water"]))
     canopy = data.canopy(f, rect, 2.0, cache, log)
-    if a.takeoff:
-        houses = [h for h in houses if h.distance(__import__("shapely").points(0, 0)) < 60] or houses
     st = S.choose(houses, [fp.polygon for fp in fps], rd, water, classes, canopy, a.distance, log=log,
-                  takeoff_roads=rd_all)
+                  takeoff_roads=rd_all, fixed_takeoff=(0.0, 0.0) if a.takeoff else None)
     lon_t, lat_t = f.to_lonlat(*st.takeoff)
     lon_l, lat_l = f.to_lonlat(*st.landing)
     return (float(lat_t), float(lon_t)), (float(lat_l), float(lon_l)), dict(st.notes, score=st.score)
 
 
-def ground_classes(frame, rect, res, cache, ov_land_use=None, water=None, log=print, seed=0) -> Grid:
-    """Our ground classes on the frame at ``res``: WorldCover upsampled, then Overture land use and water."""
+def ground_classes(frame, rect, res, cache, ov_land_use=None, water=None, log=print, seed=0, streams=(),
+                   sentinel: Grid | None = None) -> Grid:
+    """Our ground classes on the frame at ``res``: WorldCover upsampled, then Overture land use, water areas and
+    creeks / ditches (water lines buffered to their width).  In an arid region (the satellite's mean colour is
+    not green) unwatered 'lawn' and 'meadow' become soil: built-up land there is not a lawn."""
     wc = data.worldcover(frame, rect, cache, log)
     cls = lc.from_worldcover(wc)
     cls = lc.upsample_classes(cls, rect, res, seed=seed) if res < wc.res else cls.resample(rect, res, "nearest")
@@ -131,6 +160,18 @@ def ground_classes(frame, rect, res, cache, ov_land_use=None, water=None, log=pr
             lc.burn(cls, by.get(k, []), k)
     if water:
         lc.burn(cls, water, lc.WATER)
+    if streams:
+        lc.burn(cls, [g.buffer(w / 2) for g, w in streams], lc.WATER)
+    if sentinel is not None:
+        X, Y = cls.centres()
+        rgb = np.stack([Grid(sentinel.data[..., c], sentinel.x0, sentinel.y1, sentinel.res).sample(X, Y)
+                        for c in range(3)], -1)
+        green = (rgb[..., 1] - rgb[..., 0]) / np.maximum(rgb[..., 1] + rgb[..., 0], 1e-6)
+        grassy = np.isin(cls.data, [lc.LAWN, lc.MEADOW])
+        if grassy.any() and float(np.median(green[grassy])) < 0.0:
+            dry = grassy & (green < 0.02)
+            cls.data[dry] = lc.SOIL
+            log(f"[world] arid region: {100 * dry.mean():.0f}% of the ground is dry soil rather than grass")
     return cls
 
 
@@ -139,51 +180,105 @@ def _pads(takeoff_z: float, landing_xy, landing_z: float):
             T.Pad(landing_xy[0], landing_xy[1], landing_z, flat_r=10.0, blend_r=26.0)]
 
 
+def crop_fields(classes: Grid, roads=()):
+    """Field id grid: connected crop areas, cut along roads; and each field's row direction (rad), along its
+    longest axis (rows run the long way, as they are planted)."""
+    from scipy.ndimage import label
+    crop = classes.data == lc.CROP
+    if roads:
+        cut = Grid(np.zeros(classes.shape, np.uint8), classes.x0, classes.y1, classes.res)
+        lc.burn(cut, [g.buffer(max(w / 2, classes.res)) for g, w in roads], 1)
+        crop &= cut.data == 0
+    lab, n = label(crop)
+    angles = {}
+    if n:
+        X, Y = classes.centres()
+        idx = lab.ravel()
+        cnt = np.bincount(idx, minlength=n + 1).astype(float)
+        mx, my = (np.bincount(idx, w, n + 1) / np.maximum(cnt, 1) for w in (X.ravel(), Y.ravel()))
+        cxx = np.bincount(idx, (X.ravel() - mx[idx]) ** 2, n + 1)
+        cyy = np.bincount(idx, (Y.ravel() - my[idx]) ** 2, n + 1)
+        cxy = np.bincount(idx, (X.ravel() - mx[idx]) * (Y.ravel() - my[idx]), n + 1)
+        for f in range(1, n + 1):
+            angles[f] = 0.5 * math.atan2(2 * cxy[f], cxx[f] - cyy[f])
+    return Grid(lab.astype(np.int32), classes.x0, classes.y1, classes.res), angles
+
+
 def ground_materials(classes: Grid, sentinel: Grid | None, specs: dict, faces_xy: np.ndarray, faces_cls: np.ndarray,
-                     n_variants: int = 6, seed: int = 0):
-    """Material list + per-face material index + per-face UV params, with Sentinel-calibrated tint variants."""
+                     n_variants: int = 6, seed: int = 0, fields=None, log=print):
+    """Material list + per-face material index + per-face UV params.
+
+    Colour: each class's texture is tinted to the class's real reflectance, the median Sentinel-2 colour over
+    faces deep inside that class (>= 90 % of the 22 m around them is the same class, so suburban 'lawn' is not
+    calibrated against roofs and trees; for lawn, also only the greenest 30 % of those).  On top, every ~25 m patch (45 m for crops) gets the satellite's local
+    brightness relative to the class (0.75-1.3x), quantised into ``n_variants`` materials.  The forest floor is
+    not calibrated (the satellite sees the canopy, not the floor): it is the texture, darkened by the shade.
+    UVs: crop rows run along each field's long axis, with one phase per field; other classes get a random
+    rotation and phase per patch, so no texture repeat lines up across the ground."""
+    from scipy.ndimage import uniform_filter
     rng = np.random.default_rng(seed)
     patch = T.patch_ids(faces_xy[:, 0], faces_xy[:, 1], 25.0, seed)
     crop_patch = T.patch_ids(faces_xy[:, 0], faces_xy[:, 1], 45.0, seed + 1)
     patch = np.where(faces_cls == lc.CROP, crop_patch, patch)
+    s_rgb = None
+    if sentinel is not None:
+        s_rgb = np.column_stack([Grid(sentinel.data[..., c], sentinel.x0, sentinel.y1, sentinel.res).sample(
+            faces_xy[:, 0], faces_xy[:, 1]) for c in range(3)])
+    size = max(3, int(round(22.0 / classes.res)) | 1)
     mats, face_mat = [], np.zeros(len(faces_cls), np.int32)
     tile = np.ones(len(faces_cls))
     angle = np.zeros(len(faces_cls))
+    clamped = {}
     for k in np.unique(faces_cls):
         sel = faces_cls == k
         spec = specs[int(k)]
         pid = patch[sel]
         upid, inv = np.unique(pid, return_inverse=True)
-        if sentinel is not None and spec.textures.get("albedo"):
-            xy = faces_xy[sel]
-            rgb = np.column_stack([Grid(sentinel.data[..., c], sentinel.x0, sentinel.y1, sentinel.res).sample(xy[:, 0], xy[:, 1])
-                                   for c in range(3)])
-            sums = np.zeros((len(upid), 3))
-            np.add.at(sums, inv, rgb)
-            counts = np.bincount(inv, minlength=len(upid))[:, None]
-            patch_rgb = sums / np.maximum(counts, 1)
-            tints = np.array([M.calibrate_tints(spec, c, strength=0.85) for c in patch_rgb])
+        base_tint = np.asarray(spec.tint, float)
+        if k == lc.FOREST:
+            base_tint = base_tint * 0.55
+            lum_var = 1.0 + 0.06 * rng.standard_normal(len(upid))
+        elif s_rgb is not None and spec.textures.get("albedo"):
+            purity = Grid(uniform_filter((classes.data == k).astype(np.float32), size), classes.x0, classes.y1,
+                          classes.res).sample(faces_xy[sel, 0], faces_xy[sel, 1])
+            rgb = s_rgb[sel]
+            pure = purity >= 0.9
+            if k == lc.LAWN and pure.sum() > 50:
+                # 'lawn' is also WorldCover's built-up land: even its pure 10 m pixels hold roofs and streets, so
+                # take the greenest 30 % of them, the actual grass
+                g = (rgb[:, 1] - rgb[:, 0]) / np.maximum(rgb[:, 1] + rgb[:, 0], 1e-6)
+                pure &= g >= np.percentile(g[pure], 70)
+            target = np.median(rgb[pure] if pure.sum() > 50 else rgb, axis=0)
+            want = target / np.maximum(M.mean_albedo(spec.textures["albedo"]), 1e-4)
+            base_tint = np.clip(want, 0.05, 8.0)
+            clamped[spec.name] = bool((want != base_tint).any())
+            lum = rgb @ np.array([0.2126, 0.7152, 0.0722])
+            sums = np.bincount(inv, lum, len(upid))
+            counts = np.bincount(inv, minlength=len(upid))
+            ref = float(target @ np.array([0.2126, 0.7152, 0.0722]))
+            lum_var = np.clip((sums / np.maximum(counts, 1)) / max(ref, 1e-6), 0.75, 1.3)
         else:
-            lum = 1.0 + 0.08 * rng.standard_normal(len(upid))
-            tints = np.asarray(spec.tint)[None, :] * lum[:, None]
-        # quantise the patch tints into a few material variants (k-means in log space)
-        L = np.log(np.maximum(tints, 1e-3))
+            lum_var = 1.0 + 0.08 * rng.standard_normal(len(upid))
+        # quantise the patch brightness into a few material variants
         nv = min(n_variants, len(upid))
-        cent = L[np.linspace(0, len(L) - 1, nv).astype(int)]
-        for _ in range(12):
-            lab = np.argmin(((L[:, None, :] - cent[None]) ** 2).sum(-1), axis=1)
-            cent = np.array([L[lab == c].mean(0) if (lab == c).any() else cent[c] for c in range(nv)])
+        qs = np.quantile(lum_var, np.linspace(0, 1, nv + 1))
+        lab = np.clip(np.searchsorted(qs[1:-1], lum_var, side="right"), 0, nv - 1)
         base = len(mats)
         for c in range(nv):
-            mats.append(spec.with_tint(f"{spec.name}_{c}", tuple(np.exp(cent[c]) / np.asarray(spec.tint))))
+            level = float(np.median(lum_var[lab == c])) if (lab == c).any() else 1.0
+            mats.append(spec.with_tint(f"{spec.name}_{c}", tuple(base_tint * level / np.asarray(spec.tint))))
         face_mat[sel] = base + lab[inv]
         tile[sel] = spec.tile_m
-        if k == lc.CROP:
-            ang = {int(p): float(rng.choice([0.0, math.pi / 2])) for p in upid}
-            angle[sel] = np.array([ang[int(p)] for p in pid])
-        else:
-            angle[sel] = (pid * 2654435761 % 6283) / 1000.0
+        angle[sel] = (pid * 2654435761 % 6283) / 1000.0
     offset = np.column_stack([(patch * 40503 % 1000) / 1000.0, (patch * 9973 % 1000) / 1000.0])
+    if fields is not None and (faces_cls == lc.CROP).any():
+        lab_grid, angles = fields
+        crop = faces_cls == lc.CROP
+        fid = lab_grid.sample(faces_xy[crop, 0], faces_xy[crop, 1], "nearest")
+        angle[crop] = np.array([angles.get(int(f), 0.0) for f in fid])
+        offset[crop] = np.column_stack([(fid * 40503 % 1000) / 1000.0, (fid * 9973 % 1000) / 1000.0])
+    if any(clamped.values()):
+        log(f"[world] note: colour calibration hit its limits for {', '.join(k for k, v in clamped.items() if v)}")
     return mats, face_mat, tile, angle, offset
 
 
@@ -206,7 +301,7 @@ def blended_height(height: Grid, fine: Grid | None, band: float = 5.0):
 
 
 def terrain_meshes(height: Grid, fine: Grid | None, classes: Grid, sentinel, specs, rect, route, pads, log,
-                   lod=T.Lod(), tile_size=250.0, seed=0):
+                   lod=T.Lod(), tile_size=250.0, seed=0, fields=None):
     """Detail-zone terrain: one merged MeshData, its material list, and the ``terrain.Surface`` of its triangles."""
     a, b = route
     hfun = blended_height(height, fine)
@@ -219,7 +314,8 @@ def terrain_meshes(height: Grid, fine: Grid | None, classes: Grid, sentinel, spe
     cen = T.face_centroids(allm)
     # skirts take the class of the ground right above them
     fcls = classes.sample(cen[:, 0], cen[:, 1], "nearest").astype(np.int32)
-    mats, fmat, tile, angle, offset = ground_materials(classes, sentinel, specs, cen[:, :2], fcls, seed=seed)
+    mats, fmat, tile, angle, offset = ground_materials(classes, sentinel, specs, cen[:, :2], fcls, seed=seed,
+                                                       fields=fields, log=log)
     allm.material = fmat
     allm.uv = T.face_uvs(allm, tile, angle, offset)
     log(f"[world] terrain: {len(meshes)} tiles, {allm.n_faces / 1e6:.2f} M triangles, {len(mats)} ground materials")
@@ -404,6 +500,10 @@ def build(a, log=print) -> str:
     out_dir = os.path.join(os.path.expanduser(a.out), f"{a.name}_{key}")
     man_path = os.path.join(out_dir, "world.json")
     if os.path.exists(man_path) and not a.force:
+        with open(man_path, encoding="utf-8") as fh:
+            man = finish_manifest(json.load(fh), a, log)
+        with open(man_path, "w", encoding="utf-8") as fh:
+            json.dump(man, fh, indent=1)
         log(f"[world] cached: {man_path}")
         return man_path
     os.makedirs(out_dir, exist_ok=True)
@@ -448,10 +548,19 @@ def build(a, log=print) -> str:
     # map features
     ov = data.overture(frame, far, ["building", "segment", "water", "land_use", "land"], cache, log)
     water = data.water_polygons(ov["water"])
-    classes = ground_classes(frame, detail, 2.0, cache, ov["land_use"], water, log, seed=a.seed)
+    sentinel = data.sentinel(frame, far, 10.0, cache, log)
+    classes = ground_classes(frame, detail, 2.0, cache, ov["land_use"], water, log, seed=a.seed,
+                             streams=data.stream_lines(ov["water"]), sentinel=sentinel)
     canopy_d = data.canopy(frame, detail, 1.0, cache, log)
     canopy_f = data.canopy(frame, far, 10.0, cache, log)
-    sentinel = data.sentinel(frame, far, 10.0, cache, log)
+    if any(src in ("cop30", "terrarium") for src in h_info["sources"]):
+        # a surface model (trees and roofs in it): take the canopy back off, or every wood stands on a mound
+        log("[world] WARNING: no bare-earth lidar terrain here; using a surface model with the canopy height "
+            "subtracted (expect ~1-3 m errors under woods and towns)")
+        for g, c in ((h_detail, canopy_d), (h_fine, canopy_d), (h_far, canopy_f)):
+            if c is not None:
+                X, Y = g.centres()
+                g.data -= (0.8 * c.sample(X, Y)).astype(g.data.dtype)
 
     # trees
     footprints = data.buildings(ov["building"])
@@ -470,8 +579,9 @@ def build(a, log=print) -> str:
         trees = trees[np.argsort(-trees[:, 2])[:a.max_trees]]
     # geometry: terrain first, then everything stands on its exact triangles
     specs = M.ground_specs(cache, log=None)
+    fields = crop_fields(classes, [(r.line, R.road_spec(r)[0]) for r in road_list if r.line.intersects(in_detail)])
     ter, ter_mats, ground = terrain_meshes(h_detail, h_fine, classes, sentinel, specs, detail, route, pads, log,
-                                           seed=a.seed)
+                                           seed=a.seed, fields=fields)
     far_buildings = [fp.polygon for fp in footprints if not fp.polygon.within(in_detail)]
     far_road_lines = [(r.line, R.road_spec(r)[0]) for r in road_list if not r.line.within(in_detail)]
     far_mesh, far_mats, far_surface = far_terrain(h_far, far_canopy(canopy_f, far_buildings, far_road_lines, detail),
@@ -510,7 +620,7 @@ def build(a, log=print) -> str:
     rstats = {"segments": rs1["segments"] + rs2["segments"], "length_km": rs1["length_km"] + rs2["length_km"]}
     log(f"[world] buildings: {bstats}; roads: {rstats['segments']} segments, {rstats['length_km']:.0f} km")
     grass = landing_grass((lx, ly), ground, seed=a.seed)
-    cz, cinfo = cruise_height(route, h_detail, canopy_d, footprints, a)
+    _, cinfo = cruise_height(route, h_detail, canopy_d, footprints, a)
 
     write_usd(os.path.join(out_dir, "world.usdc"), {
         "terrain": ter, "terrain_mats": ter_mats, "far": far_mesh, "far_mats": far_mats,
@@ -518,21 +628,18 @@ def build(a, log=print) -> str:
         "buildings": bmesh, "building_mats": M.building_specs(cache), "roads": rmesh, "road_mats": M.road_specs(cache),
         "trees": tree_inst, "grass": grass}, log)
 
-    when = dt.datetime.fromisoformat(a.when.replace("Z", "+00:00"))
-    el, az = sun_position(lat_t, lon_t, when)
     man = {
         "version": BUILD_VERSION, "key": key, "dir": out_dir, "usd": os.path.join(out_dir, "world.usdc"),
         "origin": {"lat": lat_t, "lon": lon_t, "elevation_m": z0, "proj4": frame.proj4},
         "takeoff": {"x": 0.0, "y": 0.0, "z": z_take, "lat": lat_t, "lon": lon_t, "kind": "backyard"},
         "landing": {"x": lx, "y": ly, "z": z_land, "lat": lat_l, "lon": lon_l, "kind": "grass"},
-        "distance_m": dist, "heading_deg": heading, "cruise_z": cz, "cruise": cinfo,
-        "sun": {"when_utc": when.isoformat(), "elevation_deg": el, "azimuth_compass_deg": az,
-                "azimuth_ccw_from_east_deg": compass_to_ccw_from_east(az)},
+        "distance_m": dist, "heading_deg": heading, "cruise": cinfo,
         "extent": {"detail": detail, "far": far}, "site": site_notes, "terrain_sources": h_info,
         "stats": {"buildings": bstats, "roads_km": round(rstats["length_km"], 1), "trees": int(len(trees)),
                   "terrain_triangles": int(ter.n_faces), "seconds": round(time.time() - t0)},
         "attribution": ATTRIBUTION,
     }
+    man = finish_manifest(man, a, log)
     with open(man_path, "w", encoding="utf-8") as fh:
         json.dump(man, fh, indent=1)
     log(f"[world] done in {time.time() - t0:.0f} s -> {man_path}")
@@ -569,6 +676,7 @@ def model_heights(cache, log) -> dict:
         with open(path) as fh:
             known = json.load(fh)
     missing = [s for s in V.SPECIES if s.key not in known]
+    fallback = {}
     if missing:
         for s in missing:
             if s.height_m:
@@ -580,12 +688,12 @@ def model_heights(cache, log) -> dict:
                     raise ValueError(f"implausible height {h * s.units:.3g} m")
                 known[s.key] = h * s.units
             except Exception as exc:  # noqa: BLE001
-                log(f"[world] could not measure {s.key} ({exc}); assuming 15 m")
-                known[s.key] = 15.0
+                log(f"[world] could not measure {s.key} ({exc}); assuming 15 m for this build only")
+                fallback[s.key] = 15.0
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as fh:
-            json.dump(known, fh, indent=1)
-    return known
+            json.dump(known, fh, indent=1)                 # measured heights only; fallbacks are retried next time
+    return dict(known, **fallback)
 
 
 def main(argv=None):

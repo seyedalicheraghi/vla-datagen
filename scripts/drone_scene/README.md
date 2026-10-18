@@ -132,8 +132,8 @@ What the run does:
 - **Map.** The first run installs the map tools into `~/.cache/drone_scene/world_libs`, once and outside
   Isaac Sim's packages (about 250 MB). It downloads about 150 MB of map data and builds the map in a few
   minutes on the CPU. The map is cached under `~/.cache/drone_scene/worlds/`; later runs start at once.
-- **Sun and sky.** The sun is placed for the real date and time (`--when`, default 15 Jul 2025, 10:30
-  local). The sky is a pure-sky HDR whose glow is turned to the sun's direction.
+- **Sun and sky.** The sun is placed for the real date and time (`--when`; default 10:30 local solar
+  time in midsummer: 15 July north of the equator, 15 January south of it). The sky is a pure-sky HDR whose glow is turned to the sun's direction.
 - **Cruise height.** It is `--cruise_agl` (40 m) above the take-off, raised if needed to stay 15 m above
   every tree and building near the line.
 - **Flight attitude.** At 10 m/s the drone leans about 12° into the air stream, like a real quadrotor. The
@@ -143,8 +143,9 @@ What the run does:
 
 Choosing the place: `--region LAT,LON` searches for a route around that point (default: west Ames, Iowa). The
 search looks for a backyard behind a house, then open grass `--distance` metres away at least 35 m from
-buildings, trees and roads. It prefers the route that crosses the most varied ground. To fly a specific path,
-give `--takeoff LAT,LON --landing LAT,LON`. Outside the US the terrain falls back to Copernicus 30 m, a
+buildings, trees and roads. It prefers the route that crosses the most varied ground. To fly a specific path, give `--takeoff=LAT,LON --landing=LAT,LON`; with `--takeoff` alone, the map
+finds open grass `--distance` metres away. Write coordinates with `=`, so a negative first number works
+(`--region=-33.87,151.21`). Changing `--when` or `--cruise_agl` reuses the built map. Outside the US the terrain falls back to Copernicus 30 m, a
 surface model that includes trees and buildings.
 
 ## Tests (no Isaac Sim needed)

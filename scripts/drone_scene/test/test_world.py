@@ -111,6 +111,45 @@ class TestTerrain(unittest.TestCase):
         np.testing.assert_array_equal(ids, T.patch_ids(x, y, 25.0))
 
 
+@unittest.skipUnless(DEPS, "shapely/pxr missing")
+class TestBuildLogic(unittest.TestCase):
+    def test_crop_fields_follow_the_long_axis(self):
+        from drone_scene.world import build
+        g = geo.Grid(np.full((100, 100), lc.LAWN, np.uint8), 0.0, 200.0, 2.0)
+        X, Y = g.centres()
+        g.data[(X > 20) & (X < 180) & (Y > 40) & (Y < 80)] = lc.CROP          # wide field: rows east-west
+        g.data[(X > 40) & (X < 70) & (Y > 100) & (Y < 190)] = lc.CROP         # tall field: rows north-south
+        lab, ang = build.crop_fields(g)
+        self.assertEqual(len(ang), 2)
+        a1 = ang[int(lab.sample(np.array([100.0]), np.array([60.0]), "nearest")[0])]
+        a2 = ang[int(lab.sample(np.array([55.0]), np.array([150.0]), "nearest")[0])]
+        self.assertAlmostEqual(abs(math.cos(a1)), 1.0, places=3)
+        self.assertAlmostEqual(abs(math.sin(a2)), 1.0, places=3)
+        # a road across the wide field splits it in two
+        lab2, ang2 = build.crop_fields(g, [(LineString([(100, 0), (100, 200)]), 8.0)])
+        self.assertEqual(len(ang2), 3)
+
+    def test_default_time_is_local_morning(self):
+        from drone_scene.world import build
+        for lat, lon in ((42.0, -93.7), (-33.9, 151.2), (51.5, 0.0)):
+            when = build.default_when(lat, lon)
+            el, az = geo.sun_position(lat, lon, when)
+            self.assertGreater(el, 45.0)
+            self.assertTrue(0 < az < 180, "morning: the sun is in the eastern half")
+
+    def test_negative_coordinates(self):
+        from drone_scene.world import build
+        a = build.parse(["--out", "x", "--cache", "y", "--region=-33.87,151.21"])
+        self.assertEqual(a.region, (-33.87, 151.21))
+
+    def test_streams_have_widths(self):
+        from drone_scene.world import data
+        import pyarrow as pa
+        tbl = pa.table({"subtype": ["stream", "water"], "class": ["stream", "ditch"]})
+        out = data.stream_lines((tbl, [LineString([(0, 0), (10, 0)]), LineString([(0, 5), (10, 5)])]))
+        self.assertEqual([w for _, w in out], [2.5, 1.5])
+
+
 class TestHorizon(unittest.TestCase):
     def test_ring_surrounds_the_far_zone(self):
         from drone_scene.world import build

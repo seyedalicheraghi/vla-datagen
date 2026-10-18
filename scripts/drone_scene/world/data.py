@@ -62,6 +62,12 @@ def overture(frame: Frame, rect, kinds, cache_dir: str, log=print) -> dict:
     cnt = ov.ByteCounter()
     for kind in kinds:
         tbl = ov.read_bbox(kind, bbox, cache_dir=_cache(cache_dir, "overture"), counter=cnt)
+        if tbl is None:                                 # nothing of this kind in the area (desert, open sea, ...)
+            import pyarrow as pa
+            tbl = pa.table({"geometry": pa.array([], pa.binary())})
+            out[kind] = (tbl, [])
+            log(f"[world] overture {kind}: none here")
+            continue
         geoms = ov.to_shapely(tbl)
         if kind == "segment":
             geoms = ov.clip_to_bbox(geoms, bbox)
@@ -117,9 +123,19 @@ def water_polygons(ov_water):
     return [g for g in geoms if g is not None and g.geom_type in ("Polygon", "MultiPolygon")]
 
 
+# typical widths (m) of mapped water lines by class / subtype
+STREAM_WIDTH = {"river": 12.0, "canal": 6.0, "stream": 2.5, "drain": 1.5, "ditch": 1.5, "brook": 1.5, "tidal_channel": 6.0}
+
+
 def stream_lines(ov_water):
+    """[(line, width m)] for water mapped as lines (creeks, ditches, rivers too narrow for polygons)."""
     tbl, geoms = ov_water
-    return [g for g in geoms if g is not None and g.geom_type in ("LineString", "MultiLineString")]
+    sub, cls = _col(tbl, "subtype"), _col(tbl, "class")
+    out = []
+    for i, g in enumerate(geoms):
+        if g is not None and g.geom_type in ("LineString", "MultiLineString"):
+            out.append((g, STREAM_WIDTH.get(cls[i] or "", STREAM_WIDTH.get(sub[i] or "", 2.0))))
+    return out
 
 
 def land_use(ov_land_use):
@@ -175,11 +191,14 @@ def worldcover(frame: Frame, rect, cache_dir: str, log=print) -> Grid:
     return g
 
 
-def sentinel(frame: Frame, rect, res: float, cache_dir: str, log=print) -> Grid | None:
-    """Sentinel-2 L2A surface reflectance (linear RGB, ~albedo) of the clearest leaf-on scene, (ny, nx, 3)."""
+def sentinel(frame: Frame, rect, res: float, cache_dir: str, log=print, months=None) -> Grid | None:
+    """Sentinel-2 L2A surface reflectance (linear RGB, ~albedo) of the clearest leaf-on scene, (ny, nx, 3).
+    ``months`` default: June-August north of the equator, December-February south of it.  Cloud, cloud shadow,
+    cirrus, snow and no-data pixels (the scene classification, SCL) are filled from their clear neighbours."""
     from .sources import landcover as L
     gd = _grid_dict(frame, rect, res)
     bbox = frame.bbox_lonlat(rect)
+    months = months or ((6, 7, 8) if frame.lat0 >= 0 else (12, 1, 2))
     try:
         tiles = L.s2_tiles_for_bbox(bbox)
         cov = [t for t in tiles if t["covers"]]
@@ -188,10 +207,16 @@ def sentinel(frame: Frame, rect, res: float, cache_dir: str, log=print) -> Grid 
         valid = np.zeros((gd["height"], gd["width"]), bool)
         picked = []
         for grp in groups:
-            best, _ = L.pick_s2_scene(bbox, gd, grp, verbose=False)
+            best, _ = L.pick_s2_scene(bbox, gd, grp, months=months, verbose=False)
             if best is None:
                 continue
             r = L.read_s2_rgb(best, gd, mode="srgb")
+            try:
+                from scipy.ndimage import binary_dilation
+                bad = np.isin(L.scene_scl(best, gd), L.SCL_BAD)
+                r["valid"] &= ~binary_dilation(bad, iterations=1)
+            except Exception as exc:  # noqa: BLE001  (no SCL: keep the scene as is)
+                log(f"[world] no cloud mask for {best.get('id', '?')} ({exc})")
             fill = ~valid & r["valid"]
             refl[fill] = r["refl"][fill]
             valid |= r["valid"]

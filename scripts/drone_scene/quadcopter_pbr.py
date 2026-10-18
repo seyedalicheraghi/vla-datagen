@@ -65,11 +65,15 @@ parser.add_argument("--fly", action="store_true", help="fly the 20 s garden tour
 parser.add_argument("--route", default="garden", choices=["garden", "straight"],
                     help="garden: the 20 s backyard tour; straight: take off from a real backyard, fly --distance m "
                          "straight over a real map built from open geodata (world/), land on grass")
-parser.add_argument("--region", default=None, help="lat,lon to look for a straight route around (default: Ames, Iowa)")
-parser.add_argument("--takeoff", default=None, help="lat,lon of the take-off spot (straight route)")
-parser.add_argument("--landing", default=None, help="lat,lon of the landing spot (straight route)")
+parser.add_argument("--region", default=None,
+                    help="lat,lon to look for a straight route around (default: Ames, Iowa); write a negative first "
+                         "number as --region=-33.87,151.21")
+parser.add_argument("--takeoff", default=None, help="lat,lon of the take-off spot (straight route; --takeoff=LAT,LON)")
+parser.add_argument("--landing", default=None, help="lat,lon of the landing spot (needs --takeoff too)")
 parser.add_argument("--distance", type=float, default=2000.0, help="straight route length (m)")
-parser.add_argument("--when", default="2025-07-15T15:30:00Z", help="UTC date and time of the flight (sets the sun)")
+parser.add_argument("--when", default=None,
+                    help="UTC date and time of the flight, e.g. 2025-07-15T15:30:00Z (sets the sun; default 10:30 "
+                         "local solar time in midsummer)")
 parser.add_argument("--cruise_agl", type=float, default=40.0, help="cruise height above the take-off ground (m)")
 parser.add_argument("--speed", type=float, default=10.0, help="cruise speed (m/s)")
 parser.add_argument("--camera_pitch", type=float, default=None,
@@ -103,6 +107,8 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 if args_cli.route == "straight":
     args_cli.fly = True
+if args_cli.landing and not args_cli.takeoff:
+    parser.error("--landing needs --takeoff too (or give neither and let the map choose a route)")
 if "chase" in ({args_cli.view} | set(args_cli.cameras)) and args_cli.route != "straight":
     parser.error("the chase camera follows the straight route (--route straight)")
 if not args_cli.fly and ({args_cli.view} | set(args_cli.cameras)) & set(ONBOARD):
@@ -142,10 +148,12 @@ WORLD = None
 if args_cli.route == "straight":
     try:
         from drone_scene.world import runner
-        wargs = ["--distance", f"{args_cli.distance:g}", "--when", args_cli.when, "--cruise-agl", f"{args_cli.cruise_agl:g}"]
-        for flag, val in (("--region", args_cli.region), ("--takeoff", args_cli.takeoff), ("--landing", args_cli.landing)):
+        # --flag=value: a value may start with a minus sign (southern / western coordinates)
+        wargs = [f"--distance={args_cli.distance:g}", f"--cruise-agl={args_cli.cruise_agl:g}"]
+        for flag, val in (("--region", args_cli.region), ("--takeoff", args_cli.takeoff),
+                          ("--landing", args_cli.landing), ("--when", args_cli.when)):
             if val:
-                wargs += [flag, val]
+                wargs.append(f"{flag}={val}")
         WORLD = runner.ensure_world(os.path.expanduser(args_cli.cache), wargs, log=say)
         say(f"[drone] map: take-off {WORLD['takeoff']['lat']:.5f},{WORLD['takeoff']['lon']:.5f} -> landing "
             f"{WORLD['landing']['lat']:.5f},{WORLD['landing']['lon']:.5f} ({WORLD['distance_m']:.0f} m, heading "
