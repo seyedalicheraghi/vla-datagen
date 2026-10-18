@@ -11,22 +11,21 @@ This is a record of the work done in the Claude Code session on branch `claude/r
 
 | Location | State |
 |---|---|
-| `seyedalicheraghi/vla-datagen` (public fork), branch `claude/review-last-request-I6mXJ` | All the work below. Latest commit `ee32bb6`. |
-| `seyedalicheraghi/vla-datagen`, branch `main` | Untouched |
-| `seyedalicheraghi/IsaacSim` (your private repo) | **Not updated.** The session could only push to `vla-datagen`. |
+| `seyedalicheraghi/IsaacSim` (your private repo), branch `main` | **All the work below.** Same commit on its `claude/review-last-request-I6mXJ` branch. |
+| `seyedalicheraghi/vla-datagen` (old public fork), branch `claude/review-last-request-I6mXJ` | The same commit. Safe to delete. |
 
-The branch is your `main` (Oct 6 forklift work) plus 49 commits: 175 files, about 58,000 added lines. Only two of your
-existing files changed: `README.md` (2 lines added) and `.gitignore` (9 lines added).
+`main` is your earlier `main` (Oct 6 forklift work) plus the commits listed at the end: 175+ files, about 58,000 added
+lines. Only two of your existing files changed: `README.md` (2 lines added) and `.gitignore` (9 lines added).
 
-To copy the branch into your private repo, run this in your IsaacLab clone whose `origin` is IsaacSim:
+To update your PC, in your IsaacLab folder whose `origin` is IsaacSim:
 
 ```bash
-git fetch https://github.com/seyedalicheraghi/vla-datagen.git claude/review-last-request-I6mXJ
-git push origin FETCH_HEAD:refs/heads/claude/review-last-request-I6mXJ
-git checkout -b claude/review-last-request-I6mXJ origin/claude/review-last-request-I6mXJ
+git checkout main
+git pull origin main
 ```
 
-`vla-datagen` is public. The code there is visible to anyone until you delete that repo.
+Move your local untracked `CLAUDE.md` aside first: the repo now has one (notes for Claude Code sessions), and git will
+not overwrite an untracked file. If git complains about other local changes, run `git stash` first.
 
 ## Where things ran: please read
 
@@ -143,7 +142,7 @@ The Isaac Lab quadcopter demo in a photorealistic backyard:
 
 ## How to run it on your PC
 
-From your clone, on the branch:
+From your clone, on `main`:
 
 ```bash
 # the 2 km flight: front and back LUCID cameras plus the chase camera, whole flight (~4.5 min of video)
