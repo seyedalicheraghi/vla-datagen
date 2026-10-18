@@ -111,6 +111,21 @@ class TestTerrain(unittest.TestCase):
         np.testing.assert_array_equal(ids, T.patch_ids(x, y, 25.0))
 
 
+class TestHorizon(unittest.TestCase):
+    def test_ring_surrounds_the_far_zone(self):
+        from drone_scene.world import build
+        far, ring = (-6000.0, 7000.0, -6000.0, 7000.0), (-24000.0, 26000.0, -24000.0, 26000.0)
+        h = geo.Grid(np.zeros((200, 200), np.float32), ring[0], ring[3], 250.0)
+        m, mats = build.horizon_ring(h, far, ring, (0.05, 0.07, 0.04))
+        cen = T.face_centroids(m)
+        top = np.abs(normals(m)[:, 2]) > 1e-9                      # ground faces, not skirts
+        inside = (cen[:, 0] > far[0]) & (cen[:, 0] < far[1]) & (cen[:, 1] > far[2]) & (cen[:, 1] < far[3])
+        self.assertFalse((inside & top).any(), "no ring ground inside the far zone")
+        self.assertAlmostEqual(m.points[:, 0].min(), ring[0])
+        self.assertAlmostEqual(m.points[:, 1].max(), ring[3])
+        self.assertEqual(len(mats), 1)
+
+
 class TestLandcover(unittest.TestCase):
     def test_worldcover_mapping(self):
         g = geo.Grid(np.array([[10, 30], [40, 80]], np.uint8), 0.0, 20.0, 10.0)

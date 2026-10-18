@@ -45,7 +45,7 @@ from . import usdio  # noqa: E402
 from . import vegetation as V  # noqa: E402
 from .geo import Frame, Grid, compass_to_ccw_from_east, sun_position  # noqa: E402
 
-BUILD_VERSION = "2"     # bump when the output changes for the same arguments (cache key)
+BUILD_VERSION = "3"     # bump when the output changes for the same arguments (cache key)
 DEFAULT_REGION = (42.0250, -93.6900)          # west Ames, Iowa: suburbs, parks and farmland
 ATTRIBUTION = ("Map data: Overture Maps Foundation (OpenStreetMap contributors ODbL, Microsoft/Esri building "
                "footprints), ESA WorldCover 2021 (CC BY 4.0), Copernicus Sentinel-2 data, USGS 3DEP (public domain) / "
@@ -72,6 +72,7 @@ def parse(argv=None):
     p.add_argument("--half-width", type=float, default=600.0, help="detail zone half width around the route (m)")
     p.add_argument("--margin", type=float, default=400.0, help="detail zone beyond take-off and landing (m)")
     p.add_argument("--far", type=float, default=6000.0, help="far terrain half size around the route centre (m)")
+    p.add_argument("--horizon", type=float, default=25000.0, help="coarse terrain out to this half size (m)")
     p.add_argument("--cruise-agl", type=float, default=40.0, help="cruise height above the take-off ground (m)")
     p.add_argument("--clearance", type=float, default=15.0, help="minimum height above trees/buildings on the route")
     p.add_argument("--max-trees", type=int, default=60000)
@@ -82,7 +83,7 @@ def parse(argv=None):
 
 def _key(a) -> str:
     blob = repr((BUILD_VERSION, a.region if not (a.takeoff and a.landing) else None, a.takeoff, a.landing, a.distance,
-                 a.when, a.half_width, a.margin, a.far, a.cruise_agl, a.clearance, a.max_trees, a.seed))
+                 a.when, a.half_width, a.margin, a.far, a.horizon, a.cruise_agl, a.clearance, a.max_trees, a.seed))
     return hashlib.sha1(blob.encode()).hexdigest()[:10]
 
 
@@ -246,6 +247,22 @@ def far_terrain(height: Grid, canopy: Grid | None, sentinel: Grid | None, far_re
     return far, [spec]
 
 
+def horizon_ring(height: Grid, far_rect, ring_rect, albedo_rgb, cell: float = 250.0):
+    """Very coarse terrain from the far zone's edge out to ``ring_rect``, so the land reaches the horizon (from 40 m
+    up the horizon is ~22 km away); one colour, the far zone's mean satellite albedo."""
+    meshes = []
+    # 1 km tiles on the far zone's 1 km grid: whole tiles are either inside the far zone (skipped) or outside it
+    for tr in T.tiles(ring_rect, 1000.0):
+        if _inside(tr, far_rect):
+            continue
+        meshes.append(T.tile_mesh(height, tr, cell, skirt_m=10.0))
+    ring = usdio.merge(meshes)
+    if not ring.n_faces:
+        return None, None
+    ring.material = np.zeros(ring.n_faces, np.int32)
+    return ring, [usdio.MaterialSpec("horizon_ground", color=tuple(float(c) for c in albedo_rgb), roughness=0.95)]
+
+
 def cruise_height(route, ground: Grid, canopy: Grid | None, footprints, a) -> tuple[float, dict]:
     """Absolute cruise z: cruise_agl above the take-off ground, raised to clear everything near the line."""
     import shapely
@@ -301,6 +318,8 @@ def write_usd(path, parts, log):
     usdio.write_mesh(stage, "/Map/Terrain", parts["terrain"], parts["terrain_mats"], looks)
     if parts.get("far") is not None:
         usdio.write_mesh(stage, "/Map/FarTerrain", parts["far"], parts["far_mats"], looks)
+    if parts.get("ring") is not None:
+        usdio.write_mesh(stage, "/Map/HorizonTerrain", parts["ring"], parts["ring_mats"], looks)
     if parts["buildings"].n_faces:
         usdio.write_mesh(stage, "/Map/Buildings", parts["buildings"], parts["building_mats"], looks)
     if parts["roads"].n_faces:
@@ -431,6 +450,17 @@ def build(a, log=print) -> str:
         return np.where(inside, ground(x, y), h_far.sample(x, y))
 
     far_mesh, far_mats = far_terrain(h_far, canopy_f, sentinel, far, detail, cache, out_dir)
+    ring_rect = (float(np.floor((cx - a.horizon) / 1000) * 1000), float(np.ceil((cx + a.horizon) / 1000) * 1000),
+                 float(np.floor((cy - a.horizon) / 1000) * 1000), float(np.ceil((cy + a.horizon) / 1000) * 1000))
+    ring_mesh, ring_mats = None, None
+    if a.horizon > a.far + 1000:
+        try:
+            h_ring, _ = data.heights(frame, ring_rect, 250.0, cache, log)
+            h_ring.data -= z0
+            mean_albedo = sentinel.data.reshape(-1, 3).mean(0) if sentinel is not None else (0.06, 0.08, 0.05)
+            ring_mesh, ring_mats = horizon_ring(h_ring, far, ring_rect, mean_albedo)
+        except Exception as exc:  # noqa: BLE001  (the horizon ring is cosmetic)
+            log(f"[world] no horizon ring ({type(exc).__name__}: {exc})")
     bmesh, bstats = B.buildings_mesh(footprints, ground_any, M.WALL_TILE, (M.ROOF_TILE, M.ROOF_TILE))
     far_roads = [r for r in road_list if r.line.intersects(in_detail) or R.road_spec(r)[3] >= 3]
     rmesh, rstats = R.roads_mesh(far_roads, ground_any)
@@ -440,6 +470,7 @@ def build(a, log=print) -> str:
 
     write_usd(os.path.join(out_dir, "world.usdc"), {
         "terrain": ter, "terrain_mats": ter_mats, "far": far_mesh, "far_mats": far_mats,
+        "ring": ring_mesh, "ring_mats": ring_mats,
         "buildings": bmesh, "building_mats": M.building_specs(cache), "roads": rmesh, "road_mats": M.road_specs(cache),
         "trees": tree_inst, "grass": grass}, log)
 

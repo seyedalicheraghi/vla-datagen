@@ -81,10 +81,7 @@ a clear day of 100 klx. The first frame's log line compares the render's brightn
   LEDs and propeller blur discs. It can carry about 15 g, so a real one could not lift these cameras. The
   log says so.
 
-The cameras are mounted from the drone's own mesh: on the centre line, at the mount height, with the
-housing 16 mm clear of the body (room for the M12 GigE connector). They are drawn on the drone as housing,
-lens, connectors and an aluminium bracket. The third-person views (`hero`, `garden`, `demo`) stand back 3×
-for the larger drone.
+The cameras are mounted using the drone's own mesh. Each sits on the centre line, with the housing at least 16 mm clear of the body (room for the M12 GigE connector). The mount height and bracket length are chosen so the drone covers at most 1% of the camera's view: its triangles are drawn through the real lens to check. The cameras appear on the drone as housing, lens, connectors and an aluminium bracket. The third-person views (`hero`, `garden`, `demo`) stand back 3× for the larger drone.
 
 ## Long flight over a real map (`--route straight`)
 
@@ -117,7 +114,8 @@ What gets built:
 
 - **Terrain.** The detail zone (the route ±600 m and 400 m beyond each end) has 1-16 m cells, finest along
   the route. Out to ~6.5 km, coarser terrain is raised by the real canopy, so tree lines stand on the
-  horizon, and coloured with the satellite image.
+  horizon, and coloured with the satellite image. Beyond that, 250 m terrain runs out to 25 km in the area's
+  average colour, so the land reaches the true horizon (about 22 km away from 40 m up).
 - **Ground.** NVIDIA photo-scanned materials per land class: lawn, meadow, forest floor, soil, concrete,
   sand. Crop fields get rows on a 0.76 m spacing along the survey grid. Satellite reflectance calibrates
   each patch's colour, so fields and lawns have their real colour from the air.
