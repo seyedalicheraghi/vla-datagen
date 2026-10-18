@@ -62,6 +62,7 @@ BUILDING = {
     "flat_roof": (None, None, (0.55, 0.55, 0.55)),                   # light grey membrane / ballast
 }
 WALL_TILE = (4.0, 3.0)
+TEXTURE_VERSION = "v2"         # in the generated texture file names: bump when textures.py changes them
 ROOF_TILE = 2.0
 
 
@@ -120,10 +121,10 @@ def building_specs(cache_dir: str) -> list[MaterialSpec]:
     for slot in BUILDING_SLOTS:
         gen, kind, tint = BUILDING[slot]
         if gen == "facade":
-            t = textures.facade(tex_dir, f"wall_{kind}", kind=kind, windows=kind != "metal", tile_w=WALL_TILE[0],
+            t = textures.facade(tex_dir, f"wall_{kind}_{TEXTURE_VERSION}", kind=kind, windows=kind != "metal", tile_w=WALL_TILE[0],
                                 tile_h=WALL_TILE[1])
         elif gen == "shingles":
-            t = textures.shingles(tex_dir, f"roof_{kind}", kind=kind, tile_m=ROOF_TILE)
+            t = textures.shingles(tex_dir, f"roof_{kind}_{TEXTURE_VERSION}", kind=kind, tile_m=ROOF_TILE)
         else:
             out.append(MaterialSpec(slot, color=tint, roughness=0.8))
             continue

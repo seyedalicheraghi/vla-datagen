@@ -45,7 +45,7 @@ from . import usdio  # noqa: E402
 from . import vegetation as V  # noqa: E402
 from .geo import Frame, Grid, compass_to_ccw_from_east, sun_position  # noqa: E402
 
-BUILD_VERSION = "3"     # bump when the output changes for the same arguments (cache key)
+BUILD_VERSION = "4"     # bump when the output changes for the same arguments (cache key)
 DEFAULT_REGION = (42.0250, -93.6900)          # west Ames, Iowa: suburbs, parks and farmland
 ATTRIBUTION = ("Map data: Overture Maps Foundation (OpenStreetMap contributors ODbL, Microsoft/Esri building "
                "footprints), ESA WorldCover 2021 (CC BY 4.0), Copernicus Sentinel-2 data, USGS 3DEP (public domain) / "
@@ -187,15 +187,34 @@ def ground_materials(classes: Grid, sentinel: Grid | None, specs: dict, faces_xy
     return mats, face_mat, tile, angle, offset
 
 
+def blended_height(height: Grid, fine: Grid | None, band: float = 5.0):
+    """Heights from ``height``, with the finer lidar grid ``fine`` blended in where it exists (fading over
+    ``band`` m inside its border)."""
+    if fine is None:
+        return height.sample
+    fx0, fx1, fy0, fy1 = fine.rect
+
+    def h(x, y):
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        d = np.minimum.reduce([x - fx0, fx1 - x, y - fy0, fy1 - y]) - fine.res
+        w = T.smoothstep(0.0, band, d)
+        z = height.sample(x, y)
+        if (w > 0).any():
+            z = np.where(w > 0, z * (1 - w) + fine.sample(x, y) * w, z)
+        return z
+    return h
+
+
 def terrain_meshes(height: Grid, fine: Grid | None, classes: Grid, sentinel, specs, rect, route, pads, log,
                    lod=T.Lod(), tile_size=250.0, seed=0):
-    """Detail-zone terrain tiles (MeshData list) and their material list."""
+    """Detail-zone terrain: one merged MeshData, its material list, and the ``terrain.Surface`` of its triangles."""
     a, b = route
+    hfun = blended_height(height, fine)
     meshes = []
     for tr in T.tiles(rect, tile_size):
         cell = lod.cell(T.rect_segment_distance(tr, a, b))
-        hsrc = fine if (fine is not None and cell <= fine.res * 1.01 and _inside(tr, fine.rect)) else height
-        meshes.append(T.tile_mesh(hsrc, tr, cell, pads=pads))
+        meshes.append(T.tile_mesh(hfun, tr, cell, pads=pads))
+    surface = T.Surface(meshes, rect, tile_size)
     allm = usdio.merge(meshes)
     cen = T.face_centroids(allm)
     # skirts take the class of the ground right above them
@@ -204,30 +223,50 @@ def terrain_meshes(height: Grid, fine: Grid | None, classes: Grid, sentinel, spe
     allm.material = fmat
     allm.uv = T.face_uvs(allm, tile, angle, offset)
     log(f"[world] terrain: {len(meshes)} tiles, {allm.n_faces / 1e6:.2f} M triangles, {len(mats)} ground materials")
-    return allm, mats
+    return allm, mats, surface
 
 
 def _inside(r, outer):
     return r[0] >= outer[0] and r[1] <= outer[1] and r[2] >= outer[2] and r[3] <= outer[3]
 
 
-def far_terrain(height: Grid, canopy: Grid | None, sentinel: Grid | None, far_rect, hole, cache_dir, out_dir, cell=32.0,
-                tile_size=1000.0):
+def far_canopy(canopy: Grid | None, buildings, roads, hole, fade: float = 150.0) -> Grid | None:
+    """The canopy raise of the far terrain: 0.85 x canopy height, cleared around buildings (+4 m) and roads
+    (+3 m beyond their edges) so they are not buried under 'tree' terrain, and faded to 0 approaching the detail
+    zone so the far mesh meets the detail terrain at ground level."""
+    if canopy is None:
+        return None
+    from rasterio.features import rasterize
+    from rasterio.transform import from_origin
+    ny, nx = canopy.shape
+    shapes = [(p.buffer(4.0), 1) for p in buildings] + [(line.buffer(w / 2 + 3.0), 1) for line, w in roads]
+    mask = rasterize(shapes, out_shape=(ny, nx), transform=from_origin(canopy.x0, canopy.y1, canopy.res, canopy.res),
+                     fill=0, all_touched=True, dtype="uint8").astype(bool) if shapes else np.zeros((ny, nx), bool)
+    X, Y = canopy.centres()
+    d = np.maximum.reduce([hole[0] - X, X - hole[1], hole[2] - Y, Y - hole[3]])      # > 0 outside the hole
+    raise_ = np.where(mask, 0.0, np.nan_to_num(canopy.data) * 0.85) * T.smoothstep(0.0, fade, d)
+    return Grid(raise_.astype(np.float32), canopy.x0, canopy.y1, canopy.res)
+
+
+def far_terrain(height: Grid, raise_: Grid | None, sentinel: Grid | None, far_rect, hole, cache_dir, out_dir,
+                cell=31.25, tile_size=1000.0):
     """Coarse terrain around the detail zone (with a hole for it), raised by the canopy so forests stand on the
-    horizon, coloured by the satellite image."""
+    horizon, coloured by the satellite image.  31.25 m cells put vertex lines on every 250 m, so the hole's edges
+    (the detail zone, 250 m aligned) fall exactly on them.  Returns (mesh, materials, Surface)."""
     meshes = []
     for tr in T.tiles(far_rect, tile_size):
         if _inside(tr, hole):
             continue
-        z_off = (lambda x, y: np.nan_to_num(canopy.sample(x, y)) * 0.85) if canopy is not None else None
+        z_off = raise_.sample if raise_ is not None else None
         m = T.tile_mesh(height, tr, cell, z_offset=z_off, skirt_m=4.0)
         cen = T.face_centroids(m)
         inside = (cen[:, 0] > hole[0]) & (cen[:, 0] < hole[1]) & (cen[:, 1] > hole[2]) & (cen[:, 1] < hole[3])
         m.faces = m.faces[~inside]
         meshes.append(m)
+    surface = T.Surface(meshes, far_rect, tile_size)
     far = usdio.merge(meshes)
     if not far.n_faces:
-        return None, None
+        return None, None, surface
     x0, x1, y0, y1 = far_rect
     P = far.points[far.faces][..., :2]
     far.uv = np.stack([(P[..., 0] - x0) / (x1 - x0), (P[..., 1] - y0) / (y1 - y0)], -1)
@@ -244,7 +283,7 @@ def far_terrain(height: Grid, canopy: Grid | None, sentinel: Grid | None, far_re
         spec = usdio.MaterialSpec("far_ground", {"albedo": path}, 1.0, roughness=0.9, flip_green=False)
     else:
         spec = usdio.MaterialSpec("far_ground", color=(0.07, 0.10, 0.05), roughness=0.9)
-    return far, [spec]
+    return far, [spec], surface
 
 
 def horizon_ring(height: Grid, far_rect, ring_rect, albedo_rgb, cell: float = 250.0):
@@ -288,8 +327,8 @@ def cruise_height(route, ground: Grid, canopy: Grid | None, footprints, a) -> tu
                "ground_min": round(float(ground.sample(xs, ys).min()), 1)}
 
 
-def landing_grass(landing_xy, landing_z, radius=22.0, seed=0):
-    """3D meadow grass clumps around the landing spot: (prototype index, x, y, z, yaw, scale)."""
+def landing_grass(landing_xy, ground, radius=22.0, seed=0):
+    """3D meadow grass clumps around the landing spot, each standing on ``ground(x, y)``."""
     rng = np.random.default_rng(seed)
     from ..scene import poisson_disk
     lx, ly = landing_xy
@@ -297,7 +336,7 @@ def landing_grass(landing_xy, landing_z, radius=22.0, seed=0):
                        keep=lambda x, y: math.hypot(x - lx, y - ly) < radius * (0.8 + 0.2 * rng.random()))
     n = len(pts)
     return {"protos": ["grass_a", "grass_b", "grass_c"], "index": rng.integers(0, 3, n),
-            "positions": np.column_stack([pts, np.full(n, landing_z - 0.02)]), "yaw": rng.uniform(0, 2 * math.pi, n),
+            "positions": np.column_stack([pts, ground(pts[:, 0], pts[:, 1]) - 0.02]), "yaw": rng.uniform(0, 2 * math.pi, n),
             "scale": rng.uniform(0.85, 1.25, n)}
 
 
@@ -406,10 +445,6 @@ def build(a, log=print) -> str:
     z_land = float(h_detail.sample(np.array([lx]), np.array([ly]))[0])
     pads = _pads(z_take, (lx, ly), z_land)
 
-    def ground(x, y):
-        z = h_detail.sample(x, y)
-        return T.apply_pads(x, y, z, pads)
-
     # map features
     ov = data.overture(frame, far, ["building", "segment", "water", "land_use", "land"], cache, log)
     water = data.water_polygons(ov["water"])
@@ -433,23 +468,26 @@ def build(a, log=print) -> str:
         trees = np.concatenate([trees, extra]) if len(extra) else trees
     if len(trees) > a.max_trees:
         trees = trees[np.argsort(-trees[:, 2])[:a.max_trees]]
+    # geometry: terrain first, then everything stands on its exact triangles
+    specs = M.ground_specs(cache, log=None)
+    ter, ter_mats, ground = terrain_meshes(h_detail, h_fine, classes, sentinel, specs, detail, route, pads, log,
+                                           seed=a.seed)
+    far_buildings = [fp.polygon for fp in footprints if not fp.polygon.within(in_detail)]
+    far_road_lines = [(r.line, R.road_spec(r)[0]) for r in road_list if not r.line.within(in_detail)]
+    far_mesh, far_mats, far_surface = far_terrain(h_far, far_canopy(canopy_f, far_buildings, far_road_lines, detail),
+                                                  sentinel, far, detail, cache, out_dir)
+    far_surface.fallback = h_far.sample
+    ground.fallback = far_surface
+
+    def ground_any(x, y):
+        return ground(x, y)
+
     mh = model_heights(cache, log)
     sp = V.assign_species(trees, seed=a.seed, model_heights=mh)
     tree_inst = V.tree_instances(trees, sp, mh, ground, seed=a.seed)
     per_species = ", ".join(f"{k} {len(v['positions'])}" for k, v in tree_inst.items())
     log(f"[world] trees: {len(trees)} ({n_detected} crowns detected, {len(trees) - n_detected} filled into closed "
         f"canopy; {per_species})")
-
-    # geometry
-    specs = M.ground_specs(cache, log=None)
-    ter, ter_mats = terrain_meshes(h_detail, h_fine, classes, sentinel, specs, detail, route, pads, log, seed=a.seed)
-
-    def ground_any(x, y):
-        x, y = np.asarray(x, float), np.asarray(y, float)
-        inside = (x >= detail[0]) & (x <= detail[1]) & (y >= detail[2]) & (y <= detail[3])
-        return np.where(inside, ground(x, y), h_far.sample(x, y))
-
-    far_mesh, far_mats = far_terrain(h_far, canopy_f, sentinel, far, detail, cache, out_dir)
     ring_rect = (float(np.floor((cx - a.horizon) / 1000) * 1000), float(np.ceil((cx + a.horizon) / 1000) * 1000),
                  float(np.floor((cy - a.horizon) / 1000) * 1000), float(np.ceil((cy + a.horizon) / 1000) * 1000))
     ring_mesh, ring_mats = None, None
@@ -462,10 +500,16 @@ def build(a, log=print) -> str:
         except Exception as exc:  # noqa: BLE001  (the horizon ring is cosmetic)
             log(f"[world] no horizon ring ({type(exc).__name__}: {exc})")
     bmesh, bstats = B.buildings_mesh(footprints, ground_any, M.WALL_TILE, (M.ROOF_TILE, M.ROOF_TILE))
-    far_roads = [r for r in road_list if r.line.intersects(in_detail) or R.road_spec(r)[3] >= 3]
-    rmesh, rstats = R.roads_mesh(far_roads, ground_any)
+    # all roads and paths in the detail zone, with markings; outside it only real roads (no paths), no markings
+    road_tiles = {k: v[1] for k, v in M.ROAD.items()}
+    near_roads = [r for r in road_list if r.line.intersects(in_detail)]
+    far_only = [r for r in road_list if not r.line.intersects(in_detail) and R.road_spec(r)[3] >= 3]
+    rm1, rs1 = R.roads_mesh(near_roads, ground_any, tiles=road_tiles)
+    rm2, rs2 = R.roads_mesh(far_only, ground_any, tiles=road_tiles, markings=False)
+    rmesh = usdio.merge([rm1, rm2])
+    rstats = {"segments": rs1["segments"] + rs2["segments"], "length_km": rs1["length_km"] + rs2["length_km"]}
     log(f"[world] buildings: {bstats}; roads: {rstats['segments']} segments, {rstats['length_km']:.0f} km")
-    grass = landing_grass((lx, ly), z_land, seed=a.seed)
+    grass = landing_grass((lx, ly), ground, seed=a.seed)
     cz, cinfo = cruise_height(route, h_detail, canopy_d, footprints, a)
 
     write_usd(os.path.join(out_dir, "world.usdc"), {

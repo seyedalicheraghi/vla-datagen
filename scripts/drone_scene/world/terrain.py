@@ -147,7 +147,7 @@ def tile_mesh(height, rect, cell: float, pads=(), skirt_m: float = 2.0, z_offset
         # outward-facing quads (the border runs clockwise seen from above)
         faces = np.concatenate([faces, np.column_stack([a, lb, la]), np.column_stack([a, b, lb])])
     return MeshData(pts.astype(np.float64), faces.astype(np.int32), N.astype(np.float32),
-                    meta={"cell": (x1 - x0) / nx, "n_ground_faces": n_ground})
+                    meta={"cell": (x1 - x0) / nx, "n_ground_faces": n_ground, "rect": (x0, x1, y0, y1), "Z": Z})
 
 
 def tiles(rect, size: float) -> list[tuple[float, float, float, float]]:
@@ -200,3 +200,49 @@ def face_uvs(mesh: MeshData, tile_m: np.ndarray, angle: np.ndarray, offset: np.n
     u = (c * P[..., 0] + s * P[..., 1]) / tile_m[:, None] + offset[:, None, 0]
     v = (-s * P[..., 0] + c * P[..., 1]) / tile_m[:, None] + offset[:, None, 1]
     return np.stack([u, v], axis=-1)
+
+
+class Surface:
+    """The exact height of the triangles ``tile_mesh`` made, at any (x, y): what roads, buildings and grass must
+    stand on (a coarse tile's flat triangles can be decimetres above or below the DEM).  Tiles sit on a regular
+    grid (``tiles(rect, size)``); outside them ``fallback(x, y)`` is used."""
+
+    def __init__(self, meshes, rect, size: float, fallback=None):
+        self.x0, self.y0, self.size, self.fallback = rect[0], rect[2], size, fallback
+        self.tiles = {}
+        for m in meshes:
+            tx0, tx1, ty0, ty1 = m.meta["rect"]
+            key = (int(round((tx0 - self.x0) / size)), int(round((ty0 - self.y0) / size)))
+            self.tiles[key] = (m.meta["rect"], m.meta["Z"])
+
+    def __call__(self, x, y):
+        x, y = np.asarray(x, float), np.asarray(y, float)
+        shape = np.broadcast(x, y).shape
+        x, y = np.broadcast_to(x, shape).ravel(), np.broadcast_to(y, shape).ravel()
+        out = np.full(x.shape, np.nan)
+        ti = np.floor((x - self.x0) / self.size).astype(np.int64)
+        tj = np.floor((y - self.y0) / self.size).astype(np.int64)
+        for key in set(zip(ti.tolist(), tj.tolist())):
+            if key not in self.tiles:
+                continue
+            sel = (ti == key[0]) & (tj == key[1])
+            (rx0, rx1, ry0, ry1), Z = self.tiles[key]
+            out[sel] = _triangle_height(Z, rx0, rx1, ry0, ry1, x[sel], y[sel])
+        miss = np.isnan(out)
+        if miss.any() and self.fallback is not None:
+            out[miss] = self.fallback(x[miss], y[miss])
+        return out.reshape(shape)
+
+
+def _triangle_height(Z, x0, x1, y0, y1, x, y):
+    """Height on the two-triangles-per-cell surface of tile_mesh (rows north -> south, alternating diagonals)."""
+    ny, nx = Z.shape[0] - 1, Z.shape[1] - 1
+    fx = np.clip((x - x0) / (x1 - x0) * nx, 0, nx - 1e-9)
+    fy = np.clip((y1 - y) / (y1 - y0) * ny, 0, ny - 1e-9)
+    i, j = np.floor(fx).astype(int), np.floor(fy).astype(int)
+    u, w = fx - i, fy - j                                    # u east, w south within the cell
+    nw, ne, sw, se = Z[j, i], Z[j, i + 1], Z[j + 1, i], Z[j + 1, i + 1]
+    alt = (i + j) % 2 == 0                                   # diagonal NW-SE, else NE-SW
+    a1 = np.where(w >= u, nw + w * (sw - nw) + u * (se - sw), nw + u * (ne - nw) + w * (se - ne))
+    a2 = np.where(u + w <= 1, nw + u * (ne - nw) + w * (sw - nw), se + (1 - u) * (sw - se) + (1 - w) * (ne - se))
+    return np.where(alt, a1, a2)

@@ -142,7 +142,7 @@ def obb_frame(poly):
     return c, u, v, np.linalg.norm(e1) / 2, np.linalg.norm(e2) / 2
 
 
-def cover_rectangles(poly, cell: float = 0.5, max_rects: int = 4, min_area: float = 12.0):
+def cover_rectangles(poly, cell: float = 0.5, max_rects: int = 6, min_area: float = 3.0, leave: float = 0.02):
     """Up to max_rects rectangles (in the OBB frame: (x0, x1, y0, y1)) covering the footprint greedily."""
     from shapely import contains_xy
     c, u, v, hl, hs = obb_frame(poly)
@@ -153,7 +153,7 @@ def cover_rectangles(poly, cell: float = 0.5, max_rects: int = 4, min_area: floa
     inside = contains_xy(poly, wx, wy)
     total = inside.sum()
     rects, left = [], inside.copy()
-    while len(rects) < max_rects and left.sum() > 0.1 * total:
+    while len(rects) < max_rects and left.sum() > leave * total:
         best, best_r = 0, None
         # largest all-inside rectangle covering the most uncovered cells (histogram method per row)
         h = np.zeros(len(xs), int)
@@ -181,7 +181,7 @@ def cover_rectangles(poly, cell: float = 0.5, max_rects: int = 4, min_area: floa
 
 
 def _roof_on_rect(b: _Builder, frame, rect, eave_z: float, pitch: float, hip: bool, roof_mat: int, wall_mat: int,
-                  tile=(1.0, 1.0)):
+                  tile=(1.0, 1.0), wall_tile=(1.0, 1.0), floor_z: float = 0.0):
     """Gable or hip roof over an OBB-frame rectangle, ridge along its longer side, with overhang."""
     c, u, v = frame
     x0, x1, y0, y1 = rect
@@ -213,10 +213,34 @@ def _roof_on_rect(b: _Builder, frame, rect, eave_z: float, pitch: float, hip: bo
     if hip:                                        # hip ends: triangular roof faces
         b.tri(W(xa, yb, ez), W(xa, ya, ez), W(ra, ym, rz), roof_mat, (yb / tu, 0), (ya / tu, 0), (ym / tu, slope / tv))
         b.tri(W(xb, ya, ez), W(xb, yb, ez), W(rb, ym, rz), roof_mat, (ya / tu, 0), (yb / tu, 0), (ym / tu, slope / tv))
-    else:                                          # gable ends: wall triangles under the ridge
-        b.tri(W(x0, y1, eave_z), W(x0, y0, eave_z), W(x0, ym, rz), wall_mat, (y1, 0), (y0, 0), (ym, rz - eave_z))
-        b.tri(W(x1, y0, eave_z), W(x1, y1, eave_z), W(x1, ym, rz), wall_mat, (y0, 0), (y1, 0), (ym, rz - eave_z))
+    else:                                          # gable ends: wall triangles under the ridge, textured like the walls
+        tw, th = wall_tile
+        ve, vr = (eave_z - floor_z) / th, (rz - floor_z) / th
+        b.tri(W(x0, y1, eave_z), W(x0, y0, eave_z), W(x0, ym, rz), wall_mat, (y1 / tw, ve), (y0 / tw, ve), (ym / tw, vr))
+        b.tri(W(x1, y0, eave_z), W(x1, y1, eave_z), W(x1, ym, rz), wall_mat, (y0 / tw, ve), (y1 / tw, ve), (ym / tw, vr))
     return rz
+
+
+def _flat_remainder(b: _Builder, poly, frame, rects, z: float, mat: int, tile) -> None:
+    from shapely.geometry import Polygon
+    c, u, v = frame
+    covered = []
+    for x0, x1, y0, y1 in rects:
+        corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        covered.append(Polygon([(c[0] + x * u[0] + y * v[0], c[1] + x * u[1] + y * v[1]) for x, y in corners]))
+    from shapely.ops import unary_union
+    rest = poly.difference(unary_union(covered).buffer(0.05))
+    parts = [rest] if rest.geom_type == "Polygon" else list(getattr(rest, "geoms", []))
+    tu, tv = tile
+    for part in parts:
+        if part.geom_type != "Polygon" or part.area < 0.5:
+            continue
+        for t in _triangulate(part):
+            a, bb, cc = t
+            if (bb[0] - a[0]) * (cc[1] - a[1]) - (bb[1] - a[1]) * (cc[0] - a[0]) < 0:
+                bb, cc = cc, bb
+            b.tri((a[0], a[1], z), (bb[0], bb[1], z), (cc[0], cc[1], z), mat,
+                  (a[0] / tu, a[1] / tv), (bb[0] / tu, bb[1] / tv), (cc[0] / tu, cc[1] / tv))
 
 
 def _triangulate(poly):
@@ -274,7 +298,10 @@ def building_mesh(fp: Footprint, ground, wall_tile=(1.0, 1.0), roof_tile=(1.0, 1
             c, u, v, hl, hs = obb_frame(poly)
             frame, rects = (c, u, v), [(-hl, hl, -hs, hs)]
         for r in rects:
-            top = max(top, _roof_on_rect(b, frame, r, eave, st["pitch"], st["hip"], roof_mat, wall_mat, roof_tile))
+            top = max(top, _roof_on_rect(b, frame, r, eave, st["pitch"], st["hip"], roof_mat, wall_mat, roof_tile,
+                                         wall_tile, floor))
+        # whatever the rectangles leave uncovered (small wings, notches) gets a flat roof at the eaves
+        _flat_remainder(b, poly, frame, rects, eave + 0.02, roof_mat, roof_tile)
     return b.mesh(), {"area": area, "eave": eave - float(np.max(gz)), "top": top - float(np.max(gz)),
                       "wall": st["wall"], "roof": st["roof"], "flat": st["flat"], "hip": st["hip"]}
 

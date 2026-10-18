@@ -59,38 +59,72 @@ def _resample(coords: np.ndarray, step: float) -> np.ndarray:
     return np.column_stack([np.interp(t, s, coords[:, 0]), np.interp(t, s, coords[:, 1])])
 
 
-def ribbon(coords: np.ndarray, width: float, ground, lift: float, step: float, tile: float, mat: int,
-           offset: float = 0.0, dashed: tuple | None = None) -> MeshData:
-    """A strip of ``width`` centred ``offset`` m left of the polyline.  ``dashed=(on, off)`` makes dashes."""
+def stations(coords: np.ndarray, step: float):
+    """Resampled centre line (n, 2), unit left normals (n, 2) and distance along it (n,)."""
     P = _resample(np.asarray(coords, float)[:, :2], step)
     if len(P) < 2:
-        return MeshData(np.zeros((0, 3)), np.zeros((0, 3), np.int32))
+        return P, np.zeros_like(P), np.zeros(len(P))
     d = np.gradient(P, axis=0)
     d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
     nrm = np.column_stack([-d[:, 1], d[:, 0]])
-    C = P + nrm * offset
-    L, R = C + nrm * width / 2, C - nrm * width / 2
-    zl, zr = ground(L[:, 0], L[:, 1]) + lift, ground(R[:, 0], R[:, 1]) + lift
-    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(C, axis=0), axis=1))])
-    pts = np.concatenate([np.column_stack([L, zl]), np.column_stack([R, zr])])
+    s = np.concatenate([[0], np.cumsum(np.linalg.norm(np.diff(P, axis=0), axis=1))])
+    return P, nrm, s
+
+
+def strip(P, nrm, s, offset: float, width: float, z_at, tile: float, mat: int, dashed: tuple | None = None,
+          rows=None) -> MeshData:
+    """A strip of ``width`` centred ``offset`` m left of the stations.  ``rows``: offsets across it (m, from
+    ``offset - width/2`` to ``offset + width/2``; default just the two edges); every row is a line of vertices
+    whose heights ``z_at(xy (n, 2), row_offset)`` gives.  ``dashed=(on, off)`` makes dashes."""
     n = len(P)
-    faces, uv = [], []
-    for k in range(n - 1):
-        if dashed:
-            on, off = dashed
-            if ((s[k] + s[k + 1]) / 2) % (on + off) > on:
-                continue
-        l0, l1, r0, r1 = k, k + 1, n + k, n + k + 1
-        u0, u1 = s[k] / tile, s[k + 1] / tile
-        faces += [(r0, r1, l1), (r0, l1, l0)]
-        uv += [((u0, 0), (u1, 0), (u1, width / tile)), ((u0, 0), (u1, width / tile), (u0, width / tile))]
-    if not faces:
+    if n < 2:
         return MeshData(np.zeros((0, 3)), np.zeros((0, 3), np.int32))
-    return MeshData(pts, np.asarray(faces, np.int32), None, np.asarray(uv, float), np.full(len(faces), mat, np.int32))
+    rows = np.asarray(rows if rows is not None else (offset - width / 2, offset + width / 2), float)
+    lines = [np.column_stack([P + nrm * o, z_at(P + nrm * o, o)]) for o in rows]
+    pts = np.concatenate(lines)
+    keep = np.ones(n - 1, bool)
+    if dashed:
+        on, off = dashed
+        keep = ((s[:-1] + s[1:]) / 2) % (on + off) <= on
+    k = np.nonzero(keep)[0]
+    faces, uv = [], []
+    for r in range(len(rows) - 1):
+        a0, a1 = r * n + k, r * n + k + 1                      # row r (right side of this band)
+        b0, b1 = (r + 1) * n + k, (r + 1) * n + k + 1          # row r + 1 (left side)
+        faces += [np.column_stack([a0, a1, b1]), np.column_stack([a0, b1, b0])]
+        u0, u1 = s[k] / tile, s[k + 1] / tile
+        va, vb = np.full(len(k), (rows[r] - rows[0]) / tile), np.full(len(k), (rows[r + 1] - rows[0]) / tile)
+        uv += [np.stack([np.column_stack([u0, va]), np.column_stack([u1, va]), np.column_stack([u1, vb])], 1),
+               np.stack([np.column_stack([u0, va]), np.column_stack([u1, vb]), np.column_stack([u0, vb])], 1)]
+    if not len(k):
+        return MeshData(np.zeros((0, 3)), np.zeros((0, 3), np.int32))
+    F = np.concatenate(faces).astype(np.int32)
+    return MeshData(pts, F, None, np.concatenate(uv), np.full(len(F), mat, np.int32))
 
 
-def roads_mesh(roads, ground, step: float = 2.0, tile: float = 4.0, log=None) -> tuple[MeshData, dict]:
-    """All road ribbons + markings in one mesh (material ids = SURFACES indices) and summary counts."""
+def cross_rows(width: float, extra=(), max_gap: float = 1.5) -> np.ndarray:
+    """Offsets across a road (right edge -w/2 to left edge +w/2), at most ``max_gap`` apart, including ``extra``."""
+    base = np.linspace(-width / 2, width / 2, max(2, int(np.ceil(width / max_gap)) + 1))
+    r = np.unique(np.round(np.concatenate([base, [e for e in extra if -width / 2 < e < width / 2]]), 4))
+    return r
+
+
+def ribbon(coords: np.ndarray, width: float, ground, lift: float, step: float, tile: float, mat: int,
+           offset: float = 0.0, dashed: tuple | None = None) -> MeshData:
+    """A strip of ``width`` centred ``offset`` m left of the polyline, lifted ``lift`` above ``ground``."""
+    P, nrm, s = stations(coords, step)
+    return strip(P, nrm, s, offset, width, lambda xy, o: ground(xy[:, 0], xy[:, 1]) + lift, tile, mat, dashed)
+
+
+DEFAULT_TILES = {"asphalt": 3.0, "concrete": 1.0, "gravel": 1.5}
+
+
+def roads_mesh(roads, ground, step: float = 2.0, tiles: dict | None = None, markings: bool = True,
+               log=None) -> tuple[MeshData, dict]:
+    """All road ribbons + markings in one mesh (material ids = SURFACES indices) and summary counts.  ``tiles``:
+    texture repeat (m) per surface (the materials' tile_m).  Markings lie on the road's own surface: their height
+    is interpolated between the road edges, not taken from the ground under them."""
+    tiles = dict(DEFAULT_TILES, **(tiles or {}))
     from .usdio import merge
     meshes, stats = [], {"segments": 0, "length_km": 0.0, "by_class": {}}
     for r in sorted(roads, key=lambda r: road_spec(r)[3]):
@@ -101,14 +135,23 @@ def roads_mesh(roads, ground, step: float = 2.0, tile: float = 4.0, log=None) ->
             if len(coords) < 2:
                 continue
             lift = 0.04 + 0.004 * prio                 # bigger roads sit a hair higher at junctions
-            meshes.append(ribbon(coords, w, ground, lift, step, tile, SURFACES.index(surf)))
-            if mark == "yellow":                       # double yellow centre line
-                for off in (-0.12, 0.12):
-                    meshes.append(ribbon(coords, 0.10, ground, lift + 0.005, step, 1.0,
-                                         SURFACES.index("marking_yellow"), offset=off))
-                for off in (w / 2 - 0.35, -(w / 2 - 0.35)):          # white edge lines
-                    meshes.append(ribbon(coords, 0.10, ground, lift + 0.005, step, 1.0,
-                                         SURFACES.index("marking_white"), offset=off))
+            P, nrm, s = stations(coords, step)
+            if len(P) < 2:
+                continue
+            marks = []
+            if markings and mark == "yellow":           # double yellow centre line, white edge lines
+                marks = [(-0.12, "marking_yellow"), (0.12, "marking_yellow"),
+                         (w / 2 - 0.35, "marking_white"), (-(w / 2 - 0.35), "marking_white")]
+            # the road's cross-section follows the ground (rows <= 1.5 m apart) and has rows exactly under the
+            # marking edges, so each marking lies 5 mm above the road surface it is painted on
+
+            def surface(xy, o, lift=lift):
+                return ground(xy[:, 0], xy[:, 1]) + lift
+            rows = cross_rows(w, [o + d for o, _ in marks for d in (-0.05, 0.05)])
+            meshes.append(strip(P, nrm, s, 0.0, w, surface, tiles.get(surf, 3.0), SURFACES.index(surf), rows=rows))
+            for off, kind in marks:
+                meshes.append(strip(P, nrm, s, off, 0.10, lambda xy, o: surface(xy, o) + 0.005, 1.0,
+                                    SURFACES.index(kind)))
             stats["segments"] += 1
             stats["length_km"] += g.length / 1000
             stats["by_class"][r.cls] = stats["by_class"].get(r.cls, 0) + 1
