@@ -38,7 +38,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .lucid import Rig, undistort
+from .lucid import Rig, distort, undistort
 
 # photo-electrons per (lux x second x um^2) of sensor irradiance for a Pregius colour pixel's green channel:
 # 4.09e15 photons/(m^2 s lux) at 555 nm x 1e-12 m^2/um^2 x QE 0.64 x 0.55 colour-filter transmission
@@ -149,7 +149,18 @@ def lens_grids(rig: Rig, plan: dict, device=None) -> tuple[torch.Tensor, torch.T
     xd, yd = (u - rig.cx) / rig.fx, (v - rig.cy) / rig.fx
     xu, yu = undistort(xd, yd, rig.lens)
     r_corner_px = math.hypot(rig.cx + 0.5, rig.cy + 0.5)
-    half = 0.5 * rig.lens.lateral_color_px / r_corner_px
+    # lateral colour scales the undistorted radius by 1 +- half; at the corner that must separate red and blue by
+    # lateral_color_px *output* pixels, so divide by the undistorted corner radius and the distortion's radial
+    # stretch there (d r_distorted / d r_undistorted)
+    rd = r_corner_px / rig.fx
+    dx, dy = (rig.cx + 0.5) / r_corner_px, (rig.cy + 0.5) / r_corner_px
+    xu0, yu0 = undistort(np.array([rd * dx]), np.array([rd * dy]), rig.lens)
+    ru = float(math.hypot(xu0[0], yu0[0]))
+    eps = 1e-4 * ru
+    xa, ya = distort(np.array([(ru + eps) * dx]), np.array([(ru + eps) * dy]), rig.lens)
+    xb, yb = distort(np.array([(ru - eps) * dx]), np.array([(ru - eps) * dy]), rig.lens)
+    stretch = float(math.hypot(xa[0] - xb[0], ya[0] - yb[0]) / (2 * eps))
+    half = 0.5 * rig.lens.lateral_color_px / (ru * rig.fx * stretch)
     wr, hr, fxr = plan["width"], plan["height"], plan["fx"]
     grids = []
     for scale in (1.0 + half, 1.0, 1.0 - half):                      # R, G, B
@@ -205,7 +216,9 @@ class LucidSensor:
     # --- optics --------------------------------------------------------------
     def optics(self, hdr: torch.Tensor) -> torch.Tensor:
         """(Hr, Wr, >=3) linear render -> (3, H, W) image-plane radiance, in render units."""
-        x = torch.nan_to_num(hdr[..., :3].to(self.device, torch.float32), nan=0.0, posinf=0.0).clamp_min(0.0)
+        # an overflowed (inf) fp16 pixel is a very bright one (a sun glint), not a black one
+        x = torch.nan_to_num(hdr[..., :3].to(self.device, torch.float32), nan=0.0, posinf=65504.0,
+                             neginf=0.0).clamp_min(0.0)
         x = x.permute(2, 0, 1)
         ss = self.plan.get("supersample", 1.0)
         if ss > 1.05:                                   # pre-filter a supersampled render before resampling

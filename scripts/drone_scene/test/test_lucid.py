@@ -284,6 +284,31 @@ class TestSensor(unittest.TestCase):
         c = c.reshape(-1, 3).mean(0)
         np.testing.assert_allclose((c / c[1]).numpy(), [0.6, 1.0, 0.4], atol=0.03)
 
+    def test_overflowed_pixels_stay_bright(self):
+        sensor = ss.LucidSensor(self.rig, self.plan, settings=ss.SensorSettings(noise=False, prnu=0.0))
+        hdr = torch.full((self.plan["height"], self.plan["width"], 3), 100.0, dtype=torch.float16)
+        cy, cx = self.plan["height"] // 2, self.plan["width"] // 2
+        hdr[cy - 10:cy + 10, cx - 10:cx + 10] = float("inf")
+        out = sensor.process(hdr)["rgb"]
+        self.assertEqual(int(out[self.rig.height // 2, self.rig.width // 2].min()), 255)
+
+    def test_lateral_colour_matches_the_lens_at_the_corner(self):
+        """Red-blue separation of the image corner, measured in output pixels through the distortion."""
+        for cam in ("TRI032S-CC", "PHX016S-CS"):
+            rig = lucid.make_rig(cam, resolution_scale=0.25)
+            plan = rig.render_plan()
+            g, _ = ss.lens_grids(rig, plan)
+            # render-pixel positions sampled for the corner output pixel, red and blue
+            to_px = lambda q: ((q[..., 0] + 1) / 2 * plan["width"] - 0.5, (q[..., 1] + 1) / 2 * plan["height"] - 0.5)  # noqa: E731
+            ur, vr = to_px(g[0, 0, 0].numpy())
+            ub, vb = to_px(g[2, 0, 0].numpy())
+            sep_render = math.hypot(float(ur - ub), float(vr - vb))
+            # local render-px per output-px along the diagonal, from the green grid's neighbour
+            u0, v0 = to_px(g[1, 0, 0].numpy())
+            u1, v1 = to_px(g[1, 1, 1].numpy())
+            jac = math.hypot(float(u1 - u0), float(v1 - v0)) / math.sqrt(2)
+            self.assertAlmostEqual(sep_render / jac, rig.lens.lateral_color_px, delta=0.06 * rig.lens.lateral_color_px)
+
     def test_lateral_colour_separates_red_and_blue_at_the_corner(self):
         sensor = ss.LucidSensor(self.rig, self.plan)
         g = sensor.grid
