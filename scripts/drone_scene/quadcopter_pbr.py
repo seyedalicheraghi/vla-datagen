@@ -353,18 +353,19 @@ def scene_cfg() -> scene.SceneCfg:
     if WORLD:
         az = float(WORLD["sun"]["azimuth_ccw_from_east_deg"])
         hs = MANIFEST["sky"].get("hdr_sun", {})
-        cfg = replace(cfg, sun=scene.SunCfg(elevation_deg=SUN_EL, azimuth_deg=az), lawn_half=12.0,
+        # lawn_half 0.5: the map's terrain is the lawn (flattened to lawn_z at the take-off), so the backyard keeps
+        # only a token lawn quad hidden under the patio
+        cfg = replace(cfg, sun=scene.SunCfg(elevation_deg=SUN_EL, azimuth_deg=az), lawn_half=0.5,
                       sky_rotation_deg=hdr.dome_rotation_deg(hs["azimuth_deg"], az) if "azimuth_deg" in hs else 0.0)
     return vehicles.frame_scene(cfg, VEHICLE)
 
 
-def make_flight(onboard: dict, robot_z0: float):
-    """The flight (or just the camera geometry when hovering)."""
+def make_flight(onboard: dict, start_z: float, clearance: float):
+    """The flight (or just the camera geometry when hovering).  ``start_z``: body origin standing on the patio;
+    ``clearance``: body origin above the ground it stands on (its landing gear)."""
     if not WORLD:
         return flight.Flight(cameras=onboard)
     L = WORLD["landing"]
-    start_z = robot_z0
-    clearance = start_z - WORLD["takeoff"]["z"]
     cruise = max(WORLD["cruise_z"], start_z + args_cli.cruise_agl, L["z"] + clearance + 10.0)
     return flight.StraightFlight(start=(0.0, 0.0, start_z), end_ground_z=L["z"], distance=WORLD["distance_m"],
                                  heading_deg=WORLD["heading_deg"], cruise_z=cruise, speed=args_cli.speed,
@@ -413,8 +414,8 @@ def main() -> None:
     # body origin above its landing gear, standing on the patio (backyard) or the map's take-off spot
     z_feet = float(pts[:, 2].min()) if len(pts) else 0.0
     from drone_scene.pavers import PaverSpec
-    robot_z0 = cfg.patio_top + PaverSpec().top_rise - z_feet + 0.005
-    geom = make_flight(onboard, robot_z0)           # camera poses (and the flight path, with --fly)
+    clearance = 0.005 - z_feet
+    geom = make_flight(onboard, cfg.patio_top + PaverSpec().top_rise + clearance, clearance)
     fl = geom if args_cli.fly else None
     if WORLD:
         say(f"[drone] flight: {fl.duration:.0f} s - take-off, climb to {fl.cruise_z:.0f} m, {fl.distance:.0f} m at "

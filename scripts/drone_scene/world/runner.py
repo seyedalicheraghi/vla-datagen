@@ -31,6 +31,7 @@ def _env(libs: str) -> dict:
     env.setdefault("GDAL_DISABLE_READDIR_ON_OPEN", "EMPTY_DIR")
     env.setdefault("CPL_VSIL_CURL_ALLOWED_EXTENSIONS", ".tif,.TIF,.tiff")
     env["PYTHONNOUSERSITE"] = "1"
+    env.setdefault("PXR_USDC_EMIT_DEPRECATION_WARNINGS", "0")     # NVIDIA's older tree files trigger it
     return env
 
 
@@ -78,8 +79,16 @@ def ensure_world(cache_dir: str, build_args: list[str], python: str = sys.execut
            "--write-path", result] + list(build_args)
     proc = subprocess.Popen(cmd, env=_env(libs), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8", errors="replace")
+    remote_refs = 0
     for line in proc.stdout:
+        # usd-core cannot open https:// references (Isaac Sim's resolver can): expected, so one summary line
+        if "Could not open asset @http" in line:
+            remote_refs += 1
+            continue
         log(line.rstrip())
+    if remote_refs:
+        log(f"[world] {remote_refs} trees/grass models are referenced from NVIDIA's server; Isaac Sim loads them "
+            "(the map tools themselves cannot open web links, which is expected)")
     if proc.wait() != 0 or not os.path.exists(result):
         raise RuntimeError(f"the world builder failed (exit code {proc.returncode}); see the [world] messages above")
     with open(result, encoding="utf-8") as f:

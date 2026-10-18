@@ -45,7 +45,7 @@ from . import usdio  # noqa: E402
 from . import vegetation as V  # noqa: E402
 from .geo import Frame, Grid, compass_to_ccw_from_east, sun_position  # noqa: E402
 
-BUILD_VERSION = "1"
+BUILD_VERSION = "2"     # bump when the output changes for the same arguments (cache key)
 DEFAULT_REGION = (42.0250, -93.6900)          # west Ames, Iowa: suburbs, parks and farmland
 ATTRIBUTION = ("Map data: Overture Maps Foundation (OpenStreetMap contributors ODbL, Microsoft/Esri building "
                "footprints), ESA WorldCover 2021 (CC BY 4.0), Copernicus Sentinel-2 data, USGS 3DEP (public domain) / "
@@ -102,13 +102,15 @@ def find_site(a, cache, log):
     ov = data.overture(f, rect, ["building", "segment", "water", "land_use"], cache, log)
     fps = data.buildings(ov["building"])
     houses = [fp.polygon for fp in fps if (fp.cls or "house") in S.HOUSE_CLASSES and 70 < fp.polygon.area < 450]
-    rd = [(r.line, R.road_spec(r)[0]) for r in data.roads(ov["segment"]) if R.road_spec(r)[0] >= 3.0]
+    rd_all = [(r.line, R.road_spec(r)[0]) for r in data.roads(ov["segment"])]
+    rd = [x for x in rd_all if x[1] >= 3.0]
     water = data.water_polygons(ov["water"])
     classes = ground_classes(f, rect, 10.0, cache, ov.get("land_use"), water, log)
     canopy = data.canopy(f, rect, 2.0, cache, log)
     if a.takeoff:
         houses = [h for h in houses if h.distance(__import__("shapely").points(0, 0)) < 60] or houses
-    st = S.choose(houses, [fp.polygon for fp in fps], rd, water, classes, canopy, a.distance, log=log)
+    st = S.choose(houses, [fp.polygon for fp in fps], rd, water, classes, canopy, a.distance, log=log,
+                  takeoff_roads=rd_all)
     lon_t, lat_t = f.to_lonlat(*st.takeoff)
     lon_l, lat_l = f.to_lonlat(*st.landing)
     return (float(lat_t), float(lon_t)), (float(lat_l), float(lon_l)), dict(st.notes, score=st.score)
@@ -378,7 +380,10 @@ def build(a, log=print) -> str:
     h_fine.data -= z0
     h_far, _ = data.heights(frame, far, 10.0, cache, log)
     h_far.data -= z0
-    z_take = 0.0
+    # the take-off pad is flattened to the hand-built backyard's lawn level (scene.SceneCfg.lawn_z), so its patio,
+    # curb and mulch bed stand on it and the map's own lawn is the backyard's lawn
+    from ..scene import SceneCfg
+    z_take = SceneCfg().lawn_z
     z_land = float(h_detail.sample(np.array([lx]), np.array([ly]))[0])
     pads = _pads(z_take, (lx, ly), z_land)
 

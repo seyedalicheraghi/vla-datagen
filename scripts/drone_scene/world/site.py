@@ -128,9 +128,12 @@ def route_score(a, b, classes: Grid, buildings, roads, canopy: Grid | None) -> t
 
 
 def choose(houses, buildings, roads, water, classes: Grid, canopy: Grid | None, distance: float = 2000.0,
-           centre=(0.0, 0.0), max_takeoffs: int = 40, bearing_step_deg: float = 3.0, log=None) -> Site:
-    """The best (take-off, landing) pair; raises if the area has none."""
-    T = takeoff_candidates(houses, roads, buildings, classes, canopy, centre)
+           centre=(0.0, 0.0), max_takeoffs: int = 40, bearing_step_deg: float = 3.0, log=None,
+           takeoff_roads=None) -> Site:
+    """The best (take-off, landing) pair; raises if the area has none.  ``takeoff_roads`` (default ``roads``) are
+    the lines a backyard must keep clear of: pass footpaths and cycle paths too, the backyard set is ~12 m across."""
+    T = takeoff_candidates(houses, takeoff_roads if takeoff_roads is not None else roads, buildings, classes, canopy,
+                           centre)
     if len(T) == 0:
         raise RuntimeError("no backyard take-off spot found near the requested place (no lawn behind a house "
                            "clear of trees and roads); give --takeoff lat,lon")
