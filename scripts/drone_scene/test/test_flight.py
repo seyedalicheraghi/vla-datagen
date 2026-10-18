@@ -192,5 +192,45 @@ class TestStraightFlight(unittest.TestCase):
             flight.StraightFlight(start=(0, 0, 50.0), cruise_z=40.0)
 
 
+class TestProbeMoments(unittest.TestCase):
+    def setUp(self):
+        self.f = flight.StraightFlight(start=(0.0, 0.0, 101.1), end_ground_z=93.0, distance=2000.0, heading_deg=30.0,
+                                       cruise_z=145.0, ground_clearance=0.1)
+        self.m = flight.probe_moments(self.f)
+
+    def test_straight_moments_in_order_and_phase(self):
+        self.assertEqual(list(self.m), ["ground", "liftoff", "climb", "cruise_early", "cruise_mid", "cruise_late",
+                                        "descent", "final"])
+        ts = list(self.m.values())
+        self.assertEqual(ts, sorted(ts))
+        self.assertTrue(all(0 < t < self.f.duration for t in ts))
+        want = {"ground": "ground", "liftoff": "climb", "climb": "climb", "cruise_early": "cruise",
+                "cruise_mid": "cruise", "cruise_late": "cruise", "descent": "descent", "final": "landing"}
+        for k, t in self.m.items():
+            self.assertEqual(self.f.phase_name(t), want[k], k)
+
+    def test_straight_moments_where_expected(self):
+        p = {k: self.f.position(t) for k, t in self.m.items()}
+        self.assertAlmostEqual(p["liftoff"][2], 101.1 + 1.5, places=3)
+        self.assertAlmostEqual(p["climb"][2], (101.1 + 145.0) / 2, places=3)
+        for k, frac in (("cruise_early", 0.15), ("cruise_mid", 0.5), ("cruise_late", 0.85)):
+            self.assertAlmostEqual(float(np.linalg.norm(p[k][:2])), 2000.0 * frac, places=2)
+            self.assertAlmostEqual(float(np.linalg.norm(self.f.velocity(self.m[k]))), 10.0, places=6, msg="at speed")
+        self.assertAlmostEqual(p["final"][2], 93.0 + 0.1 + 1.0, places=3)
+
+    def test_garden_moments(self):
+        g = flight.Flight()
+        self.assertEqual(flight.probe_moments(g), {"t2": 2.0, "t6": 6.0, "t10": 10.0, "t14": 14.0, "t18": 18.0})
+
+    def test_parse(self):
+        self.assertEqual(flight.parse_probe([], self.m, self.f.duration), self.m)
+        got = flight.parse_probe(["cruise_mid", "95", "t12.5"], self.m, self.f.duration)
+        self.assertEqual(got, {"cruise_mid": self.m["cruise_mid"], "t95": 95.0, "t12.5": 12.5})
+        with self.assertRaises(ValueError):
+            flight.parse_probe(["sunset"], self.m, self.f.duration)
+        with self.assertRaises(ValueError):
+            flight.parse_probe(["99999"], self.m, self.f.duration)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

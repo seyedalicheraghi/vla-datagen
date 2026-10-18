@@ -314,6 +314,57 @@ class StraightFlight(_Trajectory):
         return np.column_stack([x, y, z])
 
 
+# ---------------------------------------------------------------------------
+# Probe moments: a few still frames that show the whole flight (quadcopter_pbr.py --probe)
+# ---------------------------------------------------------------------------
+
+def _time_at(move: SmoothMove, s: float) -> float:
+    """Time into ``move`` at which it has covered ``s`` metres (its distance only grows, so bisect)."""
+    lo, hi = 0.0, move.duration
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if move.at(mid)[0] < s else (lo, mid)
+    return (lo + hi) / 2
+
+
+def probe_moments(fl) -> dict[str, float]:
+    """Named flight times for still-frame probes, in flight order, so each phase can be looked at without
+    rendering the whole flight.  ``StraightFlight``: standing on the patio, 1.5 m up, mid-climb, at 15 %, 50 % and
+    85 % of the route (at cruise speed, leaning into the air stream), mid-descent, and 1 m above the landing
+    grass.  ``Flight`` (the garden tour): every 4 s."""
+    if not isinstance(fl, StraightFlight):
+        return {f"t{t:g}": float(t) for t in np.arange(2.0, fl.duration, 4.0)}
+    ground, climb, cruise, descent, landing = (fl.phases[i] for i in (0, 1, 3, 5, 7))
+    out = {"ground": ground[0] + ground[1] / 2,
+           "liftoff": climb[0] + _time_at(climb[4], min(1.5, climb[4].distance / 2)),
+           "climb": climb[0] + _time_at(climb[4], climb[4].distance / 2)}
+    for name, frac in (("cruise_early", 0.15), ("cruise_mid", 0.5), ("cruise_late", 0.85)):
+        out[name] = cruise[0] + _time_at(cruise[4], frac * cruise[4].distance)
+    out["descent"] = descent[0] + _time_at(descent[4], descent[4].distance / 2)
+    out["final"] = landing[0] + _time_at(landing[4], max(0.0, landing[4].distance - 1.0))
+    return {k: float(v) for k, v in out.items()}
+
+
+def parse_probe(labels: list[str], moments: dict[str, float], duration: float) -> dict[str, float]:
+    """``--probe`` labels -> {label: time}.  A label is a moment name or a time in seconds (``95`` or ``t95``)
+    within the flight; no labels means every moment."""
+    if not labels:
+        return dict(moments)
+    out = {}
+    for lab in labels:
+        if lab in moments:
+            out[lab] = moments[lab]
+            continue
+        try:
+            t = float(lab[1:] if lab.startswith("t") else lab)
+        except ValueError:
+            raise ValueError(f"unknown probe moment {lab!r}; use a time in seconds or one of {', '.join(moments)}") from None
+        if not 0.0 <= t <= duration:
+            raise ValueError(f"probe time {t:g} s is outside the flight (0 to {duration:.1f} s)")
+        out[f"t{t:g}"] = t
+    return out
+
+
 def rot_to_quat(R: np.ndarray) -> tuple[float, float, float, float]:
     """(w, x, y, z) of a rotation matrix (column vectors)."""
     t = np.trace(R)

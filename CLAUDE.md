@@ -12,21 +12,47 @@
 
 ## Where things stand
 
-- `main` of `seyedalicheraghi/IsaacSim` (private) holds all of it, up to commit `ce68ec9` and the commit that added this file.
+- `main` of `seyedalicheraghi/IsaacSim` (private) holds all of it, including the realism agent fleet (`.claude/`,
+  `scripts/drone_scene/realism/`).
 - **Nothing has been run in Isaac Sim yet.** Everything so far was checked only by unit tests and by dry runs with Isaac Sim
-  replaced by stand-ins. How things look and run inside Isaac Sim is unverified.
-- **Next step:** the first real run on this PC.
-  1. Do a quick check first:
-     ```bash
-     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --record 60 --cameras front back --resolution_scale 0.5
-     ```
-  2. Read `drone_scene_videos/drone_scene.log`:
-     - does `HdrColor` work, or is there a "no HdrColor" warning?
-     - the "mean scene radiance = ... x an 18 % grey card" line;
-     - the camera mount lines;
-     - the `[rtx_look] WARNING` lines (unregistered settings);
-     - any traceback.
-  3. Fix what fails, then do the full flight (`--record -1 --cameras front back chase`) and look at the videos.
+  replaced by stand-ins; the fleet and the `--probe` mode have not run at all. How things look and run inside Isaac Sim
+  is unverified.
+- **Next step:** `/first-run` on this PC. It does the environment check, the unit tests, a quick probe render, log
+  triage and fixes, the baseline, the NAIP references and the noise calibration. What to read in
+  `drone_scene.log`:
+  - does `HdrColor` work, or is there a "no HdrColor" warning?
+  - the "mean scene radiance = ... x an 18 % grey card" line;
+  - the camera mount lines;
+  - the `[rtx_look] WARNING` lines (unregistered settings);
+  - any traceback.
+  Then `/realism` for improvement rounds, and `/record` for the full flight videos.
+
+## Agent fleet (details: `scripts/drone_scene/realism/README.md`)
+
+- **The lead is this main session.** It talks to the owner (style: `.claude/output-styles/drone-owner.md`) and
+  delegates to `.claude/agents/`:
+  - render-runner (haiku), the only one that renders;
+  - realism-critic and realism-judge (sonnet, read-only);
+  - realism-planner and isaac-debugger (opus);
+  - realism-implementer, candidate-reviewer and realism-integrator (sonnet);
+  - scene-researcher (sonnet) and fleet-scribe (haiku).
+- **Commands:**
+  - `/first-run`;
+  - `/probe [moments] [cameras]`;
+  - `/record [realism]`;
+  - `/realism [rounds] [candidates=N] [focus]`, which runs the saved workflow `realism-round` once per round;
+  - `/fleet-status`.
+- **Renders only through `scripts/drone_scene/realism/run_probe.sh`.**
+  - Use `start` or `record`, then `wait OUT 540`, repeated until it exits 0 or 1.
+  - It queues renders on the one GPU and outlives the 10-minute command limit.
+  - The hook `.claude/hooks/guard_bash.py` refuses direct `isaaclab.sh ... quadcopter_pbr.py` calls. It also refuses
+    project code on cloud machines, and asks before every `git push`.
+- **Workspace:** `<repo>/.realism/` (git-ignored).
+  - `config.env` (ISAACLAB_DIR), `baseline/`, `rounds/`, `reference/naip/`, `reference/footage/`, `worktrees/`,
+    `ledger.jsonl`.
+  - Accepted changes go to the local branch `realism`; candidates go to `rc/<round>-c<k>`.
+  - `realism` is merged into `main` and pushed only when the owner says so.
+- **Unit tests:** `scripts/drone_scene/realism/run_tests.sh [checkout]` (Isaac's Python; `test_world` gets the map tools).
 
 ## Rules from the owner
 
@@ -51,7 +77,9 @@
 | `scripts/drone_scene/vehicles.py` | LMF2 / Crazyflie, LMF2 PBR materials, camera mounts (kept out of their own view) |
 | `scripts/drone_scene/world/` | real-world map builder (terrain, land cover, buildings, roads, trees, site choice, USD); runs before Isaac Sim via `runner.py` |
 | `scripts/drone_scene/scene.py`, `pavers.py`, `drone_look.py`, `rtx_look.py`, `prepare.py`, `hdr.py`, `assets.py`, `nucleus.py` | backyard scene, assets, sky calibration, RTX settings |
-| `scripts/drone_scene/test/`, `scripts/heavy_machines/test/` | plain `unittest` files, no Isaac Sim needed: `python scripts/drone_scene/test/test_world.py` etc. |
+| `scripts/drone_scene/realism/` | the fleet's tools: `run_probe.sh` (GPU queue), `run_tests.sh`, `metrics.py`, `montage.py` (blind A/B), `reference.py` (NAIP), `BACKLOG.md`, `LESSONS.md` |
+| `.claude/` | agents, skills (commands), the `realism-round` workflow, output style, settings, the guard hook |
+| `scripts/drone_scene/test/`, `scripts/heavy_machines/test/` | plain `unittest` files, no Isaac Sim needed: `scripts/drone_scene/realism/run_tests.sh` runs the drone ones |
 
 ## Things learned the hard way
 

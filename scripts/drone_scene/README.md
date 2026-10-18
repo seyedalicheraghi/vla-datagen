@@ -148,13 +148,36 @@ finds open grass `--distance` metres away. Write coordinates with `=`, so a nega
 (`--region=-33.87,151.21`). Changing `--when` or `--cruise_agl` reuses the built map. Outside the US the terrain falls back to Copernicus 30 m, a
 surface model that includes trees and buildings.
 
+## Probe stills: a quick look at every phase (`--probe`)
+
+Instead of recording the whole flight, `--probe` puts the drone at named moments of the flight and keeps one still per
+camera. The moments are on the patio, 1.5 m up, mid-climb, at 15 %, 50 % and 85 % of the route, mid-descent and 1 m
+above the landing grass; times in seconds also work. At each moment the renderer streams in what is visible and
+renders `--probe_settle` frames (default 16) so auto exposure and anti-aliasing settle; the last frame is kept.
+
+```bash
+# all 8 moments, 4 cameras -> drone_scene_videos/probe/<camera>_<moment>.png + probe.json
+./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --probe --cameras front back chase nadir --resolution_scale 0.5
+# two moments only
+./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --probe cruise_mid final --cameras front nadir
+```
+
+- **The nadir camera** (`--cameras nadir`) looks straight down from `--nadir_height` (300 m) above the take-off
+  ground, north up, 60°. Its stills can be compared directly with real NAIP orthophotos of the same squares
+  (`realism/reference.py`).
+- **`probe.json`** records the exposure, clipping, timings and code commit of every still.
+- **`--world_tag NAME`** builds the map in its own cache folder, for a checkout that changes `world/`.
+- **The agent fleet** in `.claude/` uses all of this through `realism/run_probe.sh`; see `realism/README.md`.
+
 ## Tests (no Isaac Sim needed)
 
 ```bash
+scripts/drone_scene/realism/run_tests.sh             # all of them, with Isaac Sim's Python (map tests get the map tools)
 python scripts/drone_scene/test/test_lucid.py      # optics, distortion, sensor noise, demosaicing, exposure
 python scripts/drone_scene/test/test_vehicles.py   # mounts, LMF2 materials, framing
-python scripts/drone_scene/test/test_flight.py     # the garden flight, the straight flight and camera poses
+python scripts/drone_scene/test/test_flight.py     # the garden flight, the straight flight, probe moments, camera poses
 python scripts/drone_scene/test/test_world.py      # map builder: terrain, land cover, buildings, roads, trees, site choice
+python scripts/drone_scene/test/test_realism.py    # the fleet's image statistics, blind A/B pictures, render queue script
 ```
 
 What these tests cannot check, because they cannot run Isaac Sim: whether Isaac Sim 5.1 returns `HdrColor`

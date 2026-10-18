@@ -48,6 +48,9 @@ not overwrite an untracked file. If git complains about other local changes, run
   look in Isaac Sim, and whether every Isaac API call works on your version, is unverified until you run it.
 - **To have everything run on your PC from now on:** run Claude Code on the PC itself. In a terminal in your
   IsaacLab folder, run `claude remote-control`, or use the Claude Desktop app or Claude Code in VS Code.
+- **The agent-fleet work (section 6), also in the cloud session:** only file edits, git, and agents that read the code
+  and searched the web (research on multi-agent systems, and a realism audit of the scene). No code of the project
+  ran: no Isaac Sim, no Python of the scene, no tests. A hook now blocks that on cloud machines.
 
 ## 1. Heavy machines (`scripts/heavy_machines/`, `assets/heavy_machines/`)
 
@@ -140,9 +143,47 @@ The Isaac Lab quadcopter demo in a photorealistic backyard:
   - negative coordinates failed;
   - GUI flights ran 10× slower than real time.
 
+## 6. Agent fleet for realism (`.claude/`, `scripts/drone_scene/realism/`)
+
+- **What:** Claude Code agents that improve the drone scene's realism on your PC, with your GPU. Each round:
+  1. critics look at probe stills of the accepted state;
+  2. a planner picks a few independent fixes;
+  3. builders implement them in parallel, each in its own git worktree;
+  4. each fix is rendered (queued, one GPU job at a time);
+  5. blind judges compare it with the accepted state, every picture in both screen orders;
+  6. winners are merged onto the local branch `realism`.
+  Details and the research behind the design: `scripts/drone_scene/realism/README.md`.
+- **Agents** (`.claude/agents/`, model in each file):
+  - render-runner (haiku), the only one that renders;
+  - realism-critic, realism-judge, realism-implementer, candidate-reviewer, realism-integrator and
+    scene-researcher (sonnet);
+  - realism-planner and isaac-debugger (opus);
+  - fleet-scribe (haiku).
+  - The lead is the main session you talk to. Its manner (status first, exact paths, this PC only, ask before
+    pushing) is in `.claude/output-styles/drone-owner.md`.
+- **Commands:** `/first-run`, `/probe`, `/record`, `/realism`, `/fleet-status`. The loop itself is the saved workflow
+  `.claude/workflows/realism-round.js`.
+- **New in the scene script:**
+  - `--probe` renders stills at 8 named flight moments instead of the whole flight;
+  - the `nadir` camera looks straight down from 300 m, north up, for comparison with real NAIP orthophotos;
+  - `--world_tag` builds the map in its own cache folder.
+- **Tools:**
+  - `run_probe.sh`: the GPU queue and long-render wrapper;
+  - `run_tests.sh`;
+  - `metrics.py`: image statistics, A/B deltas, comparison with real pictures;
+  - `montage.py`: contact sheets and blind A/B pairs;
+  - `reference.py`: NAIP squares from Microsoft Planetary Computer.
+- **Enforced rules** (`.claude/settings.json`, `.claude/hooks/guard_bash.py`):
+  - no project code on cloud machines;
+  - renders only through the queue;
+  - every `git push` asks you;
+  - force pushes are denied.
+
 ## How to run it on your PC
 
-From your clone, on `main`:
+Start with `/first-run` in Claude Code, in the repo folder on your PC. It does the checks, a quick probe, fixes and
+the baseline. Then use `/realism` for improvement rounds and `/record` for the flight videos. By hand, from your
+clone, on `main`:
 
 ```bash
 # the 2 km flight: front and back LUCID cameras plus the chase camera, whole flight (~4.5 min of video)
@@ -194,6 +235,11 @@ Full details are in `scripts/drone_scene/README.md` and `scripts/heavy_machines/
 - **Distant haze.** There is no atmospheric haze, so far terrain looks crisper than in reality.
 - **Tests.** The unit tests (`scripts/drone_scene/test/`, `scripts/heavy_machines/test/`) check the Python logic and
   geometry only.
+- **The agent fleet has not run.**
+  - The probe mode, the nadir camera, the tools, the hook and the workflow were written without running anything,
+    and their new tests have not been run either.
+  - `/first-run` is their first test.
+  - How well a vision model judges realism here is measured by the noise calibration in `/first-run`.
 
 ## Commits on the branch (newest first)
 

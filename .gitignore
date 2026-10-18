@@ -84,3 +84,8 @@ scripts/heavy_machines/.installed_commit
 /drone_flight_frames/
 # quadcopter_pbr.py output (run from the repo root)
 /drone_scene_videos/
+# the realism agent fleet's workspace on the PC (renders, worktrees, references, ledger; .claude/ explains it)
+/.realism/
+# Claude Code: personal settings and its own worktrees
+.claude/settings.local.json
+.claude/worktrees/

@@ -20,12 +20,16 @@ weight, reset every 10 s), plus:
 - ``--view demo|hero|garden|top|front|back`` picks the viewport camera (``demo`` = the original view);
 - ``--pathtracing`` switches the renderer to path tracing (offline quality);
 - ``--record SECONDS`` renders the chosen cameras to PNG frames and an mp4 (use with --headless);
-- ``--fly`` flies the drone along ``flight.Flight`` (a 20 s garden tour) instead of hovering.
+- ``--fly`` flies the drone along ``flight.Flight`` (a 20 s garden tour) instead of hovering;
+- ``--probe [MOMENT ...]`` renders still frames at named flight moments (``flight.probe_moments``) instead of a
+  video, to ``<out>/probe/<camera>_<moment>.png`` + ``probe.json``: a quick, repeatable look at every phase of the
+  flight (used by the realism agents, ``.claude/``).
 
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py                         # GUI
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --fly --view front     # GUI, onboard view
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --fly --headless --record 20 --cameras front back
     ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --headless --record 4 --cameras hero demo --pathtracing
+    ./isaaclab.sh -p scripts/drone_scene/quadcopter_pbr.py --route straight --headless --probe --cameras front back chase
 
 Everything renders on the local GPU.  Assets are downloaded and pre-processed by ``prepare.py`` before Isaac Sim
 starts (cached in ~/.cache/drone_scene).  Output and log: <out>/ (default ./drone_scene_videos).
@@ -38,11 +42,14 @@ import glob
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
+import time
 import traceback
 
+T0 = time.time()
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from drone_scene import flight  # noqa: E402  (numpy only)
@@ -53,7 +60,7 @@ from drone_scene import vehicles  # noqa: E402
 
 parser = argparse.ArgumentParser(description="Quadcopter demo with two LUCID cameras in a PBR backyard.")
 ONBOARD = sorted(flight.CAMERAS)                    # cameras mounted on the drone (with --fly)
-CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras] + ONBOARD + ["chase"]
+CAMERA_NAMES = [c.name for c in scene.SceneCfg().cameras] + ONBOARD + ["chase", "nadir"]
 parser.add_argument("--view", default="demo", choices=CAMERA_NAMES, help="viewport camera")
 parser.add_argument("--pathtracing", action="store_true", help="path-traced rendering (slower, best quality)")
 parser.add_argument("--spp", type=int, default=64, help="path-tracing samples per pixel per frame")
@@ -98,6 +105,18 @@ parser.add_argument("--isaac_rgb", action="store_true",
 parser.add_argument("--lens", action="store_true", help="third-person cameras: bloom, vignette, grain, colour fringe")
 parser.add_argument("--motion_blur", action="store_true", help="real-time motion blur (not with --pathtracing)")
 parser.add_argument("--aces", action="store_true", help="force the ACES tonemapper (enum unverified; see rtx_look)")
+parser.add_argument("--probe", nargs="*", default=None, metavar="MOMENT",
+                    help="render still frames at these flight moments instead of a video, to <out>/probe/ (no names: "
+                         "all of them; straight route: ground liftoff climb cruise_early cruise_mid cruise_late descent "
+                         "final; or times in seconds)")
+parser.add_argument("--probe_settle", type=int, default=16,
+                    help="frames rendered at each probe moment before its still is kept (exposure and anti-aliasing settle)")
+parser.add_argument("--nadir_height", type=float, default=300.0,
+                    help="the nadir camera (--cameras nadir): looks straight down, north up, 60 deg, from this height "
+                         "(m) above the take-off ground, over the drone; compare it with orthophotos (realism/reference.py)")
+parser.add_argument("--world_tag", default=None,
+                    help="build/use the map under this name, in its own cache folder (e.g. for a git worktree that "
+                         "changes world/); letters, digits, '.', '_' and '-'")
 parser.add_argument("--out", default="drone_scene_videos")
 parser.add_argument("--cache", default=prep.DEFAULT_CACHE)
 
@@ -107,10 +126,27 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 if args_cli.route == "straight":
     args_cli.fly = True
+PROBE = args_cli.probe is not None
+if PROBE:
+    if args_cli.record:
+        parser.error("--probe renders still frames; leave out --record")
+    if not args_cli.fly:
+        parser.error("--probe needs a flight: --fly or --route straight")
+    if args_cli.probe_settle < 1:
+        parser.error("--probe_settle must be at least 1")
+    try:                                    # the names now; the times once the real flight is known
+        flight.parse_probe(args_cli.probe, flight.probe_moments(
+            flight.StraightFlight() if args_cli.route == "straight" else flight.Flight()), math.inf)
+    except ValueError as exc:
+        parser.error(str(exc))
+if args_cli.world_tag is not None and not re.fullmatch(r"[A-Za-z0-9_.-]+", args_cli.world_tag):
+    parser.error("--world_tag: use only letters, digits, '.', '_' and '-'")
 if args_cli.landing and not args_cli.takeoff:
     parser.error("--landing needs --takeoff too (or give neither and let the map choose a route)")
-if "chase" in ({args_cli.view} | set(args_cli.cameras)) and args_cli.route != "straight":
-    parser.error("the chase camera follows the straight route (--route straight)")
+if {"chase", "nadir"} & ({args_cli.view} | set(args_cli.cameras)) and args_cli.route != "straight":
+    parser.error("the chase and nadir cameras follow the straight route (--route straight)")
+if args_cli.view == "nadir":
+    parser.error("the nadir camera is for recording (--cameras nadir), not a viewport")
 if not args_cli.fly and ({args_cli.view} | set(args_cli.cameras)) & set(ONBOARD):
     parser.error(f"the onboard cameras {ONBOARD} need --fly")
 try:
@@ -151,7 +187,7 @@ if args_cli.route == "straight":
         # --flag=value: a value may start with a minus sign (southern / western coordinates)
         wargs = [f"--distance={args_cli.distance:g}", f"--cruise-agl={args_cli.cruise_agl:g}"]
         for flag, val in (("--region", args_cli.region), ("--takeoff", args_cli.takeoff),
-                          ("--landing", args_cli.landing), ("--when", args_cli.when)):
+                          ("--landing", args_cli.landing), ("--when", args_cli.when), ("--name", args_cli.world_tag)):
             if val:
                 wargs.append(f"{flag}={val}")
         WORLD = runner.ensure_world(os.path.expanduser(args_cli.cache), wargs, log=say)
@@ -177,7 +213,7 @@ except BaseException:  # noqa: BLE001
 
 if args_cli.record < 0 and not args_cli.fly:
     parser.error("--record -1 (the whole flight) needs a flight: --fly or --route straight")
-RECORDING = args_cli.record != 0                    # > 0: that many seconds, < 0: the whole flight
+RECORDING = args_cli.record != 0 or PROBE          # > 0: that many seconds, < 0: the whole flight
 if RECORDING:
     args_cli.enable_cameras = True
 try:
@@ -333,6 +369,22 @@ class ChaseCamera:
         return [float(c) for c in self.eye], [float(c) for c in p]
 
 
+NADIR_PX, NADIR_FOV, NADIR_APERTURE = 1024, 60.0, 20.955
+# Isaac Lab "world" camera axes (+X forward, +Z up) as world vectors: forward = down, up = north, left = west
+NADIR_QUAT = flight.rot_to_quat(np.array([[0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0]]))
+
+
+def nadir_pose(fl, t: float) -> list[float]:
+    """The nadir camera: over the drone, --nadir_height above the take-off ground."""
+    p = fl.position(t)
+    return [float(p[0]), float(p[1]), float(fl.start[2]) - fl.ground_clearance + args_cli.nadir_height]
+
+
+def place_nadir(cam, fl, t: float) -> None:
+    cam.set_world_poses(torch.tensor([nadir_pose(fl, t)], device=cam.device, dtype=torch.float32),
+                        torch.tensor([NADIR_QUAT], device=cam.device, dtype=torch.float32), convention="world")
+
+
 class HdrReader:
     """Replicator's HdrColor (linear radiance before tone mapping) on a camera's render product."""
 
@@ -383,6 +435,101 @@ def make_flight(onboard: dict, start_z: float, clearance: float):
     return flight.StraightFlight(start=(0.0, 0.0, start_z), end_ground_z=L["z"], distance=WORLD["distance_m"],
                                  heading_deg=WORLD["heading_deg"], cruise_z=cruise, speed=args_cli.speed,
                                  ground_clearance=clearance, cameras=onboard)
+
+
+def git_state() -> str:
+    """The commit this run's code is at, plus "+dirty" for uncommitted changes, so every output can be traced
+    to the code that made it."""
+    here = os.path.dirname(os.path.abspath(__file__))
+
+    def git(*a):
+        return subprocess.run(["git", *a], cwd=here, capture_output=True, text=True, timeout=10).stdout.strip()
+
+    try:
+        head = git("rev-parse", "--short", "HEAD") or "unknown"
+        return head + ("+dirty" if git("status", "--porcelain", "--untracked-files=no") else "")
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
+def run_probe(sim, robot, fl, cams, prop_body_ids, sim_dt, grab, place, records) -> None:
+    """--probe: still frames of the recorded cameras at named flight moments, then exit.  At each moment the drone
+    holds its flight pose (with its flight velocity and attitude), the renderer streams in what is visible from
+    there, and ``--probe_settle`` frames let auto exposure and anti-aliasing settle; the last frame is kept.
+    Output: <out>/probe/<camera>_<moment>.png and probe.json (exposure, clipping, timings, code version)."""
+    try:
+        moments = flight.parse_probe(args_cli.probe, flight.probe_moments(fl), fl.duration)
+    except ValueError:
+        say("[probe] bad --probe moment")
+        fail(2)
+    pdir = os.path.join(OUT, "probe")
+    os.makedirs(pdir, exist_ok=True)
+    for old in glob.glob(os.path.join(pdir, "*.png")) + glob.glob(os.path.join(pdir, "probe.json")):
+        os.remove(old)
+    chase = ChaseCamera() if "chase" in cams else None
+    zeros = torch.zeros(robot.num_instances, len(prop_body_ids), 3, device=sim.device)
+
+    def step(t: float) -> None:
+        place(t)
+        robot.permanent_wrench_composer.set_forces_and_torques(forces=zeros, torques=zeros, body_ids=prop_body_ids)
+        robot.write_data_to_sim()
+        sim.step(render=True)
+        robot.update(sim_dt)
+
+    say(f"[probe] {len(moments)} moments x {len(cams)} cameras ({', '.join(cams)}), {args_cli.probe_settle} frames "
+        "each to settle: " + ", ".join(f"{k} {t:.1f} s" for k, t in moments.items()))
+    for _ in range(30):                         # compile shaders before the first moment
+        sim.render()
+    stills, frame, t_ready = [], 0, time.time()
+    for label, t in moments.items():
+        t_start = time.time()
+        if chase is not None:
+            chase.eye = None                    # a still: the chase camera has settled 10 m behind and 3.5 m up
+            eye, target = chase.update(fl.position(t), fl.velocity(t), fl.direction, sim_dt)
+            cams["chase"].set_world_poses_from_view(torch.tensor([eye], device=sim.device, dtype=torch.float32),
+                                                    torch.tensor([target], device=sim.device, dtype=torch.float32))
+        if "nadir" in cams:
+            place_nadir(cams["nadir"], fl, t)
+        step(t)
+        waited = 0
+        while SimulationManager.assets_loading() and waited < 3000:   # textures and models streaming in near here
+            step(t)
+            waited += 1
+        for _ in range(args_cli.probe_settle):
+            step(t)
+            shots = {name: grab(name, frame, t) for name in cams}
+            frame += 1
+        phase = fl.phase_name(t) if hasattr(fl, "phase_name") else "garden"
+        for name, (rgb, out) in shots.items():
+            path = os.path.join(pdir, f"{name}_{label}.png")
+            Image.fromarray(np.ascontiguousarray(rgb[..., :3])).save(path)
+            rec = {"camera": name, "moment": label, "time_s": round(t, 3), "phase": phase, "file": os.path.basename(path),
+                   "drone_position_m": [round(float(c), 3) for c in fl.position(t)],
+                   "speed_m_s": round(float(np.linalg.norm(fl.velocity(t))), 3)}
+            if out is not None:
+                last = records[name][-1]
+                rec.update(source=last["source"], exposure_us=last["exposure_us"], gain_db=last["gain_db"],
+                           saturated=last["saturated"], mean_radiance=round(out["mean_radiance"], 6))
+            if name == "nadir":
+                # what it covers, for cutting the same square out of an orthophoto (flat ground at take-off height)
+                rec["nadir"] = {"position_m": [round(c, 3) for c in nadir_pose(fl, t)], "fov_deg": NADIR_FOV,
+                                "footprint_m": round(2 * args_cli.nadir_height * math.tan(math.radians(NADIR_FOV / 2)), 2),
+                                "image_up": "north"}
+            stills.append(rec)
+        say(f"[probe] {label}: t = {t:.1f} s ({phase}), {waited} frames waiting for assets, {time.time() - t_start:.0f} s")
+    info = {"code": git_state(), "argv": sys.argv[1:], "route": args_cli.route,
+            "renderer": "pathtracing" if args_cli.pathtracing else "realtime",
+            "lucid_resolution": [RIG.width, RIG.height], "render_plan": PLAN, "settle_frames": args_cli.probe_settle,
+            "seconds_to_first_moment": round(t_ready - T0, 1), "seconds_total": round(time.time() - T0, 1),
+            "flight_duration_s": round(fl.duration, 2),
+            "map": ({k: WORLD[k] for k in ("origin", "takeoff", "landing", "distance_m", "heading_deg", "cruise_z", "sun")
+                     if k in WORLD} if WORLD else None),
+            "stills": stills}
+    with open(os.path.join(pdir, "probe.json"), "w", encoding="utf-8") as f:
+        json.dump(info, f, indent=1)
+    say(f"[probe] done: {len(stills)} stills and probe.json in {pdir} ({time.time() - T0:.0f} s in all)")
+    _log.close()
+    os._exit(0)
 
 
 def main() -> None:
@@ -476,7 +623,15 @@ def main() -> None:
                                              width=1280, data_types=["rgb"],
                                              spawn=sim_utils.PinholeCameraCfg(focal_length=24.0, clipping_range=(0.05, 20000.0)),
                                              offset=CameraCfg.OffsetCfg(convention="world")))
-        for name in [n for n in args_cli.cameras if n not in ONBOARD and n != "chase"]:
+        if "nadir" in args_cli.cameras:
+            cams["nadir"] = Camera(CameraCfg(
+                prim_path="/World/RecordCameras/nadir", update_period=0.0, height=NADIR_PX, width=NADIR_PX,
+                data_types=["rgb"],
+                spawn=sim_utils.PinholeCameraCfg(focal_length=NADIR_APERTURE / 2 / math.tan(math.radians(NADIR_FOV / 2)),
+                                                 horizontal_aperture=NADIR_APERTURE, vertical_aperture=NADIR_APERTURE,
+                                                 clipping_range=(1.0, 20000.0)),
+                offset=CameraCfg.OffsetCfg(convention="world")))
+        for name in [n for n in args_cli.cameras if n not in ONBOARD and n not in ("chase", "nadir")]:
             c = cfg.camera(name)
             spawn = sim_utils.PinholeCameraCfg(
                 focal_length=c.focal_length, horizontal_aperture=c.horizontal_aperture,
@@ -488,7 +643,7 @@ def main() -> None:
 
     sim.reset()
     for name, cam in cams.items():
-        if name in ONBOARD or name == "chase":
+        if name in ONBOARD or name in ("chase", "nadir"):
             continue                                # mounted on the drone / following it: they move with it
         c = cfg.camera(name)
         cam.set_world_poses_from_view(torch.tensor([c.eye], device=sim.device, dtype=torch.float32),
@@ -519,7 +674,46 @@ def main() -> None:
     prop_body_ids = robot.find_bodies(VEHICLE.prop_bodies)[0]
     robot_mass = robot.root_physx_view.get_masses().sum()
     gravity = torch.tensor(sim.cfg.gravity, device=sim.device).norm()
-    say("[drone] setup complete")
+    say(f"[drone] setup complete ({time.time() - T0:.0f} s after start; code {git_state()})")
+
+    grey = 0.18 * MANIFEST["sky"].get("reference_illuminance", 0.0) / math.pi    # an 18 % grey card, in render units
+    hdr_checked, ldr_noted = set(), set()
+
+    def grab(name: str, frame: int, time_s: float):
+        """The current frame of a recorded camera: (RGB8 image as numpy, the LUCID sensor's output or None)."""
+        cam = cams[name]
+        cam.update(sim_dt)
+        if name not in sensors:
+            return cam.data.output["rgb"][0, ..., :3].detach().cpu().numpy().astype(np.uint8), None
+        hdr, source = (readers[name].read() if name in readers else None), "HdrColor"
+        if hdr is None or not bool(hdr[..., :3].abs().amax() > 0):
+            if name not in ldr_noted:
+                say(f"[drone] {name}: no HdrColor image at frame {frame}; the sensor simulation uses the "
+                    f"tone-mapped image (this is only expected for the first frame or two)")
+                ldr_noted.add(name)
+            hdr, source = sensor_sim.ldr_to_linear(cam.data.output["rgb"][0]), "rgb"
+        if records[name] and records[name][-1]["source"] != source:
+            sensors[name].reset_exposure()      # HdrColor and the 8-bit image differ in scale by ~1000x
+        out = sensors[name].process(hdr)
+        if source == "HdrColor" and name not in hdr_checked and grey > 0:
+            hdr_checked.add(name)
+            ratio = out["mean_radiance"] / grey
+            say(f"[drone] {name}: mean scene radiance = {ratio:.2f} x an 18 % grey card under the calibrated "
+                f"sun + sky" + ("" if 0.03 < ratio < 30 else " - HdrColor is not in the scene's light "
+                                "units, so exposure_us in camera_info is not physical (the images are fine)"))
+        records[name].append({"frame": frame, "time_s": round(time_s, 4), "source": source,
+                              "exposure_us": None if math.isnan(out["exposure_us"]) else round(out["exposure_us"], 2),
+                              "gain_db": out["gain_db"], "saturated": round(out["saturated"], 5)})
+        return out["rgb"].cpu().numpy(), out
+
+    def place(t: float) -> None:
+        """Kinematic flight: the drone at its flight pose and velocity at time t."""
+        p, q, v = fl.position(t), fl.quat_wxyz(t), fl.velocity(t)
+        robot.write_root_pose_to_sim(torch.tensor([[*p, *q]], device=sim.device, dtype=torch.float32))
+        robot.write_root_velocity_to_sim(torch.tensor([[*v, 0.0, 0.0, 0.0]], device=sim.device, dtype=torch.float32))
+
+    if PROBE:
+        run_probe(sim, robot, fl, cams, prop_body_ids, sim_dt, grab, place, records)
 
     seconds = fl.duration if (args_cli.record < 0 and fl is not None) else args_cli.record
     record_steps = int(round(seconds / sim_dt))
@@ -545,17 +739,13 @@ def main() -> None:
                 break
             sim.render()
 
-    grey = 0.18 * MANIFEST["sky"].get("reference_illuminance", 0.0) / math.pi    # an 18 % grey card, in render units
-    hdr_checked, ldr_noted = set(), set()
     count, frame = 0, 0
     while simulation_app.is_running():
         if fl is not None:
             # kinematic flight: the pose and velocity along the flight (looped with a 2 s pause when not recording)
             t = (count * sim_dt) % (fl.duration + 2.0) if not cams else count * sim_dt
             t = min(t, fl.duration)
-            p, q, v = fl.position(t), fl.quat_wxyz(t), fl.velocity(t)
-            robot.write_root_pose_to_sim(torch.tensor([[*p, *q]], device=sim.device, dtype=torch.float32))
-            robot.write_root_velocity_to_sim(torch.tensor([[*v, 0.0, 0.0, 0.0]], device=sim.device, dtype=torch.float32))
+            place(t)
         elif count % 2000 == 0:                    # reset, as in the original demo
             if robot.num_joints > 0:               # the LMF2's propellers are fixed: no joints
                 robot.write_joint_state_to_sim(robot.data.default_joint_pos, robot.data.default_joint_vel)
@@ -579,37 +769,17 @@ def main() -> None:
                                                         torch.tensor([target], device=sim.device, dtype=torch.float32))
             if args_cli.view == "chase" and not args_cli.headless:
                 sim.set_camera_view(eye=list(eye), target=list(target))
+        if "nadir" in cams and render_now:
+            place_nadir(cams["nadir"], fl, t)
         sim.step(render=render_now)
         robot.update(sim_dt)
         if capture:
-            for name, cam in cams.items():
-                cam.update(sim_dt)
-                if name not in sensors:
-                    writers[name].add(cam.data.output["rgb"][0, ..., :3].detach().cpu().numpy().astype(np.uint8))
-                    continue
-                hdr, source = (readers[name].read() if name in readers else None), "HdrColor"
-                if hdr is None or not bool(hdr[..., :3].abs().amax() > 0):
-                    if name not in ldr_noted:
-                        say(f"[drone] {name}: no HdrColor image at frame {frame}; the sensor simulation uses the "
-                            f"tone-mapped image (this is only expected for the first frame or two)")
-                        ldr_noted.add(name)
-                    hdr, source = sensor_sim.ldr_to_linear(cam.data.output["rgb"][0]), "rgb"
-                if records[name] and records[name][-1]["source"] != source:
-                    sensors[name].reset_exposure()      # HdrColor and the 8-bit image differ in scale by ~1000x
-                out = sensors[name].process(hdr)
-                if source == "HdrColor" and name not in hdr_checked and grey > 0:
-                    hdr_checked.add(name)
-                    ratio = out["mean_radiance"] / grey
-                    say(f"[drone] {name}: mean scene radiance = {ratio:.2f} x an 18 % grey card under the calibrated "
-                        f"sun + sky" + ("" if 0.03 < ratio < 30 else " - HdrColor is not in the scene's light "
-                                        "units, so exposure_us in camera_info is not physical (the images are fine)"))
-                writers[name].add(out["rgb"].cpu().numpy())
-                if args_cli.save_raw:
+            for name in cams:
+                rgb, out = grab(name, frame, count * sim_dt)
+                writers[name].add(rgb)
+                if out is not None and args_cli.save_raw:
                     Image.fromarray(out["raw"].cpu().numpy().astype(np.uint16)).save(
                         os.path.join(dirs[name], f"raw_{frame:05d}.png"))
-                records[name].append({"frame": frame, "time_s": round(count * sim_dt, 4), "source": source,
-                                      "exposure_us": None if math.isnan(out["exposure_us"]) else round(out["exposure_us"], 2),
-                                      "gain_db": out["gain_db"], "saturated": round(out["saturated"], 5)})
             frame += 1
             if frame % round(video_fps * (1 if seconds <= 30 else 10)) == 0:
                 extra = "".join(f", {n} exposure {records[n][-1]['exposure_us']} us" for n in records if records[n])
