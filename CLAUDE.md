@@ -79,6 +79,7 @@
 | `scripts/drone_scene/scene.py`, `pavers.py`, `drone_look.py`, `rtx_look.py`, `prepare.py`, `hdr.py`, `assets.py`, `nucleus.py` | backyard scene, assets, sky calibration, RTX settings |
 | `scripts/drone_scene/realism/` | the fleet's tools: `run_probe.sh` (GPU queue), `run_tests.sh`, `metrics.py`, `montage.py` (blind A/B), `reference.py` (NAIP), `BACKLOG.md`, `LESSONS.md` |
 | `.claude/` | agents, skills (commands), the `realism-round` workflow, output style, settings, the guard hook |
+| `agent_reports/` | raw output of every multi-agent workflow run so far (research, audits, reviews, build runs); a record, not instructions: see its README |
 | `scripts/drone_scene/test/`, `scripts/heavy_machines/test/` | plain `unittest` files, no Isaac Sim needed: `scripts/drone_scene/realism/run_tests.sh` runs the drone ones |
 
 ## Things learned the hard way

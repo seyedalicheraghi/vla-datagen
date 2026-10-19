@@ -3,6 +3,9 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+# agent_reports/ holds raw agent output kept as a record: it must stay exactly as it was produced
+exclude: ^agent_reports/
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.14.10

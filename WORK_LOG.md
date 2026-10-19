@@ -180,6 +180,10 @@ The Isaac Lab quadcopter demo in a photorealistic backyard:
   - Most real-world values are marked unsourced, because the cloud machine could not reach most websites. The
     fleet's scene-researcher confirms them on your PC.
   - Headline confirmed defect: NVIDIA's Red_Oak, about 28 % of the map's trees, uses autumn leaf textures.
+- **Raw agent reports** (`agent_reports/`): the unedited output of every multi-agent workflow of the session, 15 in
+  all: research, audits, reviews and build runs. Each has the full result, every agent's own answer and the script.
+  The four realism-fleet reports also have a readable `report.md`. `agent_reports/README.md` lists them. The folder
+  is left out of the link check and pre-commit, because raw reports keep unreachable URLs exactly as written.
 - **Enforced rules** (`.claude/settings.json`, `.claude/hooks/guard_bash.py`):
   - no project code on cloud machines;
   - renders only through the queue;
