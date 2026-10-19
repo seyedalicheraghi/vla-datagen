@@ -419,8 +419,12 @@ def cruise_height(route, ground: Grid, canopy: Grid | None, footprints, a) -> tu
             b_top = max(b_top, gz + (fp.height or 9.0))
     obstacle = float(max(top.max(), b_top))
     z = max(a.cruise_agl, obstacle + a.clearance)
-    return z, {"obstacle_top": round(obstacle, 1), "ground_max": round(float(ground.sample(xs, ys).max()), 1),
-               "ground_min": round(float(ground.sample(xs, ys).min()), 1)}
+    gz = ground.sample(xs, ys)
+    s = t * math.hypot(x1 - x0, y1 - y0)
+    # bare ground every 20 m along the route (distance from take-off, z): what the nadir probe camera looks down on
+    profile = [[round(float(si), 1), round(float(zi), 2)] for si, zi in zip(s[::4], gz[::4])]
+    return z, {"obstacle_top": round(obstacle, 1), "ground_max": round(float(gz.max()), 1),
+               "ground_min": round(float(gz.min()), 1), "ground_profile": profile}
 
 
 def landing_grass(landing_xy, ground, radius=22.0, seed=0):

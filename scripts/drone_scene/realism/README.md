@@ -100,8 +100,12 @@ fleet-scribe      ledger, backlog, lessons; remove the round's worktrees
 - **One render at a time.** The hook refuses `./isaaclab.sh ... quadcopter_pbr.py` from any agent; renders must go
   through `run_probe.sh`, which takes a lock (`/tmp/drone_scene_gpu.lock`, also across separate sessions). It also
   survives the 10-minute command limit.
-- **Ask before pushing.** `git push` is an "ask" rule, and the hook also catches `git -C dir push`. Force pushes are
-  denied. Accepted changes stay on the local branch `realism` until you say merge and push.
+- **Ask before pushing.** `git push` is an "ask" rule, and the hook also catches `git -C dir push`. The hook refuses
+  force pushes, mirror pushes and remote branch deletions outright, whatever the flag order. Accepted changes stay
+  on the local branch `realism` until you say merge and push. The hook covers the Bash and Monitor tools.
+- **No endless renders.** A render still running after `DRONE_PROBE_TIMEOUT` (2 h) or `DRONE_RECORD_TIMEOUT` (6 h)
+  from when it got the GPU is killed, with everything it started, so the queue moves on. Set them in
+  `.realism/config.env` if your renders are legitimately slower.
 - **Cache safety.** Parallel candidates that change the map or textures give the version constants a suffix
   (`BUILD_VERSION = "6+r001-c2"`), so they never share a cache entry; the integrator turns them into clean bumps.
   Every generated texture carries `TEXTURE_VERSION` in its file name (the crop-row texture did not until now).

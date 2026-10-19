@@ -84,8 +84,9 @@ const REVIEW = { type: 'object', required: ['approve', 'blocking'], properties: 
   approve: { type: 'boolean' }, blocking: strs, nonblocking: strs } }
 const SIDES = { type: 'object', required: ['1', '2'], properties: {
   1: { type: 'string', enum: ['A', 'B'] }, 2: { type: 'string', enum: ['A', 'B'] } } }
-const RENDER = { type: 'object', required: ['ok'], properties: {
-  ok: { type: 'boolean' }, seconds: { type: 'number' }, pictures: strs,
+const RENDER = { type: 'object', required: ['ok', 'stage'], properties: {
+  ok: { type: 'boolean' }, stage: { type: 'string', enum: ['render', 'compare', 'done'] }, seconds: { type: 'number' },
+  pictures: strs,
   key: { type: 'object', additionalProperties: SIDES }, warnings: { type: 'object', additionalProperties: strs },
   naip: { type: 'object', additionalProperties: { type: 'object' } }, failure_log: str } }
 const VOTES = { type: 'object', required: ['votes'], properties: { votes: { type: 'array', items: { type: 'object',
@@ -103,13 +104,13 @@ const DONE = { type: 'object', required: ['done'], properties: { done: { type: '
 // ---------------------------------------------------------------------------------------------------------------
 phase('Baseline')
 const base = await agent(`Task: make sure the accepted state of the drone scene has a current probe render. Your working directory is the main checkout of the repo.
-1. MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)"); FLEET=$MAIN/.realism; mkdir -p "$FLEET". Report both as absolute paths (fleet, main_checkout).
-2. If the branch realism does not exist: git branch realism HEAD. If "$FLEET/worktrees/base" is not a worktree yet: git worktree add "$FLEET/worktrees/base" realism. If git -C "$FLEET/worktrees/base" status --porcelain shows changes: stop with ok=false and problems="uncommitted changes in $FLEET/worktrees/base".
+1. MAIN=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)"); FLEET=$MAIN/.realism; mkdir -p "$FLEET/rounds/${R}" (this claims the round id). Report both as absolute paths (fleet, main_checkout).
+2. If the branch realism does not exist: git branch realism HEAD. If "$FLEET/worktrees/base" is not a worktree yet: git worktree add "$FLEET/worktrees/base" realism. If git -C "$FLEET/worktrees/base" status --porcelain shows changes: when they are all under scripts/drone_scene/realism/ and end in .md (notes left by an interrupted round), commit them (git -C "$FLEET/worktrees/base" add -A -- scripts/drone_scene/realism && git -C "$FLEET/worktrees/base" commit -m "realism: notes from an interrupted round"); any other change: stop with ok=false and problems="uncommitted changes in $FLEET/worktrees/base".
 3. commit = git -C "$FLEET/worktrees/base" rev-parse --short HEAD.
 4. Reuse the accepted renders (rendered=false) when "$FLEET/baseline/probe/probe.json" exists and the code is unchanged since they were made: B=$(cat "$FLEET/baseline/code_commit") and git -C "$FLEET/worktrees/base" diff --quiet "$B" HEAD -- scripts/drone_scene ':(exclude)scripts/drone_scene/realism/*.md' exits 0.
 5. Otherwise render them (rendered=true): ${RUN} start "$FLEET/baseline.new" "$FLEET/worktrees/base"; then run ${RUN} wait "$FLEET/baseline.new" 540 ${LONG} again and again, one call per command, until it exits 0 (done) or 1 (failed); exit 3 means still queued or running. On done: rm -rf "$FLEET/baseline" && mv "$FLEET/baseline.new" "$FLEET/baseline". On failed: ok=false and problems = the last 60 lines it printed.
-6. If "$FLEET/reference/naip" has no nadir_*.png yet: ${RUN} naip "$FLEET/baseline" (if that fails, mention it in problems but keep ok=true).
-Report ok, fleet, main_checkout, commit, rendered, stills (the PNG file names in $FLEET/baseline/probe), contact_sheet ($FLEET/baseline/contact.jpg), seconds (from $FLEET/baseline/run.status, 0 if reused), naip (true if $FLEET/reference/naip has nadir_*.png files), problems.`,
+6. If "$FLEET/reference/naip" has no nadir_*.png yet, or "$FLEET/baseline/metrics_vs_naip.json" is missing: ${RUN} naip "$FLEET/baseline" ${LONG} (it skips squares it already has; if it fails, mention it in problems but keep ok=true).
+Report ok, fleet, main_checkout, commit, rendered, stills (the PNG file names in $FLEET/baseline/probe), contact_sheet ($FLEET/baseline/contact.jpg), seconds (from $FLEET/baseline/run.status, 0 if reused), naip (true only if $FLEET/reference/naip has nadir_*.png files AND $FLEET/baseline/metrics_vs_naip.json exists), problems.`,
   { label: 'baseline', phase: 'Baseline', agentType: 'render-runner', schema: BASE })
 if (!base || !base.ok) {
   return { round: R, status: 'baseline failed', problems: base ? base.problems : 'the baseline agent did not return' }
@@ -134,8 +135,10 @@ Relevant code: ${a.files}. Look at: ${a.look}.${FOCUS ? `\nThe owner asked to fo
 Return up to 6 issues, most visible first. For each: evidence (still file names and where in the frame), what real footage shows instead, the cause in the code (open the code and name file and function), a concrete fix (values with a source where you can), the stills that would show the fix, impact 1-5, confidence 1-3, and the backlog id if the backlog already has it. Skip anything the ledger shows was rejected before, unless your fix is a different approach (then say how it differs).
 ${NO_RUN}`,
   { label: `critic:${a.key}`, phase: 'Critique', agentType: 'realism-critic', schema: ISSUES })))
-const issues = critiques.filter(Boolean).flatMap((c, i) => c.issues.map(x => ({ aspect: aspects[i].key, ...x })))
-log(`${issues.length} issues from ${critiques.filter(Boolean).length} critics`)
+// pair each answer with its aspect before dropping failed critics, so the labels stay right
+const issues = critiques.flatMap((c, i) => c && Array.isArray(c.issues) ? c.issues.map(x => ({ aspect: aspects[i].key, ...x })) : [])
+const failedCritics = aspects.filter((a, i) => !critiques[i]).map(a => a.key)
+log(`${issues.length} issues from ${critiques.filter(Boolean).length} critics` + (failedCritics.length ? `; no answer from: ${failedCritics.join(', ')}` : ''))
 if (!issues.length) {
   return { round: R, status: 'no issues found', baseline_commit: base.commit }
 }
@@ -174,7 +177,7 @@ Spec: ${c.spec}
 Files planned: ${(c.files || []).join(', ')} (change others only if the spec cannot work without them, and say why).
 What should look different once rendered (you cannot render): ${c.success}
 Steps:
-1. From the main checkout (your working directory): if ${wt} already exists from an earlier attempt at this same candidate, keep using it; otherwise git worktree add -b rc/${id} ${wt} realism
+1. From the main checkout (your working directory): if ${wt} already exists from an earlier attempt at this same candidate, keep using it; else if the branch rc/${id} exists (left by an interrupted attempt): git worktree add ${wt} rc/${id}; otherwise git worktree add -b rc/${id} ${wt} realism
 2. Change files under ${wt} only (absolute paths). Keep the surrounding style. Python 3.11: no f-string that reuses its own quote type inside. numpy-only modules stay numpy-only.
 3. Shared caches: if the change alters the map (output of scripts/drone_scene/world/), set BUILD_VERSION in world/build.py to "<old value>+${id}"; if it alters generated textures, also set TEXTURE_VERSION in world/materials.py to "<old value>+${id}"; if it alters what prepare.py produces, set PREPARE_VERSION to "<old value>+${id}". Never just add 1: parallel candidates would collide in ~/.cache/drone_scene.
 4. Add or update unit tests for logic you add. Run ${TESTS} ${wt} from the main checkout ${LONG}; every suite must pass.
@@ -206,10 +209,10 @@ function renderPrompt(id, wt, out, extra, seed) {
 1. ${RUN} start ${out} ${wt}${extra ? ` -- ${extra}` : ''}
    (if it answers "already queued or running", go on with step 2)
 2. Run ${RUN} wait ${out} 540 ${LONG} again and again, one call per command, until it exits 0 (done) or 1 (failed). Exit 3 means it is still queued behind other renders or still running. Start nothing else on the GPU.
-3. If it failed: ok=false, failure_log = the last 80 lines of ${out}/drone_scene.log (or of ${out}/run.log if that is missing), and stop.
-4. If done: ${RUN} compare ${F}/baseline ${out} ${seed}
-5. Read ${out}/ab/key.json and ${out}/metrics_vs_base.json.
-Report: ok; seconds (from ${out}/run.status); pictures = the file names in ${out}/ab/ that end in .jpg, without .jpg; key = the "pairs" object of key.json exactly as it is; warnings = for each still with a non-empty "warnings" list under "B_minus_A" in metrics_vs_base.json, that list; naip = if metrics_vs_base.json has "pairs", for each still {"A_dE", "A_ssim", "B_dE", "B_ssim"} from pairs.A and pairs.B; failure_log.`
+3. If it failed: ok=false, stage="render", failure_log = the last 80 lines of ${out}/drone_scene.log (or of ${out}/run.log if that is missing), and stop.
+4. If done: ${RUN} compare ${F}/baseline ${out} ${seed}. If compare exits non-zero: ok=false, stage="compare", failure_log = its output, and stop (do not render again).
+5. Read ${out}/ab/key.json and ${out}/metrics_vs_base.json; stage="done".
+Report: ok; stage; seconds (from ${out}/run.status); pictures = the file names in ${out}/ab/ that end in .jpg, without .jpg; key = the "pairs" object of key.json exactly as it is; warnings = for each still with a non-empty "warnings" list under "B_minus_A" in metrics_vs_base.json, that list; naip = if metrics_vs_base.json has "pairs", for each still {"A_dE", "A_ssim", "B_dE", "B_ssim"} from pairs.A and pairs.B; failure_log.`
 }
 
 function judgePrompt(lens, out, pictures) {
@@ -254,16 +257,19 @@ async function judgeAll(id, out, render, lenses, onlyFull) {
   const pics = (render.pictures || []).filter(p => render.key && render.key[p] && (!onlyFull || !p.includes('_detail')))
   const normal = pics.filter(p => !p.endsWith('_swap'))
   const swapped = pics.filter(p => p.endsWith('_swap'))
+  // a judge that dies is asked once more: judges are cheap next to a render
+  const ask = (l, set, j, again) => agent(judgePrompt(l, out, set), { label: `judge:${id}:${l.key}${j ? ':swap' : ''}${again ? ':retry' : ''}`,
+    phase: 'Judge', agentType: 'realism-judge', schema: VOTES })
   const runs = await parallel(lenses.flatMap(l => [normal, swapped].map((set, j) => () =>
-    agent(judgePrompt(l, out, set), { label: `judge:${id}:${l.key}${j ? ':swap' : ''}`, phase: 'Judge',
-      agentType: 'realism-judge', schema: VOTES }))))
+    ask(l, set, j, false).then(v => v || ask(l, set, j, true)))))
   const perLens = lenses.map((l, i) => ({ lens: l.key, ...scoreLens(runs[2 * i], runs[2 * i + 1], render.key),
     complete: Boolean(runs[2 * i] && runs[2 * i + 1]) }))
   const done = perLens.filter(p => p.complete)
   const total = done.reduce((s, p) => s + p.net, 0)
   const forB = done.filter(p => p.net > 0).length
-  const brokenB = done.some(p => p.brokenB)
-  return { total, lenses_for_candidate: forB, lenses_judged: done.length, broken_candidate: brokenB,
+  const brokenB = perLens.some(p => p.brokenB)              // a broken region counts even if the other order failed
+  return { total, lenses_for_candidate: forB, lenses_judged: done.length, lenses_total: lenses.length,
+    broken_candidate: brokenB, consistent: done.reduce((s, p) => s + p.consistent, 0),
     flipped: done.reduce((s, p) => s + p.flipped, 0), per_lens: perLens }
 }
 
@@ -289,25 +295,31 @@ async function render(b) {
   const out = `${F}/rounds/${R}/${b.id}`
   const extra = `--probe ${listOk(b.c.probe_moments, MOMENTS, ['climb', 'cruise_mid', 'final']).join(' ')} --cameras ${listOk(b.c.probe_cameras, CAMERAS, ['front', 'back', 'nadir']).join(' ')}`
   let r = await agent(renderPrompt(b.id, b.wt, out, extra, SEED), { label: `render:${b.id}`, phase: 'Render', agentType: 'render-runner', schema: RENDER })
-  if (r && !r.ok && r.failure_log) {
+  let impl = b.impl
+  // only a failed render is the candidate's code to fix; a failed compare is not, and re-rendering would not help
+  if (r && !r.ok && r.stage === 'render' && r.failure_log) {
     const fix = await agent(fixPrompt(b.c, b.id, b.wt, `Its render failed. The end of the log:\n${r.failure_log}`),
       { label: `fix-render:${b.id}`, phase: 'Build', agentType: 'realism-implementer', schema: IMPL })
     if (fix && fix.ok && fix.tests_passed) {
+      impl = { ...fix, files_changed: Array.from(new Set([...(b.impl.files_changed || []), ...(fix.files_changed || [])])) }
       r = await agent(renderPrompt(b.id, b.wt, out, extra, SEED), { label: `rerender:${b.id}`, phase: 'Render', agentType: 'render-runner', schema: RENDER })
     }
   }
   if (!r || !r.ok || !r.key || !Object.keys(r.key).length) {
-    return { ...b, out, done: true, decision: 'render failed', why: r ? String(r.failure_log || 'no pictures').slice(-2000) : 'the render runner did not return' }
+    const what = r && r.stage === 'compare' ? 'compare failed' : 'render failed'
+    return { ...b, impl, out, done: true, decision: what, why: r ? String(r.failure_log || 'no pictures').slice(-2000) : 'the render runner did not return' }
   }
-  return { ...b, out, render: r }
+  return { ...b, impl, out, render: r }
 }
 
 async function judge(r) {
   if (r.done) return r
   const s = await judgeAll(r.id, r.out, r.render, LENSES.slice(0, NL), false)
-  const accepted = !s.broken_candidate && s.total > 0 && s.lenses_judged > 0 && 2 * s.lenses_for_candidate > s.lenses_judged
-  log(`${r.id} ${accepted ? 'ACCEPTED' : 'rejected'}: score ${s.total}, ${s.lenses_for_candidate}/${s.lenses_judged} lenses for it, ${s.flipped} order flips`)
-  return { ...r, score: s, decision: accepted ? 'accepted' : 'rejected' }
+  const enough = s.lenses_judged >= Math.ceil(2 * NL / 3)  // at least two thirds of the questions answered in both orders
+  const accepted = enough && !s.broken_candidate && s.total > 0 && 2 * s.lenses_for_candidate > s.lenses_judged
+  const decision = accepted ? 'accepted' : (enough ? 'rejected' : 'rejected (judging incomplete)')
+  log(`${r.id} ${decision}: score ${s.total}, ${s.lenses_for_candidate}/${s.lenses_judged} of ${NL} lenses for it, ${s.flipped} order flips`)
+  return { ...r, score: s, decision }
 }
 
 phase('Build')
@@ -322,7 +334,7 @@ let integration = null, sanity = null, adopted = false
 if (winners.length) {
   const nwt = `${F}/worktrees/${R}-next`
   integration = await agent(`Merge the winning candidates of round ${R} into a new branch, for a combined render.
-From the main checkout (your working directory): git worktree add -b rnext/${R} ${nwt} realism  (if ${nwt} already exists from an earlier attempt of this round, remove it with git worktree remove --force ${nwt} and git branch -D rnext/${R} first).
+From the main checkout (your working directory): git worktree add -b rnext/${R} ${nwt} realism. If ${nwt} or the branch rnext/${R} already exists from an earlier attempt of this round, first remove them (git worktree remove --force ${nwt}; git branch -D rnext/${R}); rnext branches are only ever made by this step.
 Then in ${nwt}, merge in this order, one at a time: ${winners.map(w => `rc/${w.id}`).join(', ')}  (git -C ${nwt} merge --no-ff --no-edit rc/<id>).
 - A conflict only in the cache-version lines (BUILD_VERSION, TEXTURE_VERSION, PREPARE_VERSION) is expected: resolve it as described below. Any other conflict: git -C ${nwt} merge --abort, skip that candidate and list it under conflicted.
 - After merging: every cache version that carries a "+${R}-c<k>" suffix becomes a clean bump of the value on realism: "5" -> "6", "v2" -> "v3", "3" -> "4" (one bump per constant per round). Commit that as "${R}: cache versions".
@@ -335,14 +347,17 @@ Report ok, branch (rnext/${R}), worktree, commit (short), merged (the candidate 
     const mr = await agent(renderPrompt('the merged winners', nwt, mout, '', SEED + 500), { label: 'render:merged', phase: 'Integrate', agentType: 'render-runner', schema: RENDER })
     if (mr && mr.ok && mr.key && Object.keys(mr.key).length) {
       sanity = await judgeAll('merged', mout, mr, [LENSES[0], LENSES[2]], true)
-      adopted = !sanity.broken_candidate && sanity.total >= 0
-      log(`merged ${integration.merged.join(', ')}: sanity score ${sanity.total} -> ${adopted ? 'adopted' : 'NOT adopted'}`)
+      // adopt only on real evidence: both questions answered in both orders, nothing broken, not worse
+      adopted = sanity.lenses_judged === 2 && !sanity.broken_candidate && sanity.total >= 0
+      log(`merged ${integration.merged.join(', ')}: sanity score ${sanity.total}, ${sanity.lenses_judged}/2 lenses judged -> ${adopted ? 'adopted' : 'NOT adopted'}`)
       if (adopted) {
-        const fin = await agent(`Adopt the merged state of round ${R} as the new accepted state.
-1. git -C ${BW} merge --ff-only rnext/${R}   (${BW} has branch realism checked out). If that is not a fast-forward, stop with done=false.
-2. rm -rf ${F}/baseline.old; mv ${F}/baseline ${F}/baseline.old; cp -a ${mout} ${F}/baseline; then rm -rf ${F}/baseline.old
-3. echo "$(git -C ${BW} rev-parse --short HEAD)" > ${F}/baseline/code_commit
-Report done and notes. Do not push.`, { label: 'adopt', phase: 'Integrate', agentType: 'realism-integrator', schema: DONE })
+        const fin = await agent(`Adopt the merged state of round ${R} as the new accepted state. Copy and check first; move nothing until the copy is complete.
+1. rm -rf ${F}/baseline.adopt; cp -a ${mout} ${F}/baseline.adopt. If cp fails or ${F}/baseline.adopt/probe/probe.json is missing: rm -rf ${F}/baseline.adopt and stop with done=false (touch nothing else).
+2. git -C ${BW} merge --ff-only rnext/${R}   (${BW} has branch realism checked out). If that is not a fast-forward: rm -rf ${F}/baseline.adopt and stop with done=false.
+3. echo "$(git -C ${BW} rev-parse --short HEAD)" > ${F}/baseline.adopt/code_commit
+4. rm -rf ${F}/baseline.old; mv ${F}/baseline ${F}/baseline.old && mv ${F}/baseline.adopt ${F}/baseline && rm -rf ${F}/baseline.old
+5. ${RUN} naip ${F}/baseline ${LONG} (the NAIP comparison of the new accepted stills; a failure here is only a note).
+Report done (true once step 4 has succeeded) and notes. Do not push.`, { label: 'adopt', phase: 'Integrate', agentType: 'realism-integrator', schema: DONE })
         adopted = Boolean(fin && fin.done)
       }
     } else {
@@ -367,9 +382,9 @@ const records = results.map(r => ({
 const newIssues = issues.filter(x => !x.backlog_id).map(x => `[${x.aspect}] ${x.title}: ${x.fix}`)
 await agent(`Record round ${R} of the drone-scene realism loop.
 1. Append these objects to ${F}/ledger.jsonl, one JSON object per line, exactly as given: ${JSON.stringify(records)}
-2. In ${BW} (branch realism) update scripts/drone_scene/realism/BACKLOG.md: accepted and merged items -> done (round ${R}); rejected or failed ones -> one line with the reason and the round; append new issues that are not in the backlog yet under "New from critics": ${JSON.stringify(newIssues)}
+2. In ${BW} (branch realism) update scripts/drone_scene/realism/BACKLOG.md: change the status line of each item tried (by its backlog_id) to done (round ${R}, commit), rejected (round ${R}: reason) or tried (round ${R}: what happened); append new issues that are not in the backlog yet under its last heading "New from critics", one line each tagged ${R}: ${JSON.stringify(newIssues)}. If BACKLOG.md is missing, create it with a title and a "## New from critics" heading.
 3. Update scripts/drone_scene/realism/LESSONS.md: at most 5 short, general lessons from this round (from the reasons and failures above), each tagged ${R}; merge with existing lessons rather than repeating them; keep the file under 150 lines.
-4. git -C ${BW} add scripts/drone_scene/realism/BACKLOG.md scripts/drone_scene/realism/LESSONS.md && git -C ${BW} commit -m "realism ${R}: notes"
+4. git -C ${BW} add -A -- scripts/drone_scene/realism && (git -C ${BW} diff --cached --quiet || git -C ${BW} commit -m "realism ${R}: notes")
 5. Remove this round's worktrees, keeping their branches: git worktree remove --force for each of ${results.map(r => `${F}/worktrees/${r.id}`).join(', ')}${winners.length ? `, ${F}/worktrees/${R}-next` : ''} (skip ones that do not exist).
 Do not push. Report done and notes.`, { label: 'record', phase: 'Record', agentType: 'fleet-scribe', schema: DONE })
 

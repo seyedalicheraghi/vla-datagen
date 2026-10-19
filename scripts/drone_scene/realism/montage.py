@@ -17,7 +17,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
+import re
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
@@ -50,9 +52,11 @@ def _fit(im: Image.Image, width: int) -> Image.Image:
 
 
 def _sort_key(name: str):
+    """Camera, then flight order: named moments first, then times (t2 < t10), then anything else."""
     stem = os.path.splitext(name)[0]
     cam, _, moment = stem.partition("_")
-    return (cam, ORDER.index(moment) if moment in ORDER else len(ORDER), moment)
+    m = re.fullmatch(r"t(\d+(?:\.\d+)?)", moment)
+    return (cam, ORDER.index(moment) if moment in ORDER else len(ORDER), float(m.group(1)) if m else math.inf, moment)
 
 
 def stills(folder: str) -> list[str]:

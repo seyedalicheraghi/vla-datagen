@@ -173,6 +173,13 @@ The Isaac Lab quadcopter demo in a photorealistic backyard:
   - `metrics.py`: image statistics, A/B deltas, comparison with real pictures;
   - `montage.py`: contact sheets and blind A/B pairs;
   - `reference.py`: NAIP squares from Microsoft Planetary Computer.
+- **Backlog** (`scripts/drone_scene/realism/BACKLOG.md`): 84 realism items with file:line, a real-world reference,
+  a change and an acceptance test for each, and an order to work in that starts with measurements.
+  - 67 come from a static audit of the code, each re-checked against the code by a second agent.
+  - 17 come from a completeness critic and are not yet re-checked.
+  - Most real-world values are marked unsourced, because the cloud machine could not reach most websites. The
+    fleet's scene-researcher confirms them on your PC.
+  - Headline confirmed defect: NVIDIA's Red_Oak, about 28 % of the map's trees, uses autumn leaf textures.
 - **Enforced rules** (`.claude/settings.json`, `.claude/hooks/guard_bash.py`):
   - no project code on cloud machines;
   - renders only through the queue;

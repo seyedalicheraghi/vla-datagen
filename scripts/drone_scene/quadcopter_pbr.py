@@ -380,6 +380,18 @@ def nadir_pose(fl, t: float) -> list[float]:
     return [float(p[0]), float(p[1]), float(fl.start[2]) - fl.ground_clearance + args_cli.nadir_height]
 
 
+def ground_under(xy, fl) -> float:
+    """Bare-ground height (map z) below a point of the straight route, from the map's route profile (world.json
+    cruise.ground_profile); the take-off ground when the map has no profile."""
+    base = float(fl.start[2]) - fl.ground_clearance
+    prof = ((WORLD or {}).get("cruise") or {}).get("ground_profile")
+    if not prof:
+        return base
+    s = float(np.dot(np.asarray(xy, float) - np.asarray(fl.start[:2], float), fl.direction[:2]))
+    dist, z = np.asarray(prof, float).T
+    return float(np.interp(s, dist, z))
+
+
 def place_nadir(cam, fl, t: float) -> None:
     cam.set_world_poses(torch.tensor([nadir_pose(fl, t)], device=cam.device, dtype=torch.float32),
                         torch.tensor([NADIR_QUAT], device=cam.device, dtype=torch.float32), convention="world")
@@ -511,9 +523,13 @@ def run_probe(sim, robot, fl, cams, prop_body_ids, sim_dt, grab, place, records)
                 rec.update(source=last["source"], exposure_us=last["exposure_us"], gain_db=last["gain_db"],
                            saturated=last["saturated"], mean_radiance=round(out["mean_radiance"], 6))
             if name == "nadir":
-                # what it covers, for cutting the same square out of an orthophoto (flat ground at take-off height)
-                rec["nadir"] = {"position_m": [round(c, 3) for c in nadir_pose(fl, t)], "fov_deg": NADIR_FOV,
-                                "footprint_m": round(2 * args_cli.nadir_height * math.tan(math.radians(NADIR_FOV / 2)), 2),
+                # what it covers, for cutting the same square out of an orthophoto: the ground below the camera
+                # comes from the map's route profile, so relief along the 2 km does not change the scale
+                pos = nadir_pose(fl, t)
+                gz = ground_under(pos[:2], fl)
+                rec["nadir"] = {"position_m": [round(c, 3) for c in pos], "ground_z_m": round(gz, 2),
+                                "height_above_ground_m": round(pos[2] - gz, 2), "fov_deg": NADIR_FOV,
+                                "footprint_m": round(2 * (pos[2] - gz) * math.tan(math.radians(NADIR_FOV / 2)), 2),
                                 "image_up": "north"}
             stills.append(rec)
         say(f"[probe] {label}: t = {t:.1f} s ({phase}), {waited} frames waiting for assets, {time.time() - t_start:.0f} s")
@@ -522,8 +538,8 @@ def run_probe(sim, robot, fl, cams, prop_body_ids, sim_dt, grab, place, records)
             "lucid_resolution": [RIG.width, RIG.height], "render_plan": PLAN, "settle_frames": args_cli.probe_settle,
             "seconds_to_first_moment": round(t_ready - T0, 1), "seconds_total": round(time.time() - T0, 1),
             "flight_duration_s": round(fl.duration, 2),
-            "map": ({k: WORLD[k] for k in ("origin", "takeoff", "landing", "distance_m", "heading_deg", "cruise_z", "sun")
-                     if k in WORLD} if WORLD else None),
+            "map": ({k: WORLD[k] for k in ("origin", "takeoff", "landing", "distance_m", "heading_deg", "cruise_z", "sun",
+                                           "cruise") if k in WORLD} if WORLD else None),
             "stills": stills}
     with open(os.path.join(pdir, "probe.json"), "w", encoding="utf-8") as f:
         json.dump(info, f, indent=1)

@@ -57,9 +57,9 @@ def covers(item: dict, bbox) -> bool:
     return w < bbox[2] and e > bbox[0] and s < bbox[3] and n > bbox[1]
 
 
-def cut(session, items: list[dict], frame, x: float, y: float, side: float, px: int, tokens: dict) -> np.ndarray:
-    """The square (side x side metres around local x, y; north up) as RGB8 (px, px, 3), mosaicked from the
-    newest NAIP year that covers it."""
+def cut(session, items: list[dict], frame, x: float, y: float, side: float, px: int, tokens: dict):
+    """The square (side x side metres around local x, y; north up) as RGB8 (px, px, 3) and the ids of the NAIP
+    images used: newest first, older ones only fill what the newer ones leave empty."""
     import rasterio
     from rasterio.crs import CRS
     from rasterio.transform import from_origin
@@ -68,6 +68,7 @@ def cut(session, items: list[dict], frame, x: float, y: float, side: float, px: 
     dst = np.zeros((3, px, px), np.uint8)
     transform = from_origin(x - side / 2, y + side / 2, side / px, side / px)
     crs = CRS.from_proj4(frame.proj4)
+    used = []
     with rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR", GDAL_HTTP_MAX_RETRY="3", GDAL_HTTP_RETRY_DELAY="2"):
         for it in items:
             with rasterio.open(signed(session, it["assets"]["image"]["href"], tokens)) as src:
@@ -76,10 +77,13 @@ def cut(session, items: list[dict], frame, x: float, y: float, side: float, px: 
                           src_crs=src.crs, src_nodata=0, dst_transform=transform, dst_crs=crs, dst_nodata=0,
                           resampling=Resampling.bilinear)
             empty = dst.sum(0) == 0
-            dst[:, empty] = tmp[:, empty]
+            fill = empty & (tmp.sum(0) > 0)
+            if fill.any():
+                dst[:, fill] = tmp[:, fill]
+                used.append(it)
             if not (dst.sum(0) == 0).any():
                 break
-    return np.transpose(dst, (1, 2, 0))
+    return np.transpose(dst, (1, 2, 0)), used
 
 
 def main(argv=None) -> int:
@@ -126,14 +130,16 @@ def main(argv=None) -> int:
         if not items:
             print(f"{s['file']}: no NAIP image covers it", file=sys.stderr)
             continue
-        year = (items[0]["properties"].get("datetime") or "")[:4]
-        items = [it for it in items if (it["properties"].get("datetime") or "")[:4] == year]
-        rgb = cut(session, items, frame, x, y, side, px, tokens)
+        rgb, used = cut(session, items, frame, x, y, side, px, tokens)
+        if not used:
+            print(f"{s['file']}: the NAIP images over it hold no pixels there", file=sys.stderr)
+            continue
         Image.fromarray(rgb).save(path)
-        index[s["file"]] = {**want, "year": year, "items": [it["id"] for it in items],
-                            "gsd_m": items[0]["properties"].get("gsd"), "date": items[0]["properties"].get("datetime"),
+        years = sorted({(it["properties"].get("datetime") or "")[:4] for it in used}, reverse=True)
+        index[s["file"]] = {**want, "year": years[0], "years": years, "items": [it["id"] for it in used],
+                            "gsd_m": used[0]["properties"].get("gsd"), "date": used[0]["properties"].get("datetime"),
                             "empty_fraction": round(float((rgb.sum(-1) == 0).mean()), 4)}
-        print(f"{s['file']}: NAIP {year} ({', '.join(it['id'] for it in items)}), {side:.0f} m square")
+        print(f"{s['file']}: NAIP {'+'.join(years)} ({', '.join(it['id'] for it in used)}), {side:.0f} m square")
     with open(index_path, "w", encoding="utf-8") as f:
         json.dump({"attribution": ATTRIBUTION, "squares": index}, f, indent=1)
     print(f"wrote {a.out} ({len(index)} squares). {ATTRIBUTION}")

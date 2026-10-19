@@ -34,8 +34,10 @@ wait in steps of up to 540 s); delegate them to the render-runner agent. Give lo
 6. **Commit** the fixes you made, locally, with a clear message, on the branch the checkout is on (normally `main`).
    Do not push: ask the owner first.
 7. **Baseline.** If the branch `realism` does not exist: `git branch realism HEAD`. Then
-   `git worktree add .realism/worktrees/base realism` (if missing); render-runner: `run_probe.sh start
-   .realism/baseline .realism/worktrees/base`, wait. Then `run_probe.sh naip .realism/baseline` for the real NAIP
+   `git worktree add .realism/worktrees/base realism` (if missing). If `realism` already existed and lacks the
+   checkout's commits (`git merge-base --is-ancestor HEAD realism` fails), merge them:
+   `git -C .realism/worktrees/base merge --no-edit $(git rev-parse HEAD)` (on a conflict: abort and tell the owner).
+   Then render-runner: `run_probe.sh start .realism/baseline .realism/worktrees/base`, wait. Then `run_probe.sh naip .realism/baseline` for the real NAIP
    orthophotos of the nadir squares, and look at `.realism/baseline/metrics_vs_naip.json`.
 8. **Noise calibration** (skip with --skip-calibration). Render the same code again into `.realism/calibration`, then
    `run_probe.sh compare .realism/baseline .realism/calibration 1`. Identical code, so every difference is noise: note

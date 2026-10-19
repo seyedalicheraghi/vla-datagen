@@ -162,6 +162,22 @@ class TestFolders(unittest.TestCase):
         names = ["front_final.png", "front_ground.png", "front_cruise_mid.png", "back_climb.png"]
         self.assertEqual(sorted(names, key=montage._sort_key),
                          ["back_climb.png", "front_ground.png", "front_cruise_mid.png", "front_final.png"])
+        times = ["front_t10.png", "front_t2.png", "front_t6.png", "front_final.png"]
+        self.assertEqual(sorted(times, key=montage._sort_key),
+                         ["front_final.png", "front_t2.png", "front_t6.png", "front_t10.png"])
+
+    def test_empty_reference_folder(self):
+        empty = os.path.join(self.tmp, "footage")
+        os.makedirs(empty)
+        self.assertEqual(M.main([self.a, "--reference", empty]), 0)
+        with open(os.path.join(self.a, "metrics.json")) as f:
+            self.assertNotIn("reference", json.load(f))
+
+    def test_paired_skips_squares_without_imagery(self):
+        ref = os.path.join(self.tmp, "naip")
+        os.makedirs(ref)
+        Image.new("RGB", (200, 160), (0, 0, 0)).save(os.path.join(ref, "front_final.png"))
+        self.assertIn("skipped", M.paired(self.a, ref)["front_final.png"])
 
 
 class TestRunProbeScript(unittest.TestCase):

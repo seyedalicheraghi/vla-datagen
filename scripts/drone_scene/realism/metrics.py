@@ -279,11 +279,17 @@ def paired(run_dir: str, ref_dir: str) -> dict:
         sim, real = load(p), load(q)
         if real.shape != sim.shape:
             real = np.asarray(Image.fromarray((real * 255).astype(np.uint8)).resize((sim.shape[1], sim.shape[0]),
-                                                                                    Image.LANCZOS)) / 255.0
-        ls, lr = srgb_to_lab(sim).reshape(-1, 3).mean(0), srgb_to_lab(real).reshape(-1, 3).mean(0)
+                                                                                    Image.NEAREST)) / 255.0
+        valid = real.max(-1) > 0                       # pure black = no imagery there (outside every NAIP image)
+        if valid.mean() < 0.5:
+            out[name] = {"skipped": f"only {100 * valid.mean():.0f} % of the real picture has imagery"}
+            continue
+        ls, lr = srgb_to_lab(sim[valid]).mean(0), srgb_to_lab(real[valid]).mean(0)
         rs = image_stats(real)
         out[name] = {"lab_sim": [round(float(v), 2) for v in ls], "lab_real": [round(float(v), 2) for v in lr],
-                     "colour_dE": round(float(np.linalg.norm(ls - lr)), 2), "ssim_coarse": round(coarse_ssim(sim, real), 4),
+                     "colour_dE": round(float(np.linalg.norm(ls - lr)), 2),
+                     "ssim_coarse": round(coarse_ssim(sim, real), 4) if valid.all() else None,
+                     "real_coverage": round(float(valid.mean()), 4),
                      "real": {k: rs[k] for k in ("colorfulness", "saturation", "spectral_slope", "contrast")}}
     return out
 
@@ -322,7 +328,10 @@ def main(argv=None) -> int:
         last = runs["B"]
     if a.reference:
         ref = {os.path.basename(p): image_stats(load(p)) for p in images_in(a.reference)}
-        result["reference"] = {"folder": os.path.abspath(a.reference), **against(last, ref)}
+        if ref:
+            result["reference"] = {"folder": os.path.abspath(a.reference), **against(last, ref)}
+        else:
+            print(f"no images in {a.reference}: nothing to compare with", file=sys.stderr)
     if a.pairs:
         result["pairs"] = {"folder": os.path.abspath(a.pairs), "A": paired(a.run, a.pairs)}
         if a.other:
@@ -347,7 +356,8 @@ def main(argv=None) -> int:
                 continue
             print(f"\n{key} against the real picture of the same place:")
             for name, c in result["pairs"][key].items():
-                print(f"  {name}: colour {c['colour_dE']} dE, coarse SSIM {c['ssim_coarse']}")
+                print(f"  {name}: " + (c["skipped"] if "skipped" in c else
+                                       f"colour {c['colour_dE']} dE, coarse SSIM {c['ssim_coarse']}"))
             if not result["pairs"][key]:
                 print("  no still has a real picture with the same name")
     print(f"\nwrote {out}")

@@ -23,6 +23,9 @@
 # Probe default:  --route straight --headless --probe --cameras front back chase nadir --resolution_scale 0.5
 # Record default: --route straight --headless --record -1 --cameras front back chase
 #
+# A render that runs longer than DRONE_PROBE_TIMEOUT (default 7200 s) or DRONE_RECORD_TIMEOUT (21600 s), counted
+# from when it gets the GPU, is killed with everything it started, so a hung Isaac Sim cannot hold the GPU forever.
+#
 # Settings: environment, or <main checkout>/.realism/config.env (written by /first-run):
 #   ISAACLAB_DIR    folder whose ./isaaclab.sh runs Isaac Sim's Python (default: the main checkout of this repo)
 #   DRONE_GPU_LOCK  the lock file (default /tmp/drone_scene_gpu.lock)
@@ -39,7 +42,7 @@ LOCK="${DRONE_GPU_LOCK:-/tmp/drone_scene_gpu.lock}"
 PROBE_ARGS=(--route straight --headless --probe --cameras front back chase nadir --resolution_scale 0.5)
 RECORD_ARGS=(--route straight --headless --record -1 --cameras front back chase)
 
-usage() { sed -n '2,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "${BASH_SOURCE[0]}"; exit 2; }
 status_of() { cat "$1/run.status" 2>/dev/null || echo "missing"; }
 need_isaac() {
   if [[ ! -x "$ISAACLAB_DIR/isaaclab.sh" ]]; then
@@ -47,6 +50,10 @@ need_isaac() {
   fi
 }
 py() { (cd "$ISAACLAB_DIR" && ./isaaclab.sh -p "$@"); }
+# true when PID is alive and its command line contains TEXT (guards against a recycled PID)
+ours() { [[ -n "$1" ]] && kill -0 "$1" 2>/dev/null && tr '\0' ' ' < "/proc/$1/cmdline" 2>/dev/null | grep -q -- "$2"; }
+# true while PID runs (an exited child that is not reaped yet is a zombie and still answers kill -0)
+alive() { local s; s="$(ps -o stat= -p "$1" 2>/dev/null)" || return 1; [[ -n "$s" && "$s" != Z* ]]; }
 
 cmd="${1:-}"
 [[ $# -gt 0 ]] && shift
@@ -63,10 +70,12 @@ case "$cmd" in
     fi
     mkdir -p "$out"
     case "$(status_of "$out")" in queued*|running*)
-      if [[ -f "$out/run.pid" ]] && kill -0 "$(cat "$out/run.pid")" 2>/dev/null; then
+      if ours "$(cat "$out/run.pid" 2>/dev/null)" run_probe.sh; then
         echo "already queued or running: $out"; exit 2
       fi;;
     esac
+    # a re-run must not show the previous run's log if it fails before writing its own
+    rm -f "$out/drone_scene.log" "$out/run.pid" "$out/render.pgid" "$out/code_commit"
     echo "queued $(date -Is)" > "$out/run.status"
     setsid nohup bash "${BASH_SOURCE[0]}" _run "$cmd" "$out" "$code" "$@" > "$out/run.log" 2>&1 < /dev/null &
     echo $! > "$out/run.pid"
@@ -74,18 +83,35 @@ case "$cmd" in
     ;;
   _run)
     mode="$1"; out="$2"; code="$3"; shift 3
-    if [[ "$mode" == record ]]; then defaults=("${RECORD_ARGS[@]}"); else defaults=("${PROBE_ARGS[@]}"); fi
+    if [[ "$mode" == record ]]; then defaults=("${RECORD_ARGS[@]}"); limit="${DRONE_RECORD_TIMEOUT:-21600}"
+    else defaults=("${PROBE_ARGS[@]}"); limit="${DRONE_PROBE_TIMEOUT:-7200}"; fi
     exec 9>"$LOCK"
     echo "waiting for the GPU (lock $LOCK) ..."
     flock 9
     echo "running $(date -Is)" > "$out/run.status"
     git -C "$code" rev-parse --short HEAD > "$out/code_commit" 2>/dev/null
     t0=$(date +%s)
-    py "$code/scripts/drone_scene/quadcopter_pbr.py" "${defaults[@]}" --out "$out" "$@"
-    rc=$?
+    # the render gets its own process group, so a time-out (or stop) can kill Isaac Sim and everything it started
+    setsid bash -c 'cd "$1" && shift && exec ./isaaclab.sh -p "$@"' _ "$ISAACLAB_DIR" \
+      "$code/scripts/drone_scene/quadcopter_pbr.py" "${defaults[@]}" --out "$out" "$@" &
+    rpid=$!
+    echo "$rpid" > "$out/render.pgid"
+    timed_out=0
+    while alive "$rpid"; do
+      if (( $(date +%s) - t0 > limit )); then
+        timed_out=1
+        kill -TERM -- "-$rpid" 2>/dev/null; sleep 30; kill -KILL -- "-$rpid" 2>/dev/null
+        break
+      fi
+      sleep 5
+    done
+    wait "$rpid"; rc=$?
     t1=$(date +%s)
     flock -u 9
-    if [[ $rc -eq 0 && ( "$mode" == record || -f "$out/probe/probe.json" ) ]]; then
+    if (( timed_out )); then
+      echo "failed (timed out after ${limit} s; raise DRONE_PROBE_TIMEOUT / DRONE_RECORD_TIMEOUT if it was only slow)" \
+        > "$out/run.status"
+    elif [[ $rc -eq 0 && ( "$mode" == record || -f "$out/probe/probe.json" ) ]]; then
       if [[ "$mode" != record ]]; then
         { py "$code/scripts/drone_scene/realism/metrics.py" "$out/probe" \
           && py "$code/scripts/drone_scene/realism/montage.py" contact "$out/probe" --out "$out/contact.jpg"; } \
@@ -104,7 +130,10 @@ case "$cmd" in
       st="$(status_of "$out")"
       case "$st" in
         done*) echo "$st"; tail -n 3 "$out/drone_scene.log" 2>/dev/null; exit 0;;
-        failed*|missing) echo "$st"; tail -n 60 "$out/drone_scene.log" 2>/dev/null || tail -n 60 "$out/run.log"; exit 1;;
+        failed*|missing)
+          echo "$st"
+          if [[ -s "$out/drone_scene.log" ]]; then tail -n 60 "$out/drone_scene.log"; else tail -n 60 "$out/run.log"; fi
+          exit 1;;
       esac
       if [[ -f "$out/run.pid" ]] && ! kill -0 "$(cat "$out/run.pid")" 2>/dev/null; then
         sleep 1; st="$(status_of "$out")"
@@ -125,10 +154,14 @@ case "$cmd" in
   stop)
     [[ $# -ge 1 ]] || usage
     out="$(realpath -m "$1")"
-    if [[ -f "$out/run.pid" ]]; then
-      if kill -- "-$(cat "$out/run.pid")" 2>/dev/null; then echo "stopped $out"; else echo "not running: $out"; fi
-      echo "failed (stopped) $(date -Is)" > "$out/run.status"
-    fi
+    st="$(status_of "$out")"
+    case "$st" in queued*|running*) ;; *) echo "not running (status: $st)"; exit 0;; esac
+    pid="$(cat "$out/run.pid" 2>/dev/null)"
+    rp="$(cat "$out/render.pgid" 2>/dev/null)"
+    ours "$rp" quadcopter_pbr && kill -TERM -- "-$rp" 2>/dev/null
+    ours "$pid" run_probe.sh && kill -TERM -- "-$pid" 2>/dev/null
+    echo "failed (stopped) $(date -Is)" > "$out/run.status"
+    echo "stopped $out"
     ;;
   compare)
     [[ $# -ge 2 ]] || usage

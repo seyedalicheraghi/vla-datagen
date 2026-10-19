@@ -12,11 +12,18 @@ Before starting:
   exists. If not, say so and offer to run /first-run.
 - Parse the arguments: a number alone = rounds (default 2), `candidates=N` (default 3, at most 6), `lenses=N`
   (default 3), other words = focus (aspect keys light / ground / urban / vegetation / camera, or free text).
+- Bring `realism` up to date with the checkout: if `git merge-base --is-ancestor HEAD realism` fails (new commits on
+  `main`, e.g. fixes from /first-run or a `git pull`), merge them in the base worktree:
+  `git -C .realism/worktrees/base merge --no-edit $(git rev-parse HEAD)`. On a conflict, `git -C
+  .realism/worktrees/base merge --abort` and tell the owner which files conflict; do not start a round.
 - Tell the owner in one line what will happen and roughly how long: each round renders every candidate one at a
   time (about 5-15 minutes each, more when the map is rebuilt) plus one combined render.
 
 Each round:
-1. Round id: `r` + three digits, one more than the highest folder in `.realism/rounds/` (first: r001).
+1. Round id: `r` + three digits, one more than the highest round number found in any of: the folders in
+   `.realism/rounds/`, the `round` values in `.realism/ledger.jsonl`, and the branches
+   `git for-each-ref --format='%(refname:short)' refs/heads/rc refs/heads/rnext` (match `r(\d{3})`). First: r001.
+   Claim it at once: `mkdir -p .realism/rounds/<id>`.
 2. Run the saved workflow **realism-round** with the Workflow tool:
    `{"name": "realism-round", "args": {"round": "<id>", "candidates": N, "lenses": N, "focus": "<text>"}}`.
 3. When it finishes, report to the owner in at most 6 lines: what was tried, what won or lost and why (one phrase
